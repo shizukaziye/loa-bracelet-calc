@@ -11,3 +11,4 @@ __pycache__/
 .corpus/
 
 .admin-token
+worker/.wrangler/
