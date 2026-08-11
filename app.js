@@ -132,7 +132,7 @@
   var TRAIT_KEYS = ["crit", "spec", "swift"];
   var TRAIT_LABELS = { crit: "Crit", spec: "Spec", swift: "Swiftness" };
   var TRAIT_GLOSS = {
-    crit: "The Crit trait line your bracelet came with, in trait points. It converts exactly — 35 percentage points of crit rate per 699 trait points — and then runs through your skills' own crit numbers, so it is worth nothing to a build already at 100% crit.",
+    crit: "The Crit trait line your bracelet came with, in trait points. It converts exactly — 25 percentage points of crit rate per 699 trait points — and then runs through your skills' own crit numbers, so it is worth nothing to a build already at 100% crit.",
     spec: "The Specialization trait line your bracelet came with, in trait points. It scores at the Spec weight you set in the Traits block: value × weight ÷ 100.",
     swift: "The Swiftness trait line your bracelet came with, in trait points. It scores at the Swiftness weight you set in the Traits block: value × weight ÷ 100."
   };
@@ -1156,7 +1156,7 @@
     h += slider("fight.wSpec", "Spec weight", 0, 4, 0.1, "pct1",
       { gloss: "What 100 points of Specialization is worth to your class, in % damage. There is no class table behind this — it is your call. A 120-point Spec line then scores value × weight ÷ 100." });
     h += slider("fight.wSwift", "Swift weight", 0, 4, 0.1, "pct1",
-      { gloss: "What 100 points of Swiftness is worth to your class, in % damage. Crit needs no weight: it converts exactly, at 35 points of crit rate per 699 trait points, and is worth whatever that is to your skills." });
+      { gloss: "What 100 points of Swiftness is worth to your class, in % damage. Crit needs no weight: it converts exactly, at 25 points of crit rate per 699 trait points, and is worth whatever that is to your skills." });
     $("bc-traitw").innerHTML = h;
   }
 
@@ -1579,7 +1579,7 @@
       var d = B.traitDamage(one, profile), why;
       if (k === "crit") {
         var pp = tv[k] * B.TRAIT_CRIT_PP_PER_POINT;
-        why = tv[k] + " Crit converts at 35 points of crit rate per 699 trait points = +" + fx(pp, 2) +
+        why = tv[k] + " Crit converts at 25 points of crit rate per 699 trait points = +" + fx(pp, 2) +
           " pp crit rate, worth " + signPct(pct(d)) + " once your skills' crit rate and crit damage are applied.";
       } else {
         why = tv[k] + " " + TRAIT_LABELS[k] + " at " + fx(num(k === "spec" ? S.fight.wSpec : S.fight.wSwift, 0), 1) +

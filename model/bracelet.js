@@ -112,9 +112,9 @@
   // loseii astrogem coefficient (bebkok 0.08086, Arsonistic 0.08077 — same thing).
   var ADD_DMG_ASTROGEM_LV60 = 0.0484;
   // T4 combat-trait conversion for Crit: 35 percentage points of crit rate per
-  // 699 trait points (Shizu, 2026-08-11). Arsonistic's older sheet used
+  // 699 trait points (Shizu, 2026-08-11). Matches Arsonistic's sheet (0.25/699). Earlier drafts used 35/699 in error; corrected
   // 0.25/699; this is the number that ships.
-  var TRAIT_CRIT_PP_PER_POINT = 35 / 699;
+  var TRAIT_CRIT_PP_PER_POINT = 25 / 699;
   // Fixed order, so JS and Python sum the same floats in the same sequence.
   var TRAIT_KEYS = ["crit", "spec", "swift"];
   // Master node. Arsonistic's sheet reads it as +7% crit rate AND +8.5%
@@ -576,7 +576,7 @@
    *
    * traits = { crit, spec, swift } in trait points; an inactive trait is 0.
    *
-   *   Crit   converts exactly: 35 pp of crit rate per 699 trait points, fed
+   *   Crit   converts exactly: 25 pp of crit rate per 699 trait points, fed
    *          through the per-skill crit model additively with every other
    *          crit-rate source and capped at 100% — the same path granted
    *          family 31 takes. So it is worth less to a class already near cap.

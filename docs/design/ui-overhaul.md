@@ -72,14 +72,19 @@ Sliders (0–100%, step 1, value chip "N%"):
 Toggle button: **Demon boss** default OFF. ON sets demonShare = 1, OFF = 0 (dilution
 pool 7.3% unchanged, stays in Advanced).
 
+## SKILLS (right column, under FIGHT)
+
+Keep current structure, but the name field is narrow and the rows are typed inputs
+(see revisions below).
+
 ## TRAITS (right column, between FIGHT and SKILLS) — added by Shizu mid-build
 
 The bracelet's two fixed combat-trait lines now carry value in the score.
 
 1. **Two weight sliders** — Spec / Swiftness weight only, range **0–4%, step 0.1,
    default 2.5%** each. Unit: **% damage per 100 trait points**. Crit gets NO slider
-   (Shizu 2026-08-11): a crit trait line converts exactly at **35% crit rate per 699
-   points** (value × 35/699 pp) and is scored through the per-skill crit model —
+   (Shizu 2026-08-11): a crit trait line converts exactly at **25% crit rate per 699
+   points** (value × 25/699 pp) and is scored through the per-skill crit model —
    additive with the other crit-rate sources before the 100% cap, same path as
    granted family 31.
 2. **Starting trait values on the bracelet** — three slider rows (Crit, Spec,

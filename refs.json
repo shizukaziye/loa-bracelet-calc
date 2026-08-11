@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generated": "2026-08-11T09:39:54.906Z",
+    "generated": "2026-08-11T09:44:53.887Z",
     "modelSig": "bracelet-v1",
     "floatTolerance": 1e-8,
     "note": "Captured references for the bracelet core. Regenerate with `node tools/gen-refs.js`. Scoring is % damage in log space (D = 100*ln(multiplier)); the solver's V is the expected final score under optimal play with free rerolls."
@@ -1514,7 +1514,7 @@
         "spec": 120
       },
       "profile": {},
-      "damage": 7.045105786
+      "damage": 5.905961107
     },
     {
       "label": "relic band top: crit 100 + spec 100",
@@ -1523,7 +1523,7 @@
         "spec": 100
       },
       "profile": {},
-      "damage": 5.882182719
+      "damage": 4.927460768
     },
     {
       "label": "band floor: crit 61 + swift 61",
@@ -1532,7 +1532,7 @@
         "swift": 61
       },
       "profile": {},
-      "damage": 3.60170404
+      "damage": 3.012747652
     },
     {
       "label": "spec + swift only",
@@ -1549,7 +1549,7 @@
         "crit": 120
       },
       "profile": {},
-      "damage": 4.045105786
+      "damage": 2.905961107
     },
     {
       "label": "crit at cap (crit rate already 100%)",
@@ -1579,7 +1579,7 @@
           "swift": 0
         }
       },
-      "damage": 4.045105786
+      "damage": 2.905961107
     },
     {
       "label": "heavy spec weight",
@@ -1616,12 +1616,12 @@
       }
     ],
     "goldPer1Pct": 30000,
-    "traitDamage": 7.045105786,
+    "traitDamage": 5.905961107,
     "plainCurrent": 0,
     "plainFinal": 1.957792049,
-    "traitCurrent": 7.045105786,
-    "traitFinal": 9.002897835,
-    "traitValueGold": 270086.935063816,
+    "traitCurrent": 5.905961107,
+    "traitFinal": 7.863753156,
+    "traitValueGold": 235912.594690111,
     "states": 2526
   },
   "familyGrades": [

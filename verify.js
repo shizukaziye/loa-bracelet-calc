@@ -220,11 +220,11 @@ refs.traits.forEach(function (c, i) {
 // First principles.
 (function () {
   function D(m) { return 100 * Math.log(m); }
-  // Crit: 35 pp per 699 points, additive into the crit model, capped at 100%.
-  var dcr = 120 * 35 / 699 / 100;
+  // Crit: 25 pp per 699 points, additive into the crit model, capped at 100%.
+  var dcr = 120 * 25 / 699 / 100;
   check("analytic.trait.crit120", r9(B.traitDamage({ crit: 120 }, P)),
     r9(D((1 + (0.9 + dcr) * 1.8) / (1 + 0.9 * 1.8))));
-  check("analytic.trait.critPP", r9(120 * B.TRAIT_CRIT_PP_PER_POINT), 6.008583691);
+  check("analytic.trait.critPP", r9(120 * B.TRAIT_CRIT_PP_PER_POINT), 4.291845494);
   // Spec / Swiftness: flat points per 100 trait points, no log-space curve.
   check("analytic.trait.spec120", r9(B.traitDamage({ spec: 120 }, P)), 3);
   check("analytic.trait.swift96", r9(B.traitDamage({ swift: 96 }, P)), 2.4);

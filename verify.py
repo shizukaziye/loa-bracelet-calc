@@ -219,10 +219,10 @@ for i, c in enumerate(refs["traits"]):
     _p = B.normalize_profile(c["profile"])
     check("traits[%d] %s" % (i, c["label"]), r9(B.trait_damage(c["traits"], _p)), c["damage"])
 
-_dcr = 120 * 35 / 699.0 / 100.0
+_dcr = 120 * 25 / 699.0 / 100.0
 check("analytic.trait.crit120", r9(B.trait_damage({"crit": 120}, P)),
       r9(_D((1 + (0.9 + _dcr) * 1.8) / (1 + 0.9 * 1.8))))
-check("analytic.trait.critPP", r9(120 * B.TRAIT_CRIT_PP_PER_POINT), 6.008583691)
+check("analytic.trait.critPP", r9(120 * B.TRAIT_CRIT_PP_PER_POINT), 4.291845494)
 check("analytic.trait.spec120", r9(B.trait_damage({"spec": 120}, P)), 3)
 check("analytic.trait.swift96", r9(B.trait_damage({"swift": 96}, P)), 2.4)
 check("analytic.trait.additive", r9(B.trait_damage({"crit": 120, "spec": 120}, P)),

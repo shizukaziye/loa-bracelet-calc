@@ -23,9 +23,9 @@ VERSION = "0.1.0"
 MODEL_SIG = "bracelet-v1"
 
 ADD_DMG_ASTROGEM_LV60 = 0.0484
-# T4 combat-trait conversion for Crit: 35 pp of crit rate per 699 trait points
-# (Shizu, 2026-08-11). Arsonistic's older sheet used 0.25/699.
-TRAIT_CRIT_PP_PER_POINT = 35 / 699.0
+# T4 combat-trait conversion for Crit: 25 pp of crit rate per 699 trait points
+# (Shizu, 2026-08-11). Matches Arsonistic's sheet (0.25/699). Earlier drafts used 35/699 in error; corrected 0.25/699.
+TRAIT_CRIT_PP_PER_POINT = 25 / 699.0
 # Fixed order, so JS and Python sum the same floats in the same sequence.
 TRAIT_KEYS = ["crit", "spec", "swift"]
 # Shizu's ruling: Master is +7% additional damage only.
@@ -403,7 +403,7 @@ def trait_damage(traits, profile):
     """Score of the bracelet's two FIXED combat-trait lines.
 
     traits = {"crit", "spec", "swift"} in trait points; inactive trait = 0.
-    Crit converts exactly (35 pp of crit rate per 699 points) and runs through
+    Crit converts exactly (25 pp of crit rate per 699 points) and runs through
     the per-skill crit model, additive with every other crit source and capped
     at 100%. Spec and Swiftness use the class's own weight.
 
