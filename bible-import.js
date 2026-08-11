@@ -10,7 +10,10 @@
  * WHAT IT TALKS TO
  *   window.BibleOAuth      bible-oauth.js — PKCE sign-in, GET /api/oauth/rosters
  *   window.Bracelet        model/bracelet.js — decodeBibleBracelet(stats)
- *   window.BraceletApp     app.js — applyImport(patch), the one hook into the UI
+ *   window.BraceletApp     app.js — applyImport(patch), the one hook into the UI.
+ *                          The patch carries an optional `character` block (name,
+ *                          region, class, item level, cache age) that draws the
+ *                          profile header and marks any value taken off the page.
  *   WORKER_URL             worker/bracelet.js — the bracelet fallback fetch
  * The raid statistics endpoints are never touched: the site owner banned that,
  * and everything here reads the signed-in user's OWN roster through OAuth.
@@ -82,6 +85,7 @@
     chars: null,       // [{name, cls, ilvl, region, node}]
     raw: null,         // the last rosters payload, for dumpShape()
     picked: null,      // name of the character last imported
+    pickedChar: null,  // and the roster entry it came from (class / ilvl / region)
     note: null,        // a one-line result under the list
     // A character wears one bracelet PER LOADOUT on lostark.bible — a raid one,
     // a chaos-dungeon one, sometimes an estimated-raid one — and nine of the
@@ -676,6 +680,16 @@
    * "EU", a server name, or nothing at all — so map what we recognise and return
    * "" for the rest rather than guessing a region and fetching a stranger's page.
    */
+  /**
+   * The region a PERSON reads, for the header chip and the Favorites key. Bible
+   * calls central Europe CE in its URLs; every store here says EU, healed in one
+   * place so a character cannot be favourited twice under two names.
+   */
+  function normRegion(r) {
+    var s = bibleRegion(r);
+    return s === "CE" ? "EU" : s;
+  }
+
   function bibleRegion(r) {
     var s = String(r || "").trim().toUpperCase();
     if (!s) return "";
@@ -746,7 +760,7 @@
    */
   function pick(c) {
     if (!c) return;
-    state.error = null; state.note = null; state.picked = c.name;
+    state.error = null; state.note = null; state.picked = c.name; state.pickedChar = c;
     // A new character means the old character's pills are stale. Drop them
     // before anything can fail, so a failed fetch never leaves someone else's
     // loadouts sitting under the list.
@@ -849,7 +863,9 @@
     state.loadoutIdx = i;
     state.error = null;
     var l = state.loadouts[i];
-    applyBracelet({ name: state.picked || "that character" }, l.bracelet,
+    // The same character, a different loadout: keep its class / item level so
+    // switching pills does not empty the profile header.
+    applyBracelet(state.pickedChar || { name: state.picked || "that character" }, l.bracelet,
       { defaultScore: l.defaultScore, loadoutLabel: l.label });
   }
 
@@ -872,6 +888,18 @@
       render();
       return;
     }
+    // Who this bracelet belongs to, for the profile header and the provenance
+    // marks. Everything is optional and nothing is invented: a field the roster
+    // did not carry is simply absent, and app.js renders what it has.
+    built.patch.character = {
+      name: c.name,
+      region: normRegion(c.region),
+      "class": c.cls ? classLabel(c.cls) : null,
+      itemLevel: (c.ilvl === null || c.ilvl === undefined) ? null : c.ilvl,
+      source: (data && data.source) || "import",
+      cached: (data && data.cached != null) ? !!data.cached : null,
+      pulledAt: (data && data.pulledAt) || Date.now()
+    };
     app.applyImport(built.patch);
 
     var n = built.patch.rows.length;

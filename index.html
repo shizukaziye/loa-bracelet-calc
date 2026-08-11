@@ -13,18 +13,23 @@
 <!--
   App shell for the Lost Ark T4 bracelet tool. The math lives in
   model/bracelet.js (window.Bracelet), a pure core the UI reads and never mutates.
+  The character + bracelet STATE lives in profile.js (window.Profile), which also
+  owns the control deck; every tab mounts that one deck and subscribes to it.
 
-  Three tabs: "Calculator" (#tab-calculator, first/default, built by app.js),
-  "Leaderboard" (#tab-leaderboard, still a stub — phase 4) and "Method"
-  (#tab-method, method.js). The tab bar toggles .active on the panes and fires a
-  'tabselected' event so a pane can act on activation.
+  Five tabs: "Calculator" (#tab-calculator, first/default, built by app.js),
+  "Tier List" (#tab-tierlist), "Leaderboard" (#tab-leaderboard), "Method"
+  (#tab-method, method.js) and "Feedback" (#tab-feedback). The tab bar toggles
+  .active on the panes and fires a 'tabselected' event so a pane can act on
+  activation — the Calculator uses it to claim the deck back.
 
   Scripts load in two sets:
     EAGER (bottom of <body>, in order): data/bracelet-data.js and
     data/gear-data.js (the official tables), model/bracelet.js (the core), tip.js
-    (the shared tooltip), then app.js (the Calculator tab).
+    (the shared tooltip), favorites.js (the saved-character spine), profile.js
+    (state + control deck), then app.js (the Calculator tab).
     LAZY (the LAZY_TABS map below): heavier per-tab modules load on FIRST
-    activation of their tab — method.js today.
+    activation of their tab. A module that is not on disk yet fails its <script>
+    load, the loader skips it, and the pane keeps its placeholder.
 
   The solver never runs on this thread: app.js spawns solver-worker.js, which
   importScripts the same data + model files. Bump solver-worker.js's own ?v= on
@@ -47,25 +52,39 @@
   <!-- Tab bar -->
   <div class="tabbar" id="tabbar">
     <button class="tab active" data-tab="calculator" onclick="selectTab('calculator')">Calculator</button>
+    <button class="tab" data-tab="tierlist" onclick="selectTab('tierlist')">Tier List</button>
     <button class="tab" data-tab="leaderboard" onclick="selectTab('leaderboard')">Leaderboard</button>
     <button class="tab" data-tab="method" onclick="selectTab('method')">Method</button>
+    <button class="tab" data-tab="feedback" onclick="selectTab('feedback')">Feedback</button>
   </div>
 
   <!-- Tab panes -->
   <section id="tab-calculator" class="tabpane active"></section>
+  <section id="tab-tierlist" class="tabpane">
+    <div class="placeholder"><b>Tier list</b>Not built yet. It will rank every effect family and every roll by the same % damage figure the Calculator reports, live against your own settings.</div>
+  </section>
   <section id="tab-leaderboard" class="tabpane">
-    <div class="placeholder"><b>Leaderboard</b>Not built yet. It will rank bracelets by the same % damage figure the Calculator reports.</div>
+    <div class="placeholder"><b>Leaderboard</b>Not built yet. It will rank bracelets by the same % damage figure the Calculator reports, scored on the default character.</div>
   </section>
   <section id="tab-method" class="tabpane"></section>
+  <section id="tab-feedback" class="tabpane">
+    <div class="placeholder"><b>Feedback</b>Not built yet. A wrong number, a missing effect or an idea will all land here.</div>
+  </section>
 </div>
 
 <!-- Tab switching: toggle .active on the matching button + pane. -->
 <script>
 "use strict";
 // Heavy, rarely-used modules load on FIRST activation of their tab instead of on
-// every visit. Empty until those modules exist; the loader is already wired so a
-// module only has to be added to the map.
-var LAZY_TABS = { method: ['method.js?v=2'] };
+// every visit. tierlist.js, leaderboard.js and feedback.js are registered before
+// they exist: a missing file fails its <script> and the loader skips it, so each
+// pane simply keeps the placeholder until the file lands.
+var LAZY_TABS = {
+  tierlist: ['tierlist.js?v=1'],
+  leaderboard: ['leaderboard.js?v=1'],
+  method: ['method.js?v=2'],
+  feedback: ['feedback.js?v=1']
+};
 var lazyLoaded = {};
 function loadScriptsSeq(list, done){
   if (!list.length) { done(); return; }
@@ -98,20 +117,24 @@ function selectTab(name){
 }
 </script>
 
-<!-- EAGER: the official tables, then the model core, then the shared tooltip.
+<!-- EAGER: the official tables, then the model core, then the shared spine.
      Order matters — model/bracelet.js reads window.BraceletData and
-     window.BraceletGearData at parse time. -->
+     window.BraceletGearData at parse time, and profile.js reads the model at
+     parse time to grade the families. app.js is last: it holds the state object
+     profile.js hands it. -->
 <!-- ?v= cache-buster: bump on each deploy so browsers load fresh JS without a hard-refresh -->
 <script src="data/bracelet-data.js?v=2"></script>
 <script src="data/gear-data.js?v=2"></script>
 <script src="model/bracelet.js?v=4"></script>
 <script src="tip.js?v=1"></script>
-<script src="app.js?v=9"></script>
+<script src="favorites.js?v=1"></script>
+<script src="profile.js?v=1"></script>
+<script src="app.js?v=10"></script>
 <!-- lostark.bible import. AFTER app.js: bible-import.js mounts into the Bracelet
      panel app.js has just built, and hands what it decodes to
      window.BraceletApp.applyImport. Both degrade to nothing if the site is down. -->
 <script src="bible-oauth.js?v=1"></script>
-<script src="bible-import.js?v=3"></script>
+<script src="bible-import.js?v=4"></script>
 <script src="https://www.loseii.com/nav.js" defer></script>
 <script src="https://www.loseii.com/social-bar.js" defer></script>
 </body></html>

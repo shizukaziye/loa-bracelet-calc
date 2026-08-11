@@ -1,18 +1,25 @@
 /**
- * app.js — the Calculator tab: the whole tool for now.
+ * app.js — the Calculator tab.
  *
- * Layout (astrogem-grader house style: sticky inputs panel, then results):
- *   CHARACTER  grade / slots / rolls, honing levels or a raw WP+main-stat
- *              override, an "Advanced" fold for the long tail, a skills editor
- *              and the gold-per-1%-damage economy pair.
+ * Layout (astrogem-grader house style: the control deck, then results):
+ *   DECK       the character + bracelet controls. NOT built here any more —
+ *              profile.js owns them, and this file mounts them (see below).
+ *   PROFILE    the imported character's header: ★, class icon, name, cache pill
+ *              and chips. Hidden until a character is imported.
  *   BRACELET   one row per granted slot — family picker (grouped and priced),
  *              tier, and a value box for the basic-stat families. All rows empty
  *              means an unrolled bracelet, which is the default.
  *   RESULTS    headline cards, the roll advisor (best locks, P(improve), the
  *              spread of final scores), the cut flow, and a per-line breakdown.
  *
- * THE MATH IS NOT HERE. Every number comes from window.Bracelet (model/bracelet.js),
- * which this file only ever reads:
+ * THE STATE IS NOT HERE (since 2026-08-11). window.Profile owns it, persists it
+ * and renders the control deck; this file holds the LIVE state object it returns,
+ * mounts the deck into the Calculator pane, and re-solves whenever Profile says
+ * something moved. The Tier List mounts the same deck, which is the whole point of
+ * the split: one slider, every tab.
+ *
+ * THE MATH IS NOT HERE either. Every number comes from window.Bracelet
+ * (model/bracelet.js), which this file only ever reads:
  *   Bracelet.solve({grade, profile, fixedLines, grantedLines, slots, rollsLeft, …})
  *   Bracelet.advise(ctx, {current, rolled, rollsLeft})   — keep or replace
  *   Bracelet.lineDamage / lineInfo / damagePercent / deriveBaseline / attackPower
@@ -23,17 +30,14 @@
  * stale answers dropped by id, results cached by a canonical state key. Input
  * changes are debounced ~300 ms. Gold never enters the key — value is
  * (expectedFinal − baseline) × gpd, recomputed here for free.
- *
- * State (inputs + bracelet + cut history) persists under one versioned
- * localStorage key; "Reset" wipes it.
  */
 (function () {
   "use strict";
 
-  var B = window.Bracelet, DATA = window.BraceletData;
-  if (!B || !DATA) return;                       // model failed to load; leave the shell alone
+  var B = window.Bracelet, DATA = window.BraceletData, P = window.Profile;
+  if (!B || !DATA || !P) return;                 // model or spine failed to load; leave the shell alone
 
-  var LS_KEY = "loa-bracelet-calc.v1";
+  var S = P.get();                               // the LIVE state object — never re-assigned
   var TIERS = DATA.TIERS;                        // ["low","mid","high"]
   var PARTY_IDS = { 16: 1, 17: 1, 18: 1, 19: 1 };
   var DEBOUNCE_MS = 300;
@@ -64,232 +68,34 @@
   function valueGold(D) { return (pct(D) - num(S.econ.baseline, 0)) * gpd(); }
   function deltaGold(Da, Db) { return (pct(Da) - pct(Db)) * gpd(); }
 
-  function getPath(o, p) { var a = p.split("."), t = o, i; for (i = 0; i < a.length; i++) t = t[a[i]]; return t; }
-  function setPath(o, p, v) { var a = p.split("."), t = o, i; for (i = 0; i < a.length - 1; i++) t = t[a[i]]; t[a[a.length - 1]] = v; }
-
   // ------------------------------------------------------------------
-  // state
+  // the shared state, in this file's terms
+  //
+  // Everything below reads S (window.Profile's live object) and the handful of
+  // derived numbers Profile exposes. Nothing here writes a control's value: the
+  // deck does that and tells us through onChange. What this file DOES own is the
+  // bracelet itself — rows, fixed rows, locks, the rolled set and the history —
+  // because they are the Calculator's subject, not the character's.
   // ------------------------------------------------------------------
 
-  function blankRow() { return { fam: "none", tier: "mid", value: null }; }
-
-  function defaults() {
-    return {
-      v: 2,
-      grade: "ancient",
-      slots: 3,
-      rollsLeft: 7,
-      rollsTotal: 7,                 // what a FRESH bracelet gets — drives the "unrolled" price
-      useOverride: false,
-      // One honing level per piece — six sliders, the weapon alone driving WP.
-      gear: { weapon: 25, head: 21, shoulder: 21, chest: 21, pants: 21, gloves: 23 },
-      ov: { mainStatRaw: 703826, weaponPowerRaw: 241367 },
-      // Accessories, gems and the two on/off nodes. wpPct and baseApPct are
-      // DERIVED from these (see wpPctOf / baseApPctOf), not stored.
-      kit: { neck: 2.6, ear1: 3, ear2: 3, gems: 9, stone: true, master: false },
-      // Where the damage lands, how the cooldown line is judged, and what the
-      // class pays for a Spec / Swiftness trait line (points per 100 points).
-      fight: { back: 100, front: 100, nonDir: 100, cdWeight: 70, demon: false, wSpec: 2.5, wSwift: 2.5 },
-      // The bracelet's two FIXED combat traits. A real bracelet carries exactly
-      // two, but the panel no longer polices it: a third can be switched on and
-      // the score keeps counting it, with a warning that the state is illegal
-      // in game (Shizu, 2026-08-11 — the silent auto-off was worse).
-      traits: { crit: { on: true, v: 120 }, spec: { on: true, v: 120 }, swift: { on: false, v: 120 } },
-      adv: {
-        msPct: 9, karmaWp: 2.5, baseApOverride: false, baseApPct: 12.5, flatAP: 2700,
-        accessoryMainStat: 71429, rosterBonus: 2085,
-        addWeapon: 30, addPet: 1, addAstrogem: 4.84,
-        staggerShare: 10, demonBase: 7.3, shieldUptime: 60, enemyDR: 50,
-        allyCount: 2
-      },
-      skills: [{ name: "", share: 100, cr: 90, cd: 280 }],
-      econ: { gpd: 1500000, baseline: 0 },
-      rows: [blankRow(), blankRow(), blankRow()],
-      fixedRows: [],
-      advOpen: false,
-      locks: null,                   // per-slot booleans in the cut flow; null = follow the model
-      rolled: null,                  // per-slot rows entered in the cut flow
-      history: []
-    };
-  }
-
-  // Per-gem base attack power by gem level; eleven of them plus a 9/7 stone.
-  var GEM_AP = { 6: 0.4, 7: 0.6, 8: 0.8, 9: 1.0, 10: 1.2 };
-  var STONE_AP = 1.5;
-  // Slider order, Shizu's: armour first, the weapon last because it is the one
-  // piece that moves weapon power.
-  var PIECES = [["head", "Head"], ["shoulder", "Shoulder"], ["chest", "Chest"],
-    ["pants", "Pants"], ["gloves", "Gloves"], ["weapon", "Weapon"]];
-
-  /** Weapon-power % bucket = the two earring lines + karma. */
-  function wpPctOf() { return num(S.kit.ear1, 0) + num(S.kit.ear2, 0) + num(S.adv.karmaWp, 0); }
-  /** Attack-power % bucket = eleven gems at their level + the ability stone. */
-  function baseApPctOf() {
-    if (S.adv.baseApOverride) return num(S.adv.baseApPct, 0);
-    var per = GEM_AP[Math.round(num(S.kit.gems, 9))] || 0;
-    return 11 * per + (S.kit.stone ? STONE_AP : 0);
-  }
-  // ---- combat traits ----
-  var TRAIT_KEYS = ["crit", "spec", "swift"];
-  var TRAIT_LABELS = { crit: "Crit", spec: "Spec", swift: "Swiftness" };
+  function blankRow() { return P.blankRow(); }
+  function traitValues() { return P.traitValues(); }
+  function traitBand() { return P.traitBand(); }
+  function buildProfile() { return P.profile(); }
+  function famGrades(grade) { return P.famGrades(grade); }
+  function letterOf(val, grade) { return P.letterOf(val, grade); }
+  var TRAIT_KEYS = P.TRAIT_KEYS, TRAIT_LABELS = P.TRAIT_LABELS;
+  // The tooltip on each of the bracelet's two fixed combat-trait rows. It stays
+  // here because the rows do: they are bracelet lines, not character settings.
   var TRAIT_GLOSS = {
     crit: "The Crit trait line your bracelet came with, in trait points. It converts exactly — 25 percentage points of crit rate per 699 trait points — and then runs through your skills' own crit numbers, so it is worth nothing to a build already at 100% crit.",
     spec: "The Specialization trait line your bracelet came with, in trait points. It scores at the Spec weight you set in the Traits block: value × weight ÷ 100.",
     swift: "The Swiftness trait line your bracelet came with, in trait points. It scores at the Swiftness weight you set in the Traits block: value × weight ÷ 100."
   };
-  /** The official starting-value band, which moves with the grade. */
-  function traitBand() { return S.grade === "relic" ? [41, 100] : [61, 120]; }
-  /** What the model scores: an inactive trait contributes nothing. */
-  function traitValues() {
-    var out = {}, i, k;
-    for (i = 0; i < TRAIT_KEYS.length; i++) {
-      k = TRAIT_KEYS[i];
-      out[k] = S.traits[k].on ? num(S.traits[k].v, 0) : 0;
-    }
-    return out;
-  }
-  /** Weights are typed as % damage per 100 trait points; the model wants points. */
-  function traitWeights() {
-    return { spec: num(S.fight.wSpec, 0) / 100, swift: num(S.fight.wSwift, 0) / 100 };
-  }
+  var GRADE_COLOR = P.GRADE_COLOR;
+  var JUNK = P.JUNK;                             // the granted picker's one zero-damage option
+  function save() { P.save(); }
 
-  /** The live item level: the mean of the six piece item levels, unrounded. */
-  function ilvlExact() {
-    var G = window.BraceletGearData, s = 0, i;
-    if (!G) return 0;
-    for (i = 0; i < PIECES.length; i++) s += G.ILVL0 + G.ILVL_STEP * num(S.gear[PIECES[i][0]], 0);
-    return s / 6;
-  }
-
-  var S = defaults();
-
-  function save() {
-    try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) { /* private mode */ }
-  }
-  function load() {
-    var raw;
-    try { raw = localStorage.getItem(LS_KEY); } catch (e) { return; }
-    if (!raw) return;
-    var got;
-    try { got = JSON.parse(raw); } catch (e) { return; }
-    // v2 reshaped the panel (per-piece honing, accessory/gem controls, fight
-    // and trait blocks), so a v1 blob has nothing worth migrating: start clean.
-    if (!got || got.v !== 2) return;
-    var d = defaults(), k;
-    for (k in d) if (Object.prototype.hasOwnProperty.call(d, k)) {
-      if (got[k] === undefined || got[k] === null) continue;
-      if (k === "adv" || k === "gear" || k === "ov" || k === "econ" || k === "kit" || k === "fight" || k === "traits") {
-        for (var a in d[k]) if (got[k][a] !== undefined && got[k][a] !== null) d[k][a] = got[k][a];
-      } else {
-        d[k] = got[k];
-      }
-    }
-    S = d;
-    fitRows();
-  }
-
-  // Slot count and grade drive how many rows exist and which are legal.
-  function slotChoices() { return S.grade === "relic" ? [1, 2] : [2, 3]; }
-  function fitRows() {
-    var ch = slotChoices();
-    if (ch.indexOf(S.slots) === -1) S.slots = ch[ch.length - 1];
-    while (S.rows.length < S.slots) S.rows.push(blankRow());
-    S.rows.length = S.slots;
-    if (S.fixedRows.length > 2) S.fixedRows.length = 2;
-    S.rollsLeft = clamp(Math.round(S.rollsLeft), 0, 20);
-    S.rollsTotal = clamp(Math.round(S.rollsTotal), 0, 20);
-    if (!S.skills.length) S.skills = [{ name: "", share: 100, cr: 90, cd: 280 }];
-    normalizeShares();
-    fitTraits();
-    migrateJunkRows();
-  }
-
-  /**
-   * Every trait value inside the grade's band, so a Relic bracelet can never
-   * show an Ancient-only 120. Called on load and whenever the grade moves.
-   *
-   * It no longer forces exactly two active. Three combat traits is illegal in
-   * game, but the panel says so rather than switching one off behind the
-   * user's back, and the score counts whatever is on.
-   */
-  function fitTraits() {
-    var band = traitBand(), i, k;
-    for (i = 0; i < TRAIT_KEYS.length; i++) {
-      k = TRAIT_KEYS[i];
-      if (!S.traits[k]) S.traits[k] = { on: false, v: band[1] };
-      S.traits[k].v = clamp(Math.round(num(S.traits[k].v, band[1])), band[0], band[1]);
-    }
-    delete S.traitOrder;                                 // the old eviction queue, no longer used
-  }
-
-  /** How many combat traits are switched on right now. Two is the legal count. */
-  function traitOnCount() {
-    var n = 0, i;
-    for (i = 0; i < TRAIT_KEYS.length; i++) if (S.traits[TRAIT_KEYS[i]].on) n++;
-    return n;
-  }
-
-  // ------------------------------------------------------------------
-  // state -> model profile
-  // ------------------------------------------------------------------
-
-  function pieceLevels() {
-    var g = S.gear, o = {}, i;
-    for (i = 0; i < PIECES.length; i++) o[PIECES[i][0]] = clamp(Math.round(num(g[PIECES[i][0]], 0)), 0, 25);
-    return o;
-  }
-
-  function baseStats() {
-    if (S.useOverride) {
-      return { mainStatRaw: num(S.ov.mainStatRaw, 703826), weaponPowerRaw: num(S.ov.weaponPowerRaw, 241367), ilvl: null };
-    }
-    var a = S.adv;
-    return B.deriveBaseline({
-      pieceLevels: pieceLevels(),
-      msPct: a.msPct / 100, wpPct: wpPctOf() / 100, baseApPct: baseApPctOf() / 100, flatAP: a.flatAP,
-      accessoryMainStat: a.accessoryMainStat, rosterBonus: a.rosterBonus
-    });
-  }
-
-  function buildProfile() {
-    var a = S.adv, base = baseStats(), sk = [], i;
-    for (i = 0; i < S.skills.length; i++) {
-      var s = S.skills[i];
-      sk.push({ share: num(s.share, 0) / 100, critRate: num(s.cr, 0) / 100, critDamage: num(s.cd, 0) / 100 });
-    }
-    // Through normalizeProfile, never as a bare object: the model reads fields
-    // this panel does not expose (wpStacks20, wpUptime21, wpStacks22, the ally
-    // crit numbers), and a missing one turns a whole family's score into NaN or,
-    // worse, silently into zero.
-    return B.normalizeProfile({
-      role: "dps",
-      ilvl: base.ilvl || 0,
-      mainStatRaw: base.mainStatRaw,
-      weaponPowerRaw: base.weaponPowerRaw,
-      msPct: a.msPct / 100, wpPct: wpPctOf() / 100, baseApPct: baseApPctOf() / 100, flatAP: a.flatAP,
-      skills: sk,
-      master: !!S.kit.master,
-      traitWeights: traitWeights(),
-      addDamage: {
-        weaponQuality: a.addWeapon / 100, pet: a.addPet / 100,
-        astrogemLv60: a.addAstrogem / 100, neck: num(S.kit.neck, 0) / 100
-      },
-      backAttackShare: S.fight.back / 100,
-      frontAttackShare: S.fight.front / 100,
-      nonDirectionalShare: S.fight.nonDir / 100,
-      staggeredShare: a.staggerShare / 100,
-      demonShare: S.fight.demon ? 1 : 0,
-      demonBase: a.demonBase / 100,
-      shieldUptime: a.shieldUptime / 100,
-      allyDpsCount: a.allyCount,
-      allyCritRate: 0.90, allyCritDamage: 2.8,
-      enemyBaseDR: a.enemyDR / 100,
-      cooldownPenaltyWeight: S.fight.cdWeight / 100,
-      // Families 20/21/22 are hard assumptions now (max stacks, full uptime);
-      // leaving them out lets the model's own defaults stand.
-      atkMoveSpeedDamagePerPct: 0
-    });
-  }
 
   // ------------------------------------------------------------------
   // rows <-> model lines
@@ -402,32 +208,14 @@
   // come from the canonical default profile (Bracelet.familyGrades), so they
   // label the family rather than the current build and never shuffle mid-edit.
 
-  // The astrogem calculator's rank palette, so a letter reads the same across
-  // the two tools. D and F share the grey, as they do there.
-  var GRADE_COLOR = { S: "#cc5c81", A: "#7e5cc0", B: "#3b7fd0", C: "#4f9d5d", D: "#6f747a", F: "#6f747a" };
+  // The letters, their palette and the JUNK sentinel live in profile.js, so the
+  // Tier List and this picker can never disagree about a family's grade.
   // Our low / mid / high are the game's Rare / Epic / Legendary rarities.
   var TIER_META = {
     low: { label: "Rare", color: "#5aa9e6" },
     mid: { label: "Epic", color: "#c78cff" },
     high: { label: "Legendary", color: "#ffb86b" }
   };
-
-  var famGradeCache = {};
-  function famGrades(grade) {
-    if (!famGradeCache[grade]) famGradeCache[grade] = B.familyGrades(grade);
-    return famGradeCache[grade];
-  }
-
-  /** The letter the picker shows for a stored family value. */
-  function letterOf(val, grade) {
-    if (!val || val === "none") return null;
-    if (val === JUNK) return "F";
-    var fg = famGrades(grade);
-    if (val.indexOf("basic:") === 0) return (fg.basic[val.slice(6)] || {}).letter || "F";
-    if (val.indexOf("trait:") === 0) return (fg.trait[val.slice(6)] || {}).letter || "F";
-    if (val.indexOf("sp:") === 0) return (fg.special[Number(val.slice(3))] || {}).letter || "F";
-    return null;
-  }
 
   // ---- "Junk Line": every F family under one option ----
   //
@@ -437,7 +225,6 @@
   // separately was fifteen rows of noise, so the granted picker shows a single
   // "Junk Line" entry (Shizu, 2026-08-11). The FIXED-line editor keeps the full
   // list: see the note on junkFamPool.
-  var JUNK = "junk";
 
   /**
    * The stand-in families a "Junk Line" pick resolves to, lightest listed
@@ -495,24 +282,6 @@
     for (i = 0; i < pool.length && out.length < S.slots; i++) if (!used[pool[i]]) out.push(pool[i]);
     while (out.length < S.slots) out.push(pool[out.length] || pool[0]);
     return out;
-  }
-
-  /** True for a stored family value the granted picker now folds into JUNK. */
-  function isJunkFam(val, grade) {
-    if (!val || val === "none" || val === JUNK) return false;
-    return letterOf(val, grade) === "F";
-  }
-
-  /** Rewrite granted / rolled rows saved before the collapse existed. */
-  function migrateJunkRows() {
-    var sets = [S.rows, S.rolled], s, i, rows;
-    for (s = 0; s < sets.length; s++) {
-      rows = sets[s];
-      if (!rows) continue;
-      for (i = 0; i < rows.length; i++) {
-        if (rows[i] && isJunkFam(rows[i].fam, S.grade)) { rows[i].fam = JUNK; rows[i].value = null; }
-      }
-    }
   }
 
   /**
@@ -910,121 +679,49 @@
 
   // ------------------------------------------------------------------
   // markup
-  // ------------------------------------------------------------------
-
-  function opts(list, sel) {
-    var h = "", i;
-    for (i = 0; i < list.length; i++) {
-      var o = list[i], v = (o && o.v !== undefined) ? o.v : o, t = (o && o.t !== undefined) ? o.t : o;
-      h += '<option value="' + esc(v) + '"' + (String(v) === String(sel) ? " selected" : "") + ">" + esc(t) + "</option>";
-    }
-    return h;
-  }
-  // Every field carries a stable id derived from its state path, so a re-render
-  // can put the cursor back where it was.
-  function fldId(path) { return "bc-fld-" + path.replace(/\./g, "-"); }
-  function fldNum(path, label, step, gloss) {
-    return '<div class="fld"><label' + (gloss ? ' data-gloss="' + esc(gloss) + '"' : "") + ">" + esc(label) + "</label>" +
-      '<input id="' + fldId(path) + '" type="number" step="' + (step || "any") + '" data-k="' + path + '" data-t="num" value="' + esc(getPath(S, path)) + '"></div>';
-  }
-  function fldSel(path, label, list, gloss) {
-    return '<div class="fld"><label' + (gloss ? ' data-gloss="' + esc(gloss) + '"' : "") + ">" + esc(label) + "</label>" +
-      '<select id="' + fldId(path) + '" data-k="' + path + '" data-t="sel">' + opts(list, getPath(S, path)) + "</select></div>";
-  }
-  function fldChk(path, label, gloss) {
-    return '<div class="fld bc-chk"><label' + (gloss ? ' data-gloss="' + esc(gloss) + '"' : "") + ">" +
-      '<input id="' + fldId(path) + '" type="checkbox" data-k="' + path + '" data-t="chk"' + (getPath(S, path) ? " checked" : "") + "> " + esc(label) + "</label></div>";
-  }
-
-  // ------------------------------------------------------------------
-  // mouse-first controls
   //
-  // Sliders, segmented buttons and toggles all read and write S through the
-  // same data-k path the number fields use, so persistence comes for free.
-  // Sliders are native <input type=range>; there is no custom drag code.
+  // The deck's own builders (fldNum / slider / segmented / toggle and the chip
+  // machinery) went to profile.js with the controls they draw. What stays here is
+  // the bracelet's markup, which the deck never touches.
   // ------------------------------------------------------------------
-
-  function chipId(path) { return fldId(path) + "-chip"; }
-  // Chip formats live in a map keyed by name so a drag can re-render the chip
-  // from the DOM alone, without hunting for the function that drew it.
-  var FMT = {
-    plus: function (v) { return "+" + v; },
-    pct: function (v) { return v + "%"; },
-    pct1: function (v) { return fx(v, 1) + "%"; },
-    lv: function (v) { return "Lv " + v; },
-    raw: function (v) { return String(v); }
-  };
-
-  /**
-   * o.cls    extra class on the row ("wep" paints the weapon track accent)
-   * o.gloss  tooltip on the label
-   * o.ticks  labels drawn under the track, one per step
-   * o.edit   the value chip becomes a number input when clicked
-   */
-  function slider(path, label, min, max, step, fmtKey, o) {
-    o = o || {};
-    var fmt = FMT[fmtKey] || FMT.raw;
-    var v = num(getPath(S, path), min), t = "";
-    if (o.ticks) {
-      t = '<div class="bc-ticks" style="grid-template-columns:repeat(' + o.ticks.length + ',1fr)">';
-      for (var i = 0; i < o.ticks.length; i++) t += "<span>" + esc(o.ticks[i]) + "</span>";
-      t += "</div>";
-    }
-    return '<div class="bc-sl' + (o.cls ? " " + o.cls : "") + '">' +
-      '<label class="lb" for="' + fldId(path) + '"' + (o.gloss ? ' data-gloss="' + esc(o.gloss) + '"' : "") + ">" + esc(label) + "</label>" +
-      '<div class="tk"><input id="' + fldId(path) + '" type="range" data-k="' + path + '" data-t="rng" data-fmt="' + esc(fmtKey) + '"' +
-        ' min="' + min + '" max="' + max + '" step="' + step + '" value="' + esc(v) + '"' +
-        (o.disabled ? " disabled" : "") + ">" + t + "</div>" +
-      '<span class="chip' + (o.edit ? " ed" : "") + '" id="' + chipId(path) + '"' +
-        (o.edit ? ' data-editk="' + path + '" data-min="' + min + '" data-max="' + max + '" data-step="' + step + '" title="Click to type an exact value"' : "") +
-        ">" + esc(fmt(v)) + "</span>" +
-      "</div>";
-  }
-
-  function segmented(path, label, options, fmt, gloss) {
-    var cur = String(getPath(S, path)), h = "", i, v;
-    for (i = 0; i < options.length; i++) {
-      v = options[i];
-      h += '<button type="button" data-seg="' + path + '" data-v="' + esc(v) + '" aria-pressed="' +
-        (String(v) === cur ? "true" : "false") + '">' + esc(fmt(v)) + "</button>";
-    }
-    return '<div class="bc-segrow"><span class="lb"' + (gloss ? ' data-gloss="' + esc(gloss) + '"' : "") + ">" + esc(label) + "</span>" +
-      '<div class="bc-seg" role="group" aria-label="' + esc(label) + '">' + h + "</div></div>";
-  }
-
-  function toggle(path, label, gloss) {
-    var on = !!getPath(S, path);
-    return '<button type="button" class="mbtn bc-tgl" data-tgl="' + path + '" aria-pressed="' + (on ? "true" : "false") + '"' +
-      (gloss ? ' data-gloss="' + esc(gloss) + '"' : "") + ">" + esc(label) + " · " + (on ? "on" : "off") + "</button>";
-  }
 
   function styleBlock() {
     return "<style>" +
-      // The control deck rides in normal document flow. It used to stick and
-      // scroll inside itself, which meant you had to collapse the panel before
-      // you could read the results under it — Shizu's complaint, 2026-08-11.
-      "#tab-calculator #bc-inputs{position:static;max-height:none;overflow:visible}" +
-      "#tab-calculator .ihdr{cursor:pointer}" +
-      "#tab-calculator .bc-busy{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--border);margin-left:8px;vertical-align:middle;transition:background .15s}" +
-      "#tab-calculator .bc-busy.on{background:var(--accent);animation:bc-pulse 1s ease-in-out infinite}" +
-      "@keyframes bc-pulse{0%,100%{opacity:.25}50%{opacity:1}}" +
-      "#tab-calculator .bc-sub{font-size:11px;color:var(--dim);margin:-4px 0 10px}" +
+      // Scoped to the Calculator pane. The DECK's stylesheet is not here any
+      // more: profile.js injects it, class-scoped, because the deck moves
+      // between tabs and a pane-id prefix would strip its own styling.
+      // ---- the imported character's header ----
+      "#tab-calculator .bc-prof{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:0 0 4px}" +
+      // An <img> cannot inherit the SVG's fill=currentColor, so flatten the
+      // glyph to black and invert it to the theme's off-white.
+      "#tab-calculator .bc-prof .bc-classicon{width:46px;height:46px;object-fit:contain;flex:0 0 auto;filter:brightness(0) invert(.82);opacity:.92}" +
+      "#tab-calculator .bc-prof .bc-id{display:flex;flex-direction:column;gap:3px;min-width:0}" +
+      "#tab-calculator .bc-prof .bc-name{font-size:30px;font-weight:800;letter-spacing:-.015em;line-height:1.05;color:var(--text)}" +
+      "#tab-calculator .bc-prof .bc-name a{color:inherit;text-decoration:none;border-bottom:1px dotted transparent;transition:border-color .12s,color .12s}" +
+      "#tab-calculator .bc-prof .bc-name a:hover{color:var(--accent);border-bottom-color:var(--accent)}" +
+      "#tab-calculator .bc-prof .bc-meta{display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:12.5px;color:var(--dim)}" +
+      "#tab-calculator .bc-prof .bc-meta .bc-chip{display:inline-flex;align-items:baseline;gap:5px;background:var(--panel);border:1px solid var(--border);border-radius:99px;padding:2px 10px;font-weight:600}" +
+      "#tab-calculator .bc-prof .bc-meta .bc-chip b{color:var(--text);font-weight:700;font-variant-numeric:tabular-nums}" +
+      "#tab-calculator .bc-star{background:none;border:none;cursor:pointer;font-size:24px;line-height:1;padding:0 2px;color:var(--none);font-family:inherit;vertical-align:middle;transition:color .12s,transform .08s}" +
+      "#tab-calculator .bc-star:hover{transform:scale(1.12)}" +
+      "#tab-calculator .bc-star.on{color:var(--high)}" +
+      "#tab-calculator .bc-cache{display:inline-block;margin-left:10px;font-size:10px;font-weight:700;letter-spacing:.02em;color:var(--dim);background:var(--panel2);border:1px solid var(--border);border-radius:99px;padding:2px 9px;vertical-align:middle}" +
+      "#tab-calculator .bc-cache.fresh{color:var(--good)}" +
+      // ---- the bracelet panel ----
       "#tab-calculator .bc-hdrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}" +
-      "#tab-calculator .bc-fam{width:100%}" +
-      // The family box carries the longest text on the row, so it gets the
-      // room: 430px fits nearly every label outright (the shrink last round
-      // went too far — Shizu, 2026-08-11).
-      "#tab-calculator .bc-slot{display:grid;grid-template-columns:44px 168px minmax(0,430px) 120px;gap:8px;align-items:end;margin-bottom:8px;justify-content:start}" +
-      // Only the few labels still too long are clipped: the full name rides in
-      // the tooltip and the title attribute.
-      "#tab-calculator .bc-fam{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
-      "#tab-calculator .bc-slot .sn{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;padding-bottom:7px}" +
-      "@media(max-width:640px){#tab-calculator .bc-slot{grid-template-columns:1fr;gap:5px}#tab-calculator .bc-slot .sn{padding-bottom:0}}" +
-      "@media(max-width:900px) and (min-width:641px){#tab-calculator .bc-slot{grid-template-columns:44px 150px minmax(0,1fr) 110px}}" +
       // An illegal-but-scored state (three combat traits, or fewer than two):
       // the house note, flagged with the bad colour. A warning, not a block.
       "#tab-calculator .note.bc-illegal{color:var(--bad);border-left:2px solid var(--bad);padding-left:9px;margin-top:8px}" +
-      // headline cards
+      // ---- the bracelet's two fixed combat traits ---------------------
+      // .bc-sl itself is the deck's row shape (profile.js); these are the
+      // overrides that make a trait row typed instead of slid.
+      "#tab-calculator .bc-sl.bc-trrow{grid-template-columns:74px 96px 72px;justify-content:start}" +
+      "#tab-calculator .bc-trrow input[type=number]{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 7px;font:inherit;font-size:13px;width:100%}" +
+      "#tab-calculator .bc-trrow input[type=number]:focus{outline:1px solid var(--accent)}" +
+      "#tab-calculator .bc-trrow input:disabled{opacity:.45;cursor:not-allowed}" +
+      "#tab-calculator .bc-tract{padding:4px 8px;font-size:11px;width:100%}" +
+      "@media(max-width:640px){#tab-calculator .bc-sl.bc-trrow{grid-template-columns:62px 84px 66px;gap:6px}}" +
+      // ---- headline cards ----
       "#tab-calculator .bc-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:14px}" +
       "#tab-calculator .bc-card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 14px}" +
       "#tab-calculator .bc-card .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);font-weight:700}" +
@@ -1064,103 +761,16 @@
       "#tab-calculator .bc-hist li{padding:6px 0;border-bottom:1px solid var(--border);line-height:1.5}" +
       "#tab-calculator .bc-hist li:last-child{border-bottom:none}" +
       "#tab-calculator .bc-warn{color:var(--bad);font-size:12.5px;margin:8px 0}" +
-      // ---- the two-column control deck -------------------------------
-      "#tab-calculator .bc-deck{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px 22px}" +
-      "@media(max-width:900px){#tab-calculator .bc-deck{grid-template-columns:1fr;gap:0}}" +
-      "#tab-calculator .bc-col{min-width:0}" +
-      "#tab-calculator .bc-gearhdr{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin:12px 0 8px}" +
-      "#tab-calculator .bc-gearhdr .subh{margin:0}" +
-      "#tab-calculator .bc-ilvl{text-align:right;line-height:1}" +
-      "#tab-calculator .bc-ilvl .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);font-weight:700}" +
-      "#tab-calculator .bc-ilvl .v{font-size:28px;font-weight:800;letter-spacing:-.02em;color:var(--accent);font-variant-numeric:tabular-nums;margin-top:3px}" +
-      // ---- slider rows ------------------------------------------------
-      "#tab-calculator .bc-sl{display:grid;grid-template-columns:96px minmax(0,1fr) 52px;gap:10px;align-items:center;margin-bottom:6px}" +
-      "#tab-calculator .bc-sl .lb{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--dim);line-height:1.25}" +
-      "#tab-calculator .bc-sl .chip{font-size:12.5px;font-weight:700;color:var(--accent);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}" +
-      "#tab-calculator .bc-sl .chip.ed{cursor:text;text-decoration:underline dotted;text-underline-offset:3px}" +
-      "#tab-calculator .bc-sl .chip input{width:100%;background:var(--panel2);color:var(--text);border:1px solid var(--accent);border-radius:5px;padding:2px 4px;font:inherit;font-size:12px;text-align:right}" +
-      "#tab-calculator .bc-sl .tk{min-width:0}" +
-      "#tab-calculator .bc-ticks{display:grid;font-size:9.5px;color:var(--dim);text-align:center;margin-top:-2px;letter-spacing:.03em}" +
-      // Native range, styled to the house theme — no custom drag code.
-      "#tab-calculator input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:transparent;margin:0;padding:0;cursor:pointer;display:block}" +
-      "#tab-calculator input[type=range]::-webkit-slider-runnable-track{height:5px;border-radius:3px;background:var(--panel2);border:1px solid var(--border)}" +
-      "#tab-calculator input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:var(--accent);border:none;margin-top:-6px}" +
-      "#tab-calculator input[type=range]::-moz-range-track{height:5px;border-radius:3px;background:var(--panel2);border:1px solid var(--border)}" +
-      "#tab-calculator input[type=range]::-moz-range-thumb{width:15px;height:15px;border-radius:50%;background:var(--accent);border:none}" +
-      "#tab-calculator input[type=range]:focus{outline:none}" +
-      "#tab-calculator input[type=range]:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 3px rgba(102,199,255,.35)}" +
-      "#tab-calculator input[type=range]:focus-visible::-moz-range-thumb{box-shadow:0 0 0 3px rgba(102,199,255,.35)}" +
-      "#tab-calculator input[type=range]:disabled{opacity:.45;cursor:not-allowed}" +
-      // The weapon is the only piece that moves weapon power: mark its track.
-      "#tab-calculator .bc-sl.wep input[type=range]::-webkit-slider-runnable-track{background:rgba(102,199,255,.30);border-color:var(--accent)}" +
-      "#tab-calculator .bc-sl.wep input[type=range]::-moz-range-track{background:rgba(102,199,255,.30);border-color:var(--accent)}" +
-      // ---- segmented controls and toggles -----------------------------
-      "#tab-calculator .bc-segrow{display:grid;grid-template-columns:96px minmax(0,1fr);gap:10px;align-items:center;margin-bottom:6px}" +
-      "#tab-calculator .bc-seg{display:flex;gap:4px}" +
-      "#tab-calculator .bc-seg button{flex:1 1 0;min-width:0;background:var(--panel2);border:1px solid var(--border);color:var(--dim);" +
-        "border-radius:6px;padding:5px 2px;font-size:11.5px;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap}" +
-      "#tab-calculator .bc-seg button:hover{color:var(--text);border-color:var(--accent)}" +
-      "#tab-calculator .bc-seg button[aria-pressed=true]{color:#06121f;background:var(--accent);border-color:var(--accent)}" +
-      "#tab-calculator .bc-tgl[aria-pressed=true]{color:var(--accent);border-color:var(--accent);background:rgba(102,199,255,.16)}" +
-      "#tab-calculator .bc-tgl[aria-pressed=true]:hover{color:var(--accent)}" +
-      // ---- the bracelet's two fixed combat traits ---------------------
-      "#tab-calculator .bc-sl.bc-trrow{grid-template-columns:74px 96px 72px;justify-content:start}" +
-      "#tab-calculator .bc-trrow input[type=number]{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 7px;font:inherit;font-size:13px;width:100%}" +
-      "#tab-calculator .bc-trrow input[type=number]:focus{outline:1px solid var(--accent)}" +
-      "#tab-calculator .bc-trrow input:disabled{opacity:.45;cursor:not-allowed}" +
-      "#tab-calculator .bc-tract{padding:4px 8px;font-size:11px;width:100%}" +
-      "@media(max-width:640px){#tab-calculator .bc-sl.bc-trrow{grid-template-columns:62px 84px 66px;gap:6px}}" +
-      // ---- skills: typed, not slid (Shizu's call for this block only) ----
-      "#tab-calculator .bc-skill{display:grid;grid-template-columns:110px minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) 26px;gap:7px;align-items:end;margin-bottom:7px}" +
-      "@media(max-width:640px){#tab-calculator .bc-skill{grid-template-columns:1fr 1fr}" +
-      "#tab-calculator .bc-skill .bc-x{justify-self:start;width:44px}" +
-      "#tab-calculator .bc-sl,#tab-calculator .bc-segrow{grid-template-columns:82px minmax(0,1fr) 46px;gap:7px}" +
-      "#tab-calculator .bc-segrow{grid-template-columns:82px minmax(0,1fr)}}" +
-      "#tab-calculator .bc-x{background:var(--panel2);border:1px solid var(--border);color:var(--dim);border-radius:6px;height:29px;width:100%;padding:0;cursor:pointer;font-family:inherit;font-size:14px;line-height:1}" +
-      "#tab-calculator .bc-x:hover{color:var(--bad);border-color:var(--bad)}" +
-      // A checkbox has no field above it to line up with, and its label is a
-      // sentence rather than a caption — give it the whole row.
-      "#tab-calculator .bc-chk{grid-column:1/-1}" +
-      "#tab-calculator .bc-chk label{display:flex;align-items:center;gap:7px;text-transform:none;font-size:12.5px;color:var(--text);letter-spacing:0;padding:4px 0}" +
-      // .fld input is width:100% for text boxes; a checkbox must not inherit that.
-      "#tab-calculator .bc-chk input{width:auto;flex:0 0 auto;margin:0;accent-color:var(--accent)}" +
       "</style>";
   }
 
-  function inputsMarkup() {
-    return '' +
-      '<div class="inputs" id="bc-inputs">' +
-      '  <div class="ihdr"><span>Character &amp; bracelet<span class="bc-busy" id="bc-busy"></span></span>' +
-      '    <span class="tgl" id="bc-toggle"><span id="bc-caret">&#9662;</span></span></div>' +
-      '  <div id="bc-inputs-body">' +
-      '    <div id="bc-top"></div>' +
-      '    <div class="bc-deck">' +
-      '      <div class="bc-col">' +
-      '        <div class="bc-gearhdr"><div class="subh">Gear</div>' +
-      '          <div class="bc-ilvl"><div class="k" data-gloss="The mean of your six pieces\' item levels, live. Serca level 0 is item level 1675 and every honing level is +5, so +25 across the board is 1800. Item level itself does not enter the damage math — the honing levels behind it do.">Item level</div>' +
-      '            <div class="v" id="bc-ilvl">—</div></div></div>' +
-      '        <div id="bc-gear"></div>' +
-      '        <div id="bc-kit"></div>' +
-      '        <div class="barrow">' +
-      '          <button class="mbtn" id="bc-advtoggle" type="button">Advanced ▾</button>' +
-      '          <button class="mbtn" id="bc-reset" type="button">Reset</button>' +
-      '        </div>' +
-      '      </div>' +
-      '      <div class="bc-col">' +
-      '        <div class="subh">Fight</div>' +
-      '        <div id="bc-fight"></div>' +
-      '        <div class="subh">Traits</div>' +
-      '        <div id="bc-traitw"></div>' +
-      '        <div class="subh">Skills — share, crit rate, crit damage</div>' +
-      '        <div id="bc-skills"></div>' +
-      '        <div class="barrow"><button class="mbtn" id="bc-addskill" type="button">+ Add skill</button></div>' +
-      '        <div class="subh">Economy</div>' +
-      '        <div id="bc-econ"></div>' +
-      '      </div>' +
-      '    </div>' +
-      '    <div id="bc-adv" style="display:none"></div>' +
-      '  </div>' +
-      '</div>';
+  /**
+   * The deck goes into #bc-deckhost (profile.js builds and owns it), and the
+   * imported character's header into #bc-charhdr, between the deck and the
+   * bracelet it belongs to. Both are empty until something fills them.
+   */
+  function hostsMarkup() {
+    return '<div id="bc-deckhost"></div><div id="bc-charhdr"></div>';
   }
 
   function braceletMarkup() {
@@ -1178,236 +788,28 @@
   }
 
   function tabMarkup() {
-    return styleBlock() + inputsMarkup() + braceletMarkup() +
+    return styleBlock() + hostsMarkup() + braceletMarkup() +
       '<section id="bc-results"></section>';
   }
 
   // ------------------------------------------------------------------
-  // input rendering
+  // what is left of "input rendering"
+  //
+  // The control deck's renderers (top row, gear, kit, fight, trait weights,
+  // skills, economy, the Advanced fold) all moved to profile.js on 2026-08-11.
+  // What stays is the bracelet: its read-out line, its two fixed combat traits,
+  // and its granted / fixed rows.
   // ------------------------------------------------------------------
-
-  function renderTop() {
-    var h = '<div class="ig">';
-    h += fldSel("grade", "Grade", [{ v: "ancient", t: "Ancient" }, { v: "relic", t: "Relic" }],
-      "Ancient bracelets roll 2 or 3 granted slots and higher line values; Relic rolls 1 or 2.");
-    h += fldSel("slots", "Granted slots", (function () {
-      var ch = slotChoices(), o = [], j;
-      for (j = 0; j < ch.length; j++) o.push({ v: ch[j], t: ch[j] + " slots" });
-      return o;
-    })(), "The rerollable lines. Ancient: 3 slots on 25% of drops, 2 on 75%. Slot count moves the value of an unrolled bracelet a lot.");
-    h += fldNum("rollsLeft", "Rolls left", "1",
-      "A fresh bracelet has 4 rolls plus up to 3 reconversion-ticket rolls = 7. The cut flow counts this down.");
-    h += "</div>";
-    h += fldChk("useOverride", "Enter WP / main stat directly",
-      "Skip the honing sliders and type the two raw numbers straight off your character sheet (before the % buckets).");
-    $("bc-top").innerHTML = h;
-  }
-
-  // ---- left column: GEAR ----
-
-  function renderGear() {
-    var h = "", i, k;
-    if (S.useOverride) {
-      h += '<div class="ig">';
-      h += fldNum("ov.mainStatRaw", "Main stat (raw)", "1", "Before the main-stat % bucket: the five armour pieces + accessories + base + roster.");
-      h += fldNum("ov.weaponPowerRaw", "Weapon power (raw)", "1", "Before the weapon-power % bucket: the weapon's table value.");
-      h += "</div>";
-      h += '<div class="note">The percentage buckets still apply on top: main stat ' + fx(S.adv.msPct, 1) +
-        "%, weapon power " + fx(wpPctOf(), 1) + "%, attack power " + fx(baseApPctOf(), 1) +
-        "%. Change them under Advanced.</div>";
-    } else {
-      for (i = 0; i < PIECES.length; i++) {
-        k = PIECES[i][0];
-        h += slider("gear." + k, PIECES[i][1], 0, 25, 1, "plus", {
-          cls: k === "weapon" ? "wep" : "",
-          gloss: k === "weapon"
-            ? "Serca honing level of the weapon. It alone sets weapon power; +25 is item level 1800."
-            : "Serca honing level of the " + PIECES[i][1].toLowerCase() + ". The five armour pieces feed main stat."
-        });
-      }
-    }
-    $("bc-gear").innerHTML = h;
-    updateIlvl();
-  }
-
-  /** The big number the eye checks after every slider move. */
-  function updateIlvl() {
-    var el = $("bc-ilvl");
-    if (!el) return;
-    el.textContent = S.useOverride ? "—" : fx(ilvlExact(), 2);
-  }
-
-  function renderKit() {
-    var box = $("bc-kit");
-    if (!box) return;
-    if (S.useOverride) { box.innerHTML = ""; return; }
-    var pc = function (v) { return v + "%"; };
-    var h = "";
-    h += segmented("kit.neck", "Neck dmg", [0, 0.7, 1.6, 2.6], pc,
-      "Your necklace's additional-damage line. It joins one additive pool with the weapon, pet and astrogem grid, and a bracelet line worth +3% is diluted against that whole pool. 0.7% is the low tier, 2.6% a high roll, 0% no line at all.");
-    h += segmented("kit.ear1", "Earring 1 WP", [0, 0.8, 1.8, 3], pc,
-      "The first earring's weapon-power line. Both earrings plus karma make the weapon-power percentage bucket, which multiplies your raw weapon power and every flat weapon-power line the bracelet gives you.");
-    h += segmented("kit.ear2", "Earring 2 WP", [0, 0.8, 1.8, 3], pc,
-      "The second earring's weapon-power line. Same bucket as the first.");
-    h += slider("kit.gems", "Damage gems", 6, 10, 1, "lv",
-      { ticks: ["6", "7", "8", "9", "10"],
-        gloss: "All eleven damage gems at this level. Per gem: lv6 0.4% · lv7 0.6% · lv8 0.8% · lv9 1.0% · lv10 1.2% attack power. It cancels out of most line ratios, but it shifts the balance between the square-root term and flat attack power." });
-    h += '<div class="barrow">' +
-      toggle("kit.stone", "9/7 stone",
-        "A 9/7 ability stone is +1.5% attack power on top of the eleven gems. Turn it off for a 9/6 or worse.") +
-      toggle("kit.master",
-        "Master", "The Master ark-grid node. Shizu's ruling: it counts as +7% additional damage and nothing else, which overrides the sheet reading that also credits crit rate.") +
-      "</div>";
-    h += '<div class="note" data-gloss="The two percentage buckets these controls add up to. Weapon power = earring 1 + earring 2 + karma. Attack power = eleven gems + the ability stone. Both are overridable under Advanced.">' +
-      "Weapon power bucket " + fx(wpPctOf(), 1) + "% · attack power bucket " + fx(baseApPctOf(), 1) + "%.</div>";
-    box.innerHTML = h;
-  }
-
-  // ---- right column: FIGHT / TRAITS / SKILLS / ECONOMY ----
-
-  function renderFight() {
-    var h = "";
-    h += slider("fight.back", "Back", 0, 100, 1, "pct",
-      { gloss: "How much of your damage lands from behind. A back-attack line is multiplied by this before it scores, so drop it to 0 if you never hit the back." });
-    h += slider("fight.front", "Front", 0, 100, 1, "pct",
-      { gloss: "How much of your damage lands on the head or front. Scales the front-attack lines the same way." });
-    h += slider("fight.nonDir", "Hitmaster", 0, 100, 1, "pct",
-      { gloss: "How much of your damage comes from skills with no positional requirement — what the Hitmaster lines pay for. Awakening does not count." });
-    h += slider("fight.cdWeight", "CD penalty wt", 0, 100, 1, "pct",
-      { gloss: "Family 15 buys damage with +2% cooldown. At 100% you are judged on burst, where the extra cooldown never bites; at 0% on sustained, where the damage is divided by 1.02. 70% is the shipped assumption." });
-    h += '<div class="barrow">' +
-      toggle("fight.demon", "Demon boss",
-        "On: the fight is a Demon or Archdemon boss, so demon-damage lines score in full — still diluted by the demon damage you already carry from cards and pets. Off: they score nothing.") +
-      "</div>";
-    $("bc-fight").innerHTML = h;
-  }
-
-  function renderTraitWeights() {
-    var h = "";
-    h += slider("fight.wSpec", "Spec weight", 0, 4, 0.1, "pct1",
-      { gloss: "What 100 points of Specialization is worth to your class, in % damage. There is no class table behind this — it is your call. A 120-point Spec line then scores value × weight ÷ 100." });
-    h += slider("fight.wSwift", "Swift weight", 0, 4, 0.1, "pct1",
-      { gloss: "What 100 points of Swiftness is worth to your class, in % damage. Crit needs no weight: it converts exactly, at 25 points of crit rate per 699 trait points, and is worth whatever that is to your skills." });
-    $("bc-traitw").innerHTML = h;
-  }
-
-  // ---- skill shares: always exactly 100 ----
-
-  /**
-   * Split `total` across `weights` as integers, largest remainder first. All
-   * weights zero means share it equally.
-   */
-  function distribute(weights, total) {
-    var n = weights.length, i, sum = 0, w = [];
-    for (i = 0; i < n; i++) { w.push(Math.max(0, num(weights[i], 0))); sum += w[i]; }
-    if (!n) return [];
-    if (sum <= 0) { for (i = 0; i < n; i++) w[i] = 1; sum = n; }
-    var floors = [], order = [], acc = 0;
-    for (i = 0; i < n; i++) {
-      var x = w[i] / sum * total, f = Math.floor(x);
-      floors.push(f); acc += f; order.push({ i: i, frac: x - f });
-    }
-    order.sort(function (a, b) { return (b.frac - a.frac) || (a.i - b.i); });
-    var rem = Math.round(total - acc);
-    for (i = 0; i < rem; i++) floors[order[i % n].i] += 1;
-    return floors;
-  }
-
-  /** Force the stored shares to integers summing to exactly 100. */
-  function normalizeShares() {
-    var w = [], i;
-    for (i = 0; i < S.skills.length; i++) w.push(num(S.skills[i].share, 0));
-    var got = distribute(w, 100);
-    for (i = 0; i < S.skills.length; i++) S.skills[i].share = got[i];
-  }
-
-  /** Move one share and rebalance the rest proportionally, total still 100. */
-  function setShare(idx, v) {
-    var n = S.skills.length, i, w = [], others = [];
-    if (n < 2) { S.skills[0].share = 100; return; }
-    v = clamp(Math.round(num(v, 0)), 0, 100);
-    for (i = 0; i < n; i++) if (i !== idx) { others.push(i); w.push(num(S.skills[i].share, 0)); }
-    var got = distribute(w, 100 - v);
-    S.skills[idx].share = v;
-    for (i = 0; i < others.length; i++) S.skills[others[i]].share = got[i];
-  }
-
-  /**
-   * Push the rebalanced shares back onto the other fields without a rebuild —
-   * `skip` is the box being typed in, which must keep its cursor.
-   */
-  function syncShares(skip) {
-    for (var i = 0; i < S.skills.length; i++) {
-      if (i === skip) continue;
-      var el = $("bc-sk-share-" + i);
-      if (el && String(el.value) !== String(S.skills[i].share)) el.value = S.skills[i].share;
-    }
-  }
-
-  /**
-   * Skills stay TYPED (Shizu reversed the slider call for this block only):
-   * a narrow name box and three compact number fields per skill. The share
-   * field is still policed — the numbers always add to exactly 100.
-   */
-  function renderSkills() {
-    var h = "", i, one = S.skills.length < 2;
-    for (i = 0; i < S.skills.length; i++) {
-      var s = S.skills[i];
-      h += '<div class="bc-skill">' +
-        '<div class="fld"><label>Name</label>' +
-        '<input type="text" data-sk="' + i + '" data-f="name" value="' + esc(s.name || "") + '" placeholder="name" aria-label="Skill name"></div>' +
-        '<div class="fld"><label data-gloss="How much of your damage this skill deals. The shares always add to exactly 100 — type one and the others move to make room. With a single skill it is locked at 100.">Share %</label>' +
-        '<input id="bc-sk-share-' + i + '" type="number" step="1" min="0" max="100" data-sk="' + i + '" data-f="share" value="' + esc(s.share) + '"' +
-        (one ? " disabled" : "") + "></div>" +
-        '<div class="fld"><label data-gloss="This skill\'s crit rate before any bracelet line. A crit-rate line is capped at 100%, which is why it quietly dies on a high-crit build.">Crit rate %</label>' +
-        '<input type="number" step="0.1" data-sk="' + i + '" data-f="cr" value="' + esc(s.cr) + '"></div>' +
-        '<div class="fld"><label data-gloss="What a crit deals, as a multiple. 280% means a crit hits for 2.8 times, not 3.8.">Crit dmg %</label>' +
-        '<input type="number" step="1" data-sk="' + i + '" data-f="cd" value="' + esc(s.cd) + '"></div>' +
-        '<button class="bc-x" type="button" data-delsk="' + i + '"' + (one ? " disabled" : "") +
-        ' title="Remove this skill">&times;</button>' +
-        "</div>";
-    }
-    $("bc-skills").innerHTML = h;
-  }
-
-  // ---- economy: a linear baseline and a LOG gold slider ----
-  // Gold per 1% spans two orders of magnitude, so the track is log10: position
-  // 0-200 maps to 100k-10M, each step about +2.3%.
-  var GPD_MIN = 100000, GPD_MAX = 10000000, GPD_STEPS = 200;
-  function sig3(v) {
-    if (!(v > 0)) return 0;
-    var e = Math.pow(10, Math.floor(Math.log(v) / Math.LN10) - 2);
-    return Math.round(v / e) * e;
-  }
-  function gpdPos(v) {
-    v = clamp(num(v, GPD_MIN), GPD_MIN, GPD_MAX);
-    return Math.round(GPD_STEPS * (Math.log(v) / Math.LN10 - 5) / 2);
-  }
-  function gpdFromPos(pos) {
-    return sig3(Math.pow(10, 5 + (clamp(pos, 0, GPD_STEPS) / GPD_STEPS) * 2));
-  }
-
-  function renderEcon() {
-    var h = '<div class="bc-sl">' +
-      '<label class="lb" for="bc-gpd" data-gloss="What one percent of damage is worth to you in gold. It is a rate you choose, not a market read — the same convention the accessory and astrogem tools use, so a bracelet, an accessory and a gem can be priced against each other. Higher for a whale roster, lower for a fresh one. The track is logarithmic: 100k at the left, 10M at the right.">Gold per 1%</label>' +
-      '<div class="tk"><input id="bc-gpd" type="range" data-gpd="1" min="0" max="' + GPD_STEPS + '" step="1" value="' + gpdPos(S.econ.gpd) + '"></div>' +
-      '<span class="chip" id="bc-gpd-chip">' + esc(gold(num(S.econ.gpd, 0))) + "</span></div>";
-    h += slider("econ.baseline", "Baseline %", 0, 25, 0.5, "pct1", {
-      edit: true,
-      gloss: "The bracelet you would wear instead. Worth is (expected final − baseline) × gold per 1%, so leaving it at 0 prices this bracelet against no bracelet at all. Click the number to type an exact one."
-    });
-    $("bc-econ").innerHTML = h;
-  }
 
   // The live read-out under the bracelet header. Split out so a slider drag can
   // refresh it without rebuilding the fields under the cursor.
   function updateBasicsNote() {
     var note = $("bc-slotnote");
     if (!note) return;
-    var base = baseStats(), p = buildProfile();
+    var base = P.baseStats(), p = buildProfile();
     var msg = S.useOverride
       ? "Main stat " + nf(base.mainStatRaw) + " raw · weapon power " + nf(base.weaponPowerRaw) + " raw"
-      : "Item level " + fx(ilvlExact(), 2) + " · main stat " + nf(base.mainStatRaw) + " raw · weapon power " + nf(base.weaponPowerRaw) + " raw";
+      : "Item level " + fx(P.ilvl(), 2) + " · main stat " + nf(base.mainStatRaw) + " raw · weapon power " + nf(base.weaponPowerRaw) + " raw";
     msg += " · attack power " + nf(B.attackPower(p, 0, 0)) + " · additional damage pool " + fx(B.addDamagePool(p) * 100, 2) + "%";
     msg += " · fixed traits " + signPct(pct(B.traitDamage(traitValues(), p)));
     note.textContent = msg + ". Leave every granted slot empty for an unrolled bracelet.";
@@ -1440,7 +842,7 @@
       ". They never reroll, so they are a constant added to every score below.</div>";
     // Nothing is switched off behind the user's back; the panel just says when
     // the set on screen could not exist in game. The score counts it either way.
-    var n = traitOnCount();
+    var n = P.traitOnCount();
     if (n > 2) {
       h += '<div class="note bc-illegal">Three combat traits are active. A real bracelet only ever carries two, ' +
         "so this bracelet cannot exist in game &mdash; every score below still counts all three exactly as entered.</div>";
@@ -1451,59 +853,17 @@
     box.innerHTML = h;
   }
 
-  function renderAdvanced() {
-    var box = $("bc-adv");
-    if (!box) return;
-    box.style.display = S.advOpen ? "block" : "none";
-    var b = $("bc-advtoggle");
-    if (b) b.textContent = S.advOpen ? "Advanced ▴" : "Advanced ▾";
-    if (!S.advOpen) { box.innerHTML = ""; return; }
-
-    var h = '<div class="subh">Stat buckets</div><div class="ig">';
-    h += fldNum("adv.msPct", "Main stat %", "0.1", "Everything multiplying raw main stat: 8% skins + 1% stronghold ranch by default.");
-    h += fldNum("adv.karmaWp", "Karma weapon power %", "0.1", "Karma's share of the weapon-power bucket. The two earring lines are set in the Gear column.");
-    h += fldChk("adv.baseApOverride", "Override attack power % (ignore the gem slider)",
-      "By default the attack-power bucket is eleven gems at their level plus the ability stone. Tick this to type it instead.");
-    h += fldNum("adv.baseApPct", "Attack power %", "0.1", "It cancels out of most ratios but shifts the balance between the square-root term and flat attack power.");
-    h += fldNum("adv.flatAP", "Flat attack power", "1", "Ark-grid cores. Flat attack power is what stops a weapon-power line from being a pure square-root ratio.");
-    h += fldNum("adv.accessoryMainStat", "Accessory main stat", "1", "Neck 17,857 + two earrings 13,889 + two rings 12,897, all at the top of their range with no flat-stat rolls.");
-    h += fldNum("adv.rosterBonus", "Roster bonus", "1", "Main stat from roster level.");
-    h += "</div>";
-
-    h += '<div class="subh">Additional damage pool</div><div class="ig">';
-    h += fldNum("adv.addWeapon", "Weapon quality %", "0.1", "A 100-quality weapon gives 30%.");
-    h += fldNum("adv.addPet", "Pet %", "0.1", "Pet additional damage.");
-    h += fldNum("adv.addAstrogem", "Astrogem grid %", "0.01", "60 grid levels × 0.080667% per level.");
-    h += "</div>";
-    h += '<div class="note">The necklace line and the Master node are in the Gear column.</div>';
-
-    h += '<div class="subh">Fight assumptions</div><div class="ig">';
-    h += fldNum("adv.staggerShare", "Stagger windows %", "1", "Share of your damage dealt while the boss is staggered.");
-    h += fldNum("adv.demonBase", "Demon damage held %", "0.1", "Demon damage you already carry from cards and pets — it dilutes a demon line.");
-    h += fldNum("adv.shieldUptime", "Shield uptime %", "1", "How much of the fight your party sits under a shield, for the shielded-target line.");
-    h += fldNum("adv.enemyDR", "Enemy damage reduction %", "1", "The boss's damage reduction before any shred. It sets how much a defense shred is worth: gain = (D+K)/(D(1−A)+K).");
-    h += fldNum("adv.allyCount", "Ally DPS in party", "1", "How many other damage dealers share your party debuffs. Each is assumed to deal what you deal before the line.");
-    h += "</div>";
-    h += '<div class="note">The conditional weapon-power families (20, 21 and 22) are no longer knobs: they are scored at max stacks and full uptime.</div>';
-
-    h += '<div class="subh">Fixed lines (come with the drop, never rerolled)</div>';
-    h += '<div class="bc-sub">Optional, and separate from the two combat traits above. They score their own damage and they lock their family and category slot out of every future roll, so they change what an empty bracelet is worth.</div>';
-    h += '<div id="bc-fixedrows"></div>';
-    h += '<div class="barrow"><button class="mbtn" id="bc-addfixed" type="button"' + (S.fixedRows.length >= 2 ? " disabled" : "") + '>+ Add fixed line</button></div>';
-
-    box.innerHTML = h;
-    var apField = $(fldId("adv.baseApPct"));
-    if (apField && !S.adv.baseApOverride) { apField.value = fx(baseApPctOf(), 2); apField.disabled = true; }
+  /**
+   * Redraw everything on screen that is NOT a deck control. Called after any
+   * change Profile announces, and after this file rewrites the rows itself.
+   */
+  function renderBracelet() {
+    renderTraits();
+    renderSlots();
     renderFixedRows();
-  }
-
-  /** Every input control, rebuilt. Used by init, by Reset and by a shape change. */
-  function renderInputs() {
-    renderTop(); renderGear(); renderKit(); renderFight(); renderTraitWeights();
-    renderSkills(); renderEcon(); renderAdvanced(); renderTraits();
     updateBasicsNote();
+    renderCharHeader();          // its grade and rolls-left chips read the same state
   }
-
 
   function rowMarkup(idx, row, prefix, label) {
     var grade = S.grade;
@@ -1875,14 +1235,6 @@
   // events
   // ------------------------------------------------------------------
 
-  // Rebuilding a field group under the cursor drops focus mid-keystroke, so the
-  // cheap live parts (the read-out line, the share note, the priced pickers) are
-  // refreshed on every edit, and the field groups themselves only when their
-  // SHAPE changes — grade, slot count, the WP/main-stat override, adding a skill.
-  function focusInside(id) {
-    var el = $(id), a = document.activeElement;
-    return !!(el && a && el.contains(a));
-  }
   /** Rebuild markup, then put the cursor back on the element it was on. */
   function keepFocus(fn) {
     var a = document.activeElement, id = (a && a.id) ? a.id : null;
@@ -1899,17 +1251,13 @@
     if (box && a && box.contains(a) && a.tagName === "INPUT") return;
     keepFocus(renderSlots);
   }
+  /**
+   * The cheap live parts, refreshed on every edit: the read-out line under the
+   * bracelet header and the priced pickers. The deck redraws itself.
+   */
   function redrawLive() {
     updateBasicsNote();
-    updateIlvl();
     redrawSlots();
-  }
-
-  var SHAPE_FIELDS = { grade: 1, slots: 1, useOverride: 1 };
-
-  /** Rebuild every control, then the bracelet rows under it. */
-  function redrawAll() {
-    keepFocus(function () { renderInputs(); renderSlots(); });
   }
 
   /** A segmented/toggle press solves at once — no debounce to sit through. */
@@ -1918,186 +1266,32 @@
     recompute();
   }
 
-  function onFieldChange(el) {
-    var path = el.getAttribute && el.getAttribute("data-k"), t = el.getAttribute("data-t");
-    if (!path) return false;
-    if (t === "chk") setPath(S, path, !!el.checked);
-    else if (t === "rng") setPath(S, path, Number(el.value));
-    else if (t === "num") setPath(S, path, num(el.value, getPath(S, path)));
-    else setPath(S, path, isNaN(Number(el.value)) ? el.value : Number(el.value));
-    if (path === "rollsLeft") S.rollsTotal = Math.max(S.rollsTotal, num(el.value, 7));
-    if (path === "grade" || path === "slots") { S.locks = null; S.rolled = null; lastVerdict = null; }
-    save();
-    if (t === "rng") {
-      // Mid-drag: repaint the chip and the derived read-outs only. Rebuilding
-      // the control would tear the slider out from under the mouse.
-      var chip = $(chipId(path)), f = FMT[el.getAttribute("data-fmt")] || FMT.raw;
-      if (chip) chip.textContent = f(Number(el.value));
-      if (path.indexOf("gear.") === 0) updateIlvl();
-      if (path === "kit.gems") updateKitNote();
+  /**
+   * Profile said something moved. The deck has already redrawn itself and
+   * persisted; this is the Calculator catching up.
+   *
+   *   d.shape      grade / slots / the override moved, or a whole state was set:
+   *                the bracelet's own rows and trait band change with it
+   *   d.reset      the state went back to defaults, so every cached solve is for
+   *                a bracelet that no longer exists
+   *   d.immediate  a press rather than a drag — solve now instead of debouncing
+   */
+  function onProfileChange(d) {
+    d = d || {};
+    if (d.reset) {
+      lastVerdict = null; cache = {}; cacheOrder = [];
+      freshSolve = null; lastSolve = null; freshSolveKey = null; lastSolveKey = null; workerCtxKey = null;
     }
-    if (SHAPE_FIELDS[path]) {
-      if (path === "grade") fitTraits();
-      fitRows();
-      redrawAll();
-    } else if (path === "adv.baseApOverride") {
-      keepFocus(function () { renderKit(); renderAdvanced(); });
-    } else if (path.indexOf("adv.") === 0) {
-      // Karma and the attack-power override feed the two derived buckets the
-      // Gear column prints; refresh that line without rebuilding the field.
-      updateKitNote();
+    if (d.shape || d.reset) {
+      lastVerdict = null;
+      keepFocus(renderBracelet);
+    } else {
+      redrawLive();
+      // Two deck fields also sit in the character header's chips.
+      if (d.path === "rollsLeft" || d.path === "grade") renderCharHeader();
     }
-    redrawLive();
-    schedule();
-    return true;
+    if (d.immediate) solveNow(); else schedule();
   }
-
-  /** The one derived line under the gem slider that a drag has to keep honest. */
-  function updateKitNote() {
-    var box = $("bc-kit");
-    if (!box) return;
-    var n = box.getElementsByClassName("note");
-    if (n.length) n[0].textContent = "Weapon power bucket " + fx(wpPctOf(), 1) +
-      "% · attack power bucket " + fx(baseApPctOf(), 1) + "%.";
-  }
-
-  /** Turn a value chip into a small number input, and back on blur or Enter. */
-  function editChip(chip, get, set) {
-    if (chip.getElementsByTagName("input").length) return;
-    var lo = Number(chip.getAttribute("data-min")), hi = Number(chip.getAttribute("data-max"));
-    var step = num(chip.getAttribute("data-step"), 1);
-    var inp = document.createElement("input");
-    inp.type = "number"; inp.min = lo; inp.max = hi; inp.step = step < 1 ? "0.01" : "1"; inp.value = get();
-    chip.textContent = "";
-    chip.appendChild(inp);
-    inp.focus();
-    inp.select();
-    // Blur and change both mean "done"; whichever lands first closes the box.
-    var closed = false;
-    function finish(keep) {
-      if (closed) return;
-      closed = true;
-      if (keep !== false) {
-        var v = clamp(num(inp.value, get()), lo, hi);
-        set(step < 1 ? Math.round(v * 100) / 100 : Math.round(v));
-        save();
-      }
-      renderInputs(); redrawLive(); solveNow();
-    }
-    inp.addEventListener("keydown", function (ev) {
-      if (ev.key === "Enter") finish();
-      else if (ev.key === "Escape") finish(false);
-      ev.stopPropagation();
-    });
-    inp.addEventListener("blur", function () { finish(); });
-    inp.addEventListener("change", function (ev) { ev.stopPropagation(); finish(); });
-    inp.addEventListener("input", function (ev) { ev.stopPropagation(); });
-  }
-
-  function bindPanel() {
-    var panel = $("bc-inputs");
-    function fieldEvent(e) {
-      var el = e.target;
-      if (el.id === "bc-gpd") {
-        S.econ.gpd = gpdFromPos(Number(el.value));
-        var gc = $("bc-gpd-chip");
-        if (gc) gc.textContent = gold(S.econ.gpd);
-        save(); schedule();                       // gold is not in the solve key: a cache hit
-        return;
-      }
-      if (el.getAttribute && el.getAttribute("data-sk") !== null && el.getAttribute("data-f")) {
-        var i = Number(el.getAttribute("data-sk")), f = el.getAttribute("data-f");
-        if (!S.skills[i]) return;
-        if (f === "name") S.skills[i].name = el.value;
-        else if (f === "share") {
-          // An empty or half-typed box must not rebalance to nonsense; wait for
-          // a number, then move the others to keep the total at exactly 100.
-          if (el.value === "" || isNaN(Number(el.value))) return;
-          setShare(i, el.value);
-          syncShares(i);
-        } else S.skills[i][f] = num(el.value, S.skills[i][f]);
-        save(); redrawLive(); schedule();
-        return;
-      }
-      onFieldChange(el);
-    }
-    // Selects fire input then change; both paths are idempotent.
-    panel.addEventListener("input", fieldEvent);
-    panel.addEventListener("change", fieldEvent);
-
-    // Leaving a share box snaps it to the number actually stored, so a typed
-    // 150 or an emptied box cannot sit there contradicting the total.
-    panel.addEventListener("focusout", function (e) {
-      var el = e.target;
-      if (!el.getAttribute || el.getAttribute("data-f") !== "share") return;
-      var i = Number(el.getAttribute("data-sk"));
-      if (!S.skills[i]) return;
-      if (el.value === "" || isNaN(Number(el.value))) { setShare(i, S.skills[i].share); save(); }
-      renderSkills(); redrawLive(); schedule();
-    });
-
-    panel.addEventListener("click", function (e) {
-      var t = e.target, d, seg, tgl, chip;
-      // A click can land on the chip's own text node in some browsers.
-      if (t && t.className && String(t.className).indexOf("chip") >= 0) chip = t;
-
-      if ((seg = t.getAttribute && t.getAttribute("data-seg"))) {
-        var raw = t.getAttribute("data-v");
-        setPath(S, seg, (raw !== "" && !isNaN(Number(raw))) ? Number(raw) : raw);
-        save();
-        keepFocus(function () { renderKit(); renderAdvanced(); });
-        redrawLive(); solveNow();
-        return;
-      }
-      if ((tgl = t.getAttribute && t.getAttribute("data-tgl"))) {
-        setPath(S, tgl, !getPath(S, tgl));
-        save();
-        keepFocus(function () { renderKit(); renderFight(); renderAdvanced(); });
-        redrawLive(); solveNow();
-        return;
-      }
-      if (chip && chip.getAttribute("data-editk")) {
-        var ep = chip.getAttribute("data-editk");
-        editChip(chip, function () { return getPath(S, ep); }, function (v) { setPath(S, ep, v); });
-        return;
-      }
-
-      if (t.id === "bc-addskill") {
-        S.skills.push({ name: "", share: 0, cr: 90, cd: 280 });
-        normalizeShares();                       // a new skill enters at an equal share
-        var eq = distribute((function () { var w = [], j; for (j = 0; j < S.skills.length; j++) w.push(1); return w; })(), 100), j2;
-        for (j2 = 0; j2 < S.skills.length; j2++) S.skills[j2].share = eq[j2];
-        save(); renderSkills(); redrawSlots(); solveNow();
-      } else if (t.getAttribute && (d = t.getAttribute("data-delsk")) !== null && d !== "") {
-        if (S.skills.length > 1) {
-          S.skills.splice(Number(d), 1);
-          normalizeShares();
-          save(); renderSkills(); redrawSlots(); solveNow();
-        }
-      } else if (t.id === "bc-advtoggle") { S.advOpen = !S.advOpen; save(); renderAdvanced(); }
-      else if (t.id === "bc-addfixed") {
-        if (S.fixedRows.length < 2) { S.fixedRows.push(blankRow()); save(); renderAdvanced(); schedule(); }
-      } else if (t.id === "bc-reset") {
-        if (window.confirm("Reset every input, the bracelet and this session's rolls?")) {
-          try { localStorage.removeItem(LS_KEY); } catch (er) { /* ignore */ }
-          S = defaults(); lastVerdict = null; cache = {}; cacheOrder = [];
-          freshSolve = null; lastSolve = null; freshSolveKey = null; lastSolveKey = null; workerCtxKey = null;
-          fitRows(); renderInputs(); renderSlots();
-          solveNow();
-        }
-      }
-    });
-
-    // The whole header row collapses the panel, not just the little arrow.
-    var hdr = panel.getElementsByClassName("ihdr")[0];
-    hdr.addEventListener("click", function () {
-      var body = $("bc-inputs-body"), c = $("bc-caret");
-      var hidden = body.style.display === "none";
-      body.style.display = hidden ? "" : "none";
-      c.innerHTML = hidden ? "&#9662;" : "&#9656;";
-    });
-  }
-
 
   // Slot / fixed / rolled rows share one delegated handler, keyed by the id
   // prefix the row was rendered with.
@@ -2133,7 +1327,11 @@
   }
 
   function bindBody() {
-    var root = $("tab-calculator");
+    // The document, not the pane: the Advanced fold's fixed-line rows are drawn
+    // by this file but live inside the deck, and the deck can be re-parented
+    // into another tab at any moment. Every branch below is gated on an id or a
+    // data- attribute only this file emits, so a wider net costs nothing.
+    var root = document;
     root.addEventListener("change", function (e) {
       if (!handleRowEvent(e.target)) return;
       save();
@@ -2167,7 +1365,7 @@
         return;
       }
       if (t.id === "bc-clear") {
-        S.rows = []; fitRows(); S.locks = null; S.rolled = null; lastVerdict = null;
+        S.rows = []; P.fit(); S.locks = null; S.rolled = null; lastVerdict = null;
         save(); redrawSlots(); recompute();
       } else if ((lk = t.getAttribute && t.getAttribute("data-lock")) !== null && lk !== undefined && lk !== "") {
         var locks = cutLocks(lastSolve, grantedLines(), buildProfile()).slice();
@@ -2249,7 +1447,7 @@
     }
     S.rollsLeft = Math.max(0, S.rollsLeft - 1);
     S.locks = null; S.rolled = null; lastVerdict = null;
-    save(); renderTop(); renderSlots(); recompute();   // rollsLeft moved: redraw its field too
+    save(); P.render(); renderSlots(); renderCharHeader(); recompute();   // rollsLeft moved: redraw its field too
   }
 
   function undo() {
@@ -2258,7 +1456,110 @@
     S.rows = e.prevRows;
     S.rollsLeft = e.rollsBefore;
     S.locks = null; S.rolled = null; lastVerdict = null;
-    fitRows(); save(); renderTop(); renderSlots(); recompute();
+    P.fit(); save(); P.render(); renderSlots(); renderCharHeader(); recompute();
+  }
+
+  // ------------------------------------------------------------------
+  // the imported character's header
+  //
+  // Astrogem's loadout header, with our chips. It appears the moment a character
+  // is imported and stays hidden otherwise — an empty header is worse than none.
+  // ------------------------------------------------------------------
+
+  /** "2d ago" for a timestamp, the same ladder astrogem uses. */
+  function ageLabel(ts) {
+    if (!ts) return "";
+    var mins = Math.floor((Date.now() - Number(ts)) / 60000);
+    if (!isFinite(mins) || mins < 0) return "";
+    if (mins < 1) return "just now";
+    if (mins < 60) return mins + "m ago";
+    var hrs = Math.floor(mins / 60);
+    if (hrs < 24) return hrs + "h ago";
+    return Math.floor(hrs / 24) + "d ago";
+  }
+
+  /** Cached / fresh / imported, in one pill beside the name. */
+  function cacheNoteHtml(c) {
+    if (!c) return "";
+    var age = ageLabel(c.pulledAt), txt;
+    if (c.source === "import" || c.cached == null) txt = "Imported" + (age ? " " + esc(age) : "");
+    else if (c.cached) txt = "Cached &middot; pulled " + esc(age || "recently");
+    else txt = "Freshly pulled";
+    return ' <span class="bc-cache' + (c.cached === false ? " fresh" : "") + '">' + txt + "</span>";
+  }
+
+  /** The character's page on lostark.bible. EU is CE there, as their URLs have it. */
+  function bibleUrl(region, name) {
+    var r = String(region || "").toUpperCase();
+    if (r === "EU" || r === "CE") return "https://lostark.bible/character/CE/" + encodeURIComponent(name || "");
+    return "https://lostark.bible/character/" + encodeURIComponent(r || "NA") + "/" + encodeURIComponent(name || "");
+  }
+
+  /**
+   * The class glyph, from assets/class-icons/<Class>.svg — the same 29 files the
+   * astrogem calculator ships. The list is spelled out because a class we have no
+   * file for must get NO icon rather than a wrong one or a broken image: we know
+   * exactly which 29 exist, so there is no reason to ask the server and find out.
+   * Matching ignores case and spacing, so "Guardian Knight" finds Guardianknight.
+   * onerror still hides a file that fails to load for any other reason.
+   */
+  var CLASS_ICONS = ("Aeromancer Arcanist Artillerist Artist Bard Berserker Breaker Deadeye Deathblade " +
+    "Destroyer Glaivier Guardianknight Gunlancer Gunslinger Machinist Paladin Reaper Scrapper " +
+    "Shadowhunter Sharpshooter Slayer Sorceress Souleater Soulfist Striker Summoner Valkyrie " +
+    "Wardancer Wildsoul").split(" ");
+  var CLASS_ICON_BY_KEY = (function () {
+    var m = {}, i;
+    for (i = 0; i < CLASS_ICONS.length; i++) m[CLASS_ICONS[i].toLowerCase()] = CLASS_ICONS[i];
+    return m;
+  })();
+  function classIconFile(className) {
+    if (!className) return null;
+    return CLASS_ICON_BY_KEY[String(className).replace(/[^A-Za-z]/g, "").toLowerCase()] || null;
+  }
+  function classIconHtml(className) {
+    var file = classIconFile(className);
+    if (!file) return "";
+    return '<img class="bc-classicon" src="assets/class-icons/' + encodeURIComponent(file) +
+      '.svg" alt="" aria-hidden="true" loading="lazy" onerror="this.style.display=\'none\'">';
+  }
+
+  function paintStar(btn, region, name) {
+    var F = window.Favorites, on = F ? F.has(region, name) : false;
+    btn.className = "bc-star" + (on ? " on" : "");
+    btn.innerHTML = on ? "&#9733;" : "&#9734;";              // ★ / ☆
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    btn.title = on ? "Remove from saved characters" : "Save this character";
+  }
+
+  /** How many granted lines the imported bracelet still has rolls for. */
+  function renderCharHeader() {
+    var box = $("bc-charhdr");
+    if (!box) return;
+    var c = S.char;
+    if (!c || !c.name) { box.innerHTML = ""; box.style.display = "none"; return; }
+    box.style.display = "";
+    var chips = "";
+    if (c.region) chips += '<span class="bc-chip">' + esc(c.region) + "</span>";
+    if (c["class"]) chips += '<span class="bc-chip">' + esc(c["class"]) + "</span>";
+    if (c.itemLevel != null) chips += '<span class="bc-chip">ilvl <b>' + esc(Number(c.itemLevel).toLocaleString("en-US")) + "</b></span>";
+    chips += '<span class="bc-chip">' + (S.grade === "relic" ? "Relic" : "Ancient") + "</span>";
+    chips += '<span class="bc-chip">rolls left <b>' + S.rollsLeft + "</b></span>";
+    box.innerHTML = '<div class="panel"><div class="bc-prof">' +
+      '<button type="button" class="bc-star" id="bc-fav-star"></button>' +
+      classIconHtml(c["class"]) +
+      '<div class="bc-id">' +
+      '<div class="bc-name"><a href="' + bibleUrl(c.region, c.name) + '" target="_blank" rel="noopener">' +
+      esc(c.name) + "</a>" + cacheNoteHtml(c) + "</div>" +
+      '<div class="bc-meta">' + chips + "</div>" +
+      "</div></div></div>";
+    var star = $("bc-fav-star");
+    if (!star) return;
+    if (!window.Favorites) { star.style.display = "none"; return; }
+    paintStar(star, c.region, c.name);
+    star.onclick = function () {                             // onclick, not addEventListener:
+      window.Favorites.toggle(c.region, c.name);             // this node is rebuilt constantly
+      paintStar(star, c.region, c.name);
+    };
   }
 
   // ------------------------------------------------------------------
@@ -2269,16 +1570,23 @@
     var pane = $("tab-calculator");
     if (!pane || pane.getAttribute("data-init")) return;
     pane.setAttribute("data-init", "1");
-    load();
-    fitRows();
     pane.innerHTML = tabMarkup();
-    renderInputs();
-    renderSlots();
-    bindPanel();
+    P.mount($("bc-deckhost"));            // the deck: built, bound and persisted by profile.js
+    P.onAdvancedRender(function () { renderFixedRows(); });
+    renderBracelet();
     bindBody();
+    P.onChange(onProfileChange);
     renderResults(buildProfile(), null);
     recompute();
   }
+
+  // The deck is a single element that MOVES between tabs (see profile.js): claim
+  // it back whenever the Calculator is the tab on screen.
+  document.addEventListener("tabselected", function (e) {
+    if (!e || !e.detail || e.detail.tab !== "calculator") return;
+    var host = $("bc-deckhost");
+    if (host) P.mount(host);
+  });
 
   /**
    * The one hook bible-import.js uses. It hands over a patch already in this
@@ -2286,23 +1594,52 @@
    * any fixed rows — and everything after that is the ordinary redraw an edit
    * would trigger. Keys the patch leaves out keep their current value, so an
    * import never disturbs the character or economy settings.
+   *
+   * `patch.character` is optional: {name, region, class, itemLevel, source,
+   * pulledAt, cached}. When it is there the profile header appears, and anything
+   * the page told us about the character's GEAR is applied as a marked, editable
+   * suggestion — never silently.
    */
   window.BraceletApp = {
     applyImport: function (patch) {
       if (!patch) return false;
       var keys = ["grade", "slots", "rollsLeft", "traits", "traitOrder", "rows", "fixedRows"], i;
+      var next = {};
       for (i = 0; i < keys.length; i++) {
-        if (patch[keys[i]] !== undefined) S[keys[i]] = patch[keys[i]];
+        if (patch[keys[i]] !== undefined) next[keys[i]] = patch[keys[i]];
       }
-      S.locks = null; S.rolled = null;      // a new bracelet voids the cut in progress
-      fitRows();
-      renderInputs();
-      renderSlots();
-      save();
-      recompute();
+      next.locks = null; next.rolled = null;      // a new bracelet voids the cut in progress
+      lastVerdict = null;
+      if (patch.character) next.char = patch.character;
+      P.set(next);                                 // merges, persists, re-renders the deck, notifies
+      if (patch.character) importProfileValues(patch.character);
+      renderCharHeader();
       return true;
-    }
+    },
+    /** Show a character's header without touching the bracelet. */
+    setCharacter: function (c) { P.setCharacter(c); renderCharHeader(); }
   };
+
+  /**
+   * What of a character page's own numbers we can honestly put in the deck.
+   *
+   * Today that is item level, and item level alone: the roster payload carries an
+   * average, and the six honing sliders are what the model reads. An average maps
+   * to a uniform honing level (Serca 0 is 1675, every level is +5), which is a
+   * derivation and not a measurement — so every slider it sets is MARKED, editable,
+   * and reverts to a "suggests" note the moment it is touched. Weapon power, main
+   * stat, crit rate, crit damage and gem levels join this list when the worker is
+   * deployed and the character page is being read directly.
+   */
+  function importProfileValues(c) {
+    var G = window.BraceletGearData;
+    if (!c || !G || c.itemLevel == null) return;
+    var lvl = clamp(Math.round((Number(c.itemLevel) - G.ILVL0) / G.ILVL_STEP), 0, 25);
+    if (!isFinite(lvl)) return;
+    var vals = {}, i, keys = ["head", "shoulder", "chest", "pants", "gloves", "weapon"];
+    for (i = 0; i < keys.length; i++) vals["gear." + keys[i]] = lvl;
+    P.applyImported(vals, c);
+  }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();

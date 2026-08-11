@@ -1,0 +1,1314 @@
+/**
+ * profile.js — the character + bracelet state, and the control deck that edits it.
+ *
+ * This is the spine every tab drives, in the same shape as favorites.js: one
+ * versioned localStorage key, one in-memory copy, subscribers notified after every
+ * change. It was carved out of app.js on 2026-08-11 so the Tier List could mount the
+ * SAME control deck the Calculator uses and watch its table move as a slider drags.
+ *
+ * Public API (window.Profile):
+ *   get()              -> the live state object (grade, slots, rows, gear, kit, fight,
+ *                         traits, skills, econ, adv, …). LIVE, not a copy: the object
+ *                         identity never changes, not even across reset(), so a module
+ *                         may hold the reference forever. Read it freely; write through
+ *                         set(), or mutate and call save() (nothing is notified then).
+ *   profile()          -> the model's view of that state: Bracelet.normalizeProfile(...)
+ *   set(patch)         -> merge (one level deep for the nested blocks), persist, notify
+ *   mount(hostEl)      -> put the control deck inside hostEl and render it
+ *   onChange(cb)       -> unsubscribe fn; cb(detail) after every change the deck makes
+ *   reset()            -> back to defaults, wiping the stored state
+ *
+ * ONE DECK, RE-PARENTED — the multi-mount decision.
+ * Every control in the deck carries a stable id derived from its state path
+ * (bc-fld-gear-head, its chip, its label's `for`), and focus restoration, the
+ * mid-drag chip repaint and the derived read-outs all find their element by that id.
+ * Two live instances would mean two elements per id, so `$()` would repaint the wrong
+ * one — the fix would be prefixing every id and re-rendering both decks on every
+ * keystroke, a large change to code that has to behave EXACTLY as it did before.
+ * So there is exactly one deck element, and `mount()` MOVES it into the host you
+ * name (appendChild on a node already in the document re-parents it, keeping its
+ * listeners and its state). Only one tab is ever visible, so a tab claims the deck by
+ * calling mount() when it is activated. That is the whole protocol.
+ *
+ * PROVENANCE. Values that came from a character page are marked: their label turns
+ * accent-coloured and says "auto-set from <Name>", and a strip above the deck counts
+ * them. Editing a field clears its marker for good and the count drops — after that
+ * the label reads "<Name> suggests +21" instead, the honest downgrade astrogem's
+ * gold-per-damage note makes. Nothing is imported silently.
+ *
+ * THE MATH IS NOT HERE either: profile() is a normalizeProfile call over the state,
+ * and every derived number (item level, the two percentage buckets, the trait
+ * contribution) is arithmetic over the official tables in data/.
+ */
+(function () {
+  "use strict";
+
+  var B = window.Bracelet, DATA = window.BraceletData;
+  if (!B || !DATA) return;                       // model failed to load; leave the shell alone
+
+  var LS_KEY = "loa-bracelet-calc.v1";           // the key app.js used; a v2 blob still loads
+
+  // ------------------------------------------------------------------
+  // small helpers (duplicated in app.js — three lines each, no module system)
+  // ------------------------------------------------------------------
+  function $(id) { return document.getElementById(id); }
+  function esc(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function num(v, d) { var n = parseFloat(v); return isFinite(n) ? n : d; }
+  function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+  function fx(v, n) { return (Math.round(v * Math.pow(10, n)) / Math.pow(10, n)).toFixed(n); }
+  function gold(g) {
+    var a = Math.abs(g);
+    if (a >= 1e6) return (g / 1e6).toFixed(2) + "M";
+    if (a >= 1e3) return Math.round(g / 1e3) + "k";
+    return String(Math.round(g));
+  }
+  function getPath(o, p) { var a = p.split("."), t = o, i; for (i = 0; i < a.length; i++) t = t[a[i]]; return t; }
+  function setPath(o, p, v) { var a = p.split("."), t = o, i; for (i = 0; i < a.length - 1; i++) t = t[a[i]]; t[a[a.length - 1]] = v; }
+
+  // ------------------------------------------------------------------
+  // state
+  // ------------------------------------------------------------------
+
+  function blankRow() { return { fam: "none", tier: "mid", value: null }; }
+
+  function defaults() {
+    return {
+      v: 2,
+      grade: "ancient",
+      slots: 3,
+      rollsLeft: 7,
+      rollsTotal: 7,                 // what a FRESH bracelet gets — drives the "unrolled" price
+      useOverride: false,
+      // One honing level per piece — six sliders, the weapon alone driving WP.
+      gear: { weapon: 25, head: 21, shoulder: 21, chest: 21, pants: 21, gloves: 23 },
+      ov: { mainStatRaw: 703826, weaponPowerRaw: 241367 },
+      // Accessories, gems and the two on/off nodes. wpPct and baseApPct are
+      // DERIVED from these (see wpPctOf / baseApPctOf), not stored.
+      kit: { neck: 2.6, ear1: 3, ear2: 3, gems: 9, stone: true, master: false },
+      // Where the damage lands, how the cooldown line is judged, and what the
+      // class pays for a Spec / Swiftness trait line (points per 100 points).
+      fight: { back: 100, front: 100, nonDir: 100, cdWeight: 70, demon: false, wSpec: 2.5, wSwift: 2.5 },
+      // The bracelet's two FIXED combat traits. A real bracelet carries exactly
+      // two, but the panel no longer polices it: a third can be switched on and
+      // the score keeps counting it, with a warning that the state is illegal
+      // in game (Shizu, 2026-08-11 — the silent auto-off was worse).
+      traits: { crit: { on: true, v: 120 }, spec: { on: true, v: 120 }, swift: { on: false, v: 120 } },
+      adv: {
+        msPct: 9, karmaWp: 2.5, baseApOverride: false, baseApPct: 12.5, flatAP: 2700,
+        accessoryMainStat: 71429, rosterBonus: 2085,
+        addWeapon: 30, addPet: 1, addAstrogem: 4.84,
+        staggerShare: 10, demonBase: 7.3, shieldUptime: 60, enemyDR: 50,
+        allyCount: 2
+      },
+      skills: [{ name: "", share: 100, cr: 90, cd: 280 }],
+      econ: { gpd: 1500000, baseline: 0 },
+      rows: [blankRow(), blankRow(), blankRow()],
+      fixedRows: [],
+      advOpen: false,
+      locks: null,                   // per-slot booleans in the cut flow; null = follow the model
+      rolled: null,                  // per-slot rows entered in the cut flow
+      history: [],
+      // ---- import provenance (see the header) ----
+      char: null,                    // { name, region, class, itemLevel, source, pulledAt, cached }
+      prov: {},                      // state path -> the character name it came from, while untouched
+      provWas: {}                    // state path -> the value that character suggested, kept after
+    };
+  }
+
+  // The nested blocks are merged key by key, so a stored blob written before a
+  // field existed still gets that field's default.
+  var NESTED = { adv: 1, gear: 1, ov: 1, econ: 1, kit: 1, fight: 1, traits: 1 };
+
+  // Per-gem base attack power by gem level; eleven of them plus a 9/7 stone.
+  var GEM_AP = { 6: 0.4, 7: 0.6, 8: 0.8, 9: 1.0, 10: 1.2 };
+  var STONE_AP = 1.5;
+  // Slider order, Shizu's: armour first, the weapon last because it is the one
+  // piece that moves weapon power.
+  var PIECES = [["head", "Head"], ["shoulder", "Shoulder"], ["chest", "Chest"],
+    ["pants", "Pants"], ["gloves", "Gloves"], ["weapon", "Weapon"]];
+
+  var TRAIT_KEYS = ["crit", "spec", "swift"];
+  var TRAIT_LABELS = { crit: "Crit", spec: "Spec", swift: "Swiftness" };
+
+  // The astrogem calculator's rank palette, so a letter reads the same across the
+  // two tools. D and F share the grey, as they do there.
+  var GRADE_COLOR = { S: "#cc5c81", A: "#7e5cc0", B: "#3b7fd0", C: "#4f9d5d", D: "#6f747a", F: "#6f747a" };
+  var JUNK = "junk";                             // the granted picker's one zero-damage option
+
+  // The single state object. Its identity NEVER changes — load() and reset() copy
+  // into it — so every module can hold the reference `Profile.get()` returned.
+  var S = defaults();
+
+  function assignInto(target, src) {
+    var k;
+    for (k in target) if (Object.prototype.hasOwnProperty.call(target, k)) delete target[k];
+    for (k in src) if (Object.prototype.hasOwnProperty.call(src, k)) target[k] = src[k];
+    return target;
+  }
+
+  function save() {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) { /* private mode */ }
+  }
+
+  function load() {
+    var raw;
+    try { raw = localStorage.getItem(LS_KEY); } catch (e) { return; }
+    if (!raw) return;
+    var got;
+    try { got = JSON.parse(raw); } catch (e) { return; }
+    // v2 reshaped the panel (per-piece honing, accessory/gem controls, fight
+    // and trait blocks), so a v1 blob has nothing worth migrating: start clean.
+    if (!got || got.v !== 2) return;
+    var d = defaults(), k;
+    for (k in d) if (Object.prototype.hasOwnProperty.call(d, k)) {
+      if (got[k] === undefined || got[k] === null) continue;
+      if (NESTED[k]) {
+        for (var a in d[k]) if (got[k][a] !== undefined && got[k][a] !== null) d[k][a] = got[k][a];
+      } else {
+        d[k] = got[k];
+      }
+    }
+    assignInto(S, d);
+  }
+
+  // Slot count and grade drive how many rows exist and which are legal.
+  function slotChoices() { return S.grade === "relic" ? [1, 2] : [2, 3]; }
+
+  function fitRows() {
+    var ch = slotChoices();
+    if (ch.indexOf(S.slots) === -1) S.slots = ch[ch.length - 1];
+    while (S.rows.length < S.slots) S.rows.push(blankRow());
+    S.rows.length = S.slots;
+    if (S.fixedRows.length > 2) S.fixedRows.length = 2;
+    S.rollsLeft = clamp(Math.round(S.rollsLeft), 0, 20);
+    S.rollsTotal = clamp(Math.round(S.rollsTotal), 0, 20);
+    if (!S.skills.length) S.skills = [{ name: "", share: 100, cr: 90, cd: 280 }];
+    if (!S.prov) S.prov = {};
+    if (!S.provWas) S.provWas = {};
+    normalizeShares();
+    fitTraits();
+    migrateJunkRows();
+  }
+
+  /**
+   * Every trait value inside the grade's band, so a Relic bracelet can never
+   * show an Ancient-only 120. Called on load and whenever the grade moves.
+   *
+   * It no longer forces exactly two active. Three combat traits is illegal in
+   * game, but the panel says so rather than switching one off behind the
+   * user's back, and the score counts whatever is on.
+   */
+  function fitTraits() {
+    var band = traitBand(), i, k;
+    for (i = 0; i < TRAIT_KEYS.length; i++) {
+      k = TRAIT_KEYS[i];
+      if (!S.traits[k]) S.traits[k] = { on: false, v: band[1] };
+      S.traits[k].v = clamp(Math.round(num(S.traits[k].v, band[1])), band[0], band[1]);
+    }
+    delete S.traitOrder;                                 // the old eviction queue, no longer used
+  }
+
+  // ---- family letters, and the "Junk Line" collapse they drive ----
+  //
+  // The letters come from the canonical default profile (Bracelet.familyGrades), so
+  // they label the family rather than the current build and never shuffle mid-edit.
+  // They live here because fitRows has to rewrite rows saved before the collapse
+  // existed, and because the Tier List reads the same letters the picker shows.
+  var famGradeCache = {};
+  function famGrades(grade) {
+    if (!famGradeCache[grade]) famGradeCache[grade] = B.familyGrades(grade);
+    return famGradeCache[grade];
+  }
+
+  /** The letter the picker shows for a stored family value. */
+  function letterOf(val, grade) {
+    if (!val || val === "none") return null;
+    if (val === JUNK) return "F";
+    var fg = famGrades(grade);
+    if (val.indexOf("basic:") === 0) return (fg.basic[val.slice(6)] || {}).letter || "F";
+    if (val.indexOf("trait:") === 0) return (fg.trait[val.slice(6)] || {}).letter || "F";
+    if (val.indexOf("sp:") === 0) return (fg.special[Number(val.slice(3))] || {}).letter || "F";
+    return null;
+  }
+
+  /** True for a stored family value the granted picker now folds into JUNK. */
+  function isJunkFam(val, grade) {
+    if (!val || val === "none" || val === JUNK) return false;
+    return letterOf(val, grade) === "F";
+  }
+
+  /** Rewrite granted / rolled rows saved before the collapse existed. */
+  function migrateJunkRows() {
+    var sets = [S.rows, S.rolled], s, i, rows;
+    for (s = 0; s < sets.length; s++) {
+      rows = sets[s];
+      if (!rows) continue;
+      for (i = 0; i < rows.length; i++) {
+        if (rows[i] && isJunkFam(rows[i].fam, S.grade)) { rows[i].fam = JUNK; rows[i].value = null; }
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // derived numbers
+  // ------------------------------------------------------------------
+
+  /** Weapon-power % bucket = the two earring lines + karma. */
+  function wpPctOf() { return num(S.kit.ear1, 0) + num(S.kit.ear2, 0) + num(S.adv.karmaWp, 0); }
+  /** Attack-power % bucket = eleven gems at their level + the ability stone. */
+  function baseApPctOf() {
+    if (S.adv.baseApOverride) return num(S.adv.baseApPct, 0);
+    var per = GEM_AP[Math.round(num(S.kit.gems, 9))] || 0;
+    return 11 * per + (S.kit.stone ? STONE_AP : 0);
+  }
+  /** The official starting-value band, which moves with the grade. */
+  function traitBand() { return S.grade === "relic" ? [41, 100] : [61, 120]; }
+  /** What the model scores: an inactive trait contributes nothing. */
+  function traitValues() {
+    var out = {}, i, k;
+    for (i = 0; i < TRAIT_KEYS.length; i++) {
+      k = TRAIT_KEYS[i];
+      out[k] = S.traits[k].on ? num(S.traits[k].v, 0) : 0;
+    }
+    return out;
+  }
+  /** Weights are typed as % damage per 100 trait points; the model wants points. */
+  function traitWeights() {
+    return { spec: num(S.fight.wSpec, 0) / 100, swift: num(S.fight.wSwift, 0) / 100 };
+  }
+  /** How many combat traits are switched on right now. Two is the legal count. */
+  function traitOnCount() {
+    var n = 0, i;
+    for (i = 0; i < TRAIT_KEYS.length; i++) if (S.traits[TRAIT_KEYS[i]].on) n++;
+    return n;
+  }
+
+  /** The live item level: the mean of the six piece item levels, unrounded. */
+  function ilvlExact() {
+    var G = window.BraceletGearData, s = 0, i;
+    if (!G) return 0;
+    for (i = 0; i < PIECES.length; i++) s += G.ILVL0 + G.ILVL_STEP * num(S.gear[PIECES[i][0]], 0);
+    return s / 6;
+  }
+
+  function pieceLevels() {
+    var g = S.gear, o = {}, i;
+    for (i = 0; i < PIECES.length; i++) o[PIECES[i][0]] = clamp(Math.round(num(g[PIECES[i][0]], 0)), 0, 25);
+    return o;
+  }
+
+  function baseStats() {
+    if (S.useOverride) {
+      return { mainStatRaw: num(S.ov.mainStatRaw, 703826), weaponPowerRaw: num(S.ov.weaponPowerRaw, 241367), ilvl: null };
+    }
+    var a = S.adv;
+    return B.deriveBaseline({
+      pieceLevels: pieceLevels(),
+      msPct: a.msPct / 100, wpPct: wpPctOf() / 100, baseApPct: baseApPctOf() / 100, flatAP: a.flatAP,
+      accessoryMainStat: a.accessoryMainStat, rosterBonus: a.rosterBonus
+    });
+  }
+
+  function buildProfile() {
+    var a = S.adv, base = baseStats(), sk = [], i;
+    for (i = 0; i < S.skills.length; i++) {
+      var s = S.skills[i];
+      sk.push({ share: num(s.share, 0) / 100, critRate: num(s.cr, 0) / 100, critDamage: num(s.cd, 0) / 100 });
+    }
+    // Through normalizeProfile, never as a bare object: the model reads fields
+    // this panel does not expose (wpStacks20, wpUptime21, wpStacks22, the ally
+    // crit numbers), and a missing one turns a whole family's score into NaN or,
+    // worse, silently into zero.
+    return B.normalizeProfile({
+      role: "dps",
+      ilvl: base.ilvl || 0,
+      mainStatRaw: base.mainStatRaw,
+      weaponPowerRaw: base.weaponPowerRaw,
+      msPct: a.msPct / 100, wpPct: wpPctOf() / 100, baseApPct: baseApPctOf() / 100, flatAP: a.flatAP,
+      skills: sk,
+      master: !!S.kit.master,
+      traitWeights: traitWeights(),
+      addDamage: {
+        weaponQuality: a.addWeapon / 100, pet: a.addPet / 100,
+        astrogemLv60: a.addAstrogem / 100, neck: num(S.kit.neck, 0) / 100
+      },
+      backAttackShare: S.fight.back / 100,
+      frontAttackShare: S.fight.front / 100,
+      nonDirectionalShare: S.fight.nonDir / 100,
+      staggeredShare: a.staggerShare / 100,
+      demonShare: S.fight.demon ? 1 : 0,
+      demonBase: a.demonBase / 100,
+      shieldUptime: a.shieldUptime / 100,
+      allyDpsCount: a.allyCount,
+      allyCritRate: 0.90, allyCritDamage: 2.8,
+      enemyBaseDR: a.enemyDR / 100,
+      cooldownPenaltyWeight: S.fight.cdWeight / 100,
+      // Families 20/21/22 are hard assumptions now (max stacks, full uptime);
+      // leaving them out lets the model's own defaults stand.
+      atkMoveSpeedDamagePerPct: 0
+    });
+  }
+
+  // ---- skill shares: always exactly 100 ----
+
+  /**
+   * Split `total` across `weights` as integers, largest remainder first. All
+   * weights zero means share it equally.
+   */
+  function distribute(weights, total) {
+    var n = weights.length, i, sum = 0, w = [];
+    for (i = 0; i < n; i++) { w.push(Math.max(0, num(weights[i], 0))); sum += w[i]; }
+    if (!n) return [];
+    if (sum <= 0) { for (i = 0; i < n; i++) w[i] = 1; sum = n; }
+    var floors = [], order = [], acc = 0;
+    for (i = 0; i < n; i++) {
+      var x = w[i] / sum * total, f = Math.floor(x);
+      floors.push(f); acc += f; order.push({ i: i, frac: x - f });
+    }
+    order.sort(function (a, b) { return (b.frac - a.frac) || (a.i - b.i); });
+    var rem = Math.round(total - acc);
+    for (i = 0; i < rem; i++) floors[order[i % n].i] += 1;
+    return floors;
+  }
+
+  /** Force the stored shares to integers summing to exactly 100. */
+  function normalizeShares() {
+    var w = [], i;
+    for (i = 0; i < S.skills.length; i++) w.push(num(S.skills[i].share, 0));
+    var got = distribute(w, 100);
+    for (i = 0; i < S.skills.length; i++) S.skills[i].share = got[i];
+  }
+
+  /** Move one share and rebalance the rest proportionally, total still 100. */
+  function setShare(idx, v) {
+    var n = S.skills.length, i, w = [], others = [];
+    if (n < 2) { S.skills[0].share = 100; return; }
+    v = clamp(Math.round(num(v, 0)), 0, 100);
+    for (i = 0; i < n; i++) if (i !== idx) { others.push(i); w.push(num(S.skills[i].share, 0)); }
+    var got = distribute(w, 100 - v);
+    S.skills[idx].share = v;
+    for (i = 0; i < others.length; i++) S.skills[others[i]].share = got[i];
+  }
+
+  /**
+   * Push the rebalanced shares back onto the other fields without a rebuild —
+   * `skip` is the box being typed in, which must keep its cursor.
+   */
+  function syncShares(skip) {
+    for (var i = 0; i < S.skills.length; i++) {
+      if (i === skip) continue;
+      var el = $("bc-sk-share-" + i);
+      if (el && String(el.value) !== String(S.skills[i].share)) el.value = S.skills[i].share;
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // provenance
+  // ------------------------------------------------------------------
+
+  /** Every path that still carries its imported value, untouched. */
+  function provCount() {
+    var n = 0, k;
+    for (k in S.prov) if (Object.prototype.hasOwnProperty.call(S.prov, k)) n++;
+    return n;
+  }
+
+  /**
+   * A user edit on `path` retires its marker — for good. The suggested value stays
+   * in provWas so the label can go on saying what the character page had, and so
+   * "Reset to imported" still works.
+   */
+  function clearProv(path) {
+    if (!path || !S.prov[path]) return false;
+    delete S.prov[path];
+    return true;
+  }
+
+  /** The character name the marks belong to, or "" when nothing is imported. */
+  function provWho() { return (S.char && S.char.name) || ""; }
+
+  /**
+   * Apply values read off a character page. `values` is a map of state path ->
+   * value; every one is marked as imported until the user edits it.
+   */
+  function applyImported(values, character) {
+    if (character) S.char = character;
+    var k;
+    for (k in values) if (Object.prototype.hasOwnProperty.call(values, k)) {
+      try { setPath(S, k, values[k]); } catch (e) { continue; }
+      S.prov[k] = provWho() || "the character page";
+      S.provWas[k] = values[k];
+    }
+    fitRows();
+    save();
+    renderAll();
+    notify({ shape: true, immediate: true, imported: true });
+  }
+
+  /** Put every imported value back, marks and all. */
+  function resetToImported() {
+    var k, any = false;
+    for (k in S.provWas) if (Object.prototype.hasOwnProperty.call(S.provWas, k)) {
+      try { setPath(S, k, S.provWas[k]); } catch (e) { continue; }
+      S.prov[k] = provWho() || "the character page";
+      any = true;
+    }
+    if (!any) return;
+    fitRows();
+    save();
+    renderAll();
+    notify({ shape: true, immediate: true, imported: true });
+  }
+
+  /**
+   * Paint the markers after a render: an imported field's label turns accent and
+   * says where the number came from; an edited one keeps the "suggests" wording.
+   */
+  function markProvenance() {
+    var seen = {}, k;
+    for (k in S.provWas) if (Object.prototype.hasOwnProperty.call(S.provWas, k)) seen[k] = 1;
+    for (k in S.prov) if (Object.prototype.hasOwnProperty.call(S.prov, k)) seen[k] = 1;
+    var who = provWho() || "the character page";
+    for (k in seen) if (Object.prototype.hasOwnProperty.call(seen, k)) {
+      // Sliders and typed fields carry the path as an id; segmented controls and
+      // toggles are buttons that carry it as data-seg / data-tgl instead.
+      var el = $(fldId(k)) ||
+        (deckEl && deckEl.querySelector('[data-seg="' + k + '"],[data-tgl="' + k + '"]'));
+      if (!el) continue;
+      var row = el.parentNode;
+      while (row && row !== document.body && !(row.className && /\b(bc-sl|bc-segrow|fld)\b/.test(String(row.className)))) row = row.parentNode;
+      if (!row || row === document.body) continue;
+      var live = !!S.prov[k], was = S.provWas[k];
+      row.className = String(row.className).replace(/\s*\bbc-imp\b/g, "") + (live ? " bc-imp" : "");
+      var lab = row.getElementsByTagName("label")[0] ||
+        (row.getElementsByClassName("lb")[0] || null);
+      if (!lab) continue;
+      var base = lab.getAttribute("data-provbase");
+      if (base === null) {
+        base = lab.getAttribute("data-gloss") || "";
+        lab.setAttribute("data-provbase", base);
+      }
+      var tail = live
+        ? " Auto-set from " + who + "."
+        : (was === undefined ? "" : " " + who + " suggests " + was + ".");
+      lab.setAttribute("data-gloss", (base + tail).replace(/^\s+/, ""));
+    }
+  }
+
+  /** The strip above the deck: who was loaded, and how much of them is still here. */
+  function renderProvStrip() {
+    var box = $("bc-prov");
+    if (!box) return;
+    var was = 0, k;
+    for (k in S.provWas) if (Object.prototype.hasOwnProperty.call(S.provWas, k)) was++;
+    if (!S.char || !was) { box.innerHTML = ""; box.style.display = "none"; return; }
+    box.style.display = "";
+    var n = provCount(), who = esc(provWho() || "the character page");
+    var txt = n
+      ? "Loaded from <b>" + who + "</b> — " + n + " value" + (n === 1 ? "" : "s") + " came from the character page."
+      : "Loaded from <b>" + who + "</b> — every imported value has been edited since.";
+    box.innerHTML = '<span class="bc-provtxt" data-gloss="Marked fields hold a number read off the character page rather than one you chose. Editing a field drops its mark for good; the label then says what the page had, as a suggestion.">' +
+      txt + "</span>" +
+      '<button type="button" class="mbtn" id="bc-prov-reimport">Reset to imported</button>' +
+      '<button type="button" class="mbtn" id="bc-prov-defaults">Reset to defaults</button>';
+  }
+
+  // ------------------------------------------------------------------
+  // change notification
+  // ------------------------------------------------------------------
+
+  var listeners = [];
+  /**
+   * detail.immediate  a press, not a drag: the subscriber should act now
+   * detail.shape      grade / slots / override moved — rebuild anything keyed on them
+   * detail.reset      the state was wiped back to defaults
+   */
+  function notify(detail) {
+    detail = detail || {};
+    for (var i = 0; i < listeners.length; i++) {
+      try { listeners[i](detail); } catch (e) { /* a bad subscriber must not break others */ }
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // the deck's stylesheet
+  //
+  // Scoped by the bc- class namespace rather than by a tab id: the deck moves
+  // between panes, so a `#tab-calculator …` prefix would strip its own styling the
+  // moment the Tier List mounted it.
+  // ------------------------------------------------------------------
+
+  function styleText() {
+    return "" +
+      // The control deck rides in normal document flow. It used to stick and
+      // scroll inside itself, which meant you had to collapse the panel before
+      // you could read the results under it — Shizu's complaint, 2026-08-11.
+      "#bc-inputs{position:static;max-height:none;overflow:visible}" +
+      "#bc-inputs .ihdr{cursor:pointer}" +
+      ".bc-busy{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--border);margin-left:8px;vertical-align:middle;transition:background .15s}" +
+      ".bc-busy.on{background:var(--accent);animation:bc-pulse 1s ease-in-out infinite}" +
+      "@keyframes bc-pulse{0%,100%{opacity:.25}50%{opacity:1}}" +
+      ".bc-sub{font-size:11px;color:var(--dim);margin:-4px 0 10px}" +
+      // ---- the provenance strip ----
+      ".bc-prov{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px;padding:8px 11px;" +
+        "border:1px solid var(--accent);border-radius:8px;background:rgba(102,199,255,.08);font-size:12.5px}" +
+      ".bc-prov .mbtn{padding:4px 10px;font-size:11.5px}" +
+      ".bc-prov b{color:var(--accent)}" +
+      ".bc-imp .lb,.bc-imp>label{color:var(--accent)}" +
+      ".bc-imp .lb::after,.bc-imp>label::after{content:'\\2022';color:var(--accent);margin-left:5px}" +
+      // ---- the two-column control deck -------------------------------
+      ".bc-deck{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px 22px}" +
+      "@media(max-width:900px){.bc-deck{grid-template-columns:1fr;gap:0}}" +
+      ".bc-col{min-width:0}" +
+      ".bc-gearhdr{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin:12px 0 8px}" +
+      ".bc-gearhdr .subh{margin:0}" +
+      ".bc-ilvl{text-align:right;line-height:1}" +
+      ".bc-ilvl .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);font-weight:700}" +
+      ".bc-ilvl .v{font-size:28px;font-weight:800;letter-spacing:-.02em;color:var(--accent);font-variant-numeric:tabular-nums;margin-top:3px}" +
+      // ---- slider rows ------------------------------------------------
+      ".bc-sl{display:grid;grid-template-columns:96px minmax(0,1fr) 52px;gap:10px;align-items:center;margin-bottom:6px}" +
+      ".bc-sl .lb{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--dim);line-height:1.25}" +
+      ".bc-sl .chip{font-size:12.5px;font-weight:700;color:var(--accent);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}" +
+      ".bc-sl .chip.ed{cursor:text;text-decoration:underline dotted;text-underline-offset:3px}" +
+      ".bc-sl .chip input{width:100%;background:var(--panel2);color:var(--text);border:1px solid var(--accent);border-radius:5px;padding:2px 4px;font:inherit;font-size:12px;text-align:right}" +
+      ".bc-sl .tk{min-width:0}" +
+      ".bc-ticks{display:grid;font-size:9.5px;color:var(--dim);text-align:center;margin-top:-2px;letter-spacing:.03em}" +
+      // Native range, styled to the house theme — no custom drag code.
+      ".bc-sl input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:transparent;margin:0;padding:0;cursor:pointer;display:block}" +
+      ".bc-sl input[type=range]::-webkit-slider-runnable-track{height:5px;border-radius:3px;background:var(--panel2);border:1px solid var(--border)}" +
+      ".bc-sl input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:var(--accent);border:none;margin-top:-6px}" +
+      ".bc-sl input[type=range]::-moz-range-track{height:5px;border-radius:3px;background:var(--panel2);border:1px solid var(--border)}" +
+      ".bc-sl input[type=range]::-moz-range-thumb{width:15px;height:15px;border-radius:50%;background:var(--accent);border:none}" +
+      ".bc-sl input[type=range]:focus{outline:none}" +
+      ".bc-sl input[type=range]:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 3px rgba(102,199,255,.35)}" +
+      ".bc-sl input[type=range]:focus-visible::-moz-range-thumb{box-shadow:0 0 0 3px rgba(102,199,255,.35)}" +
+      ".bc-sl input[type=range]:disabled{opacity:.45;cursor:not-allowed}" +
+      // The weapon is the only piece that moves weapon power: mark its track.
+      ".bc-sl.wep input[type=range]::-webkit-slider-runnable-track{background:rgba(102,199,255,.30);border-color:var(--accent)}" +
+      ".bc-sl.wep input[type=range]::-moz-range-track{background:rgba(102,199,255,.30);border-color:var(--accent)}" +
+      // ---- segmented controls and toggles -----------------------------
+      ".bc-segrow{display:grid;grid-template-columns:96px minmax(0,1fr);gap:10px;align-items:center;margin-bottom:6px}" +
+      ".bc-seg{display:flex;gap:4px}" +
+      ".bc-seg button{flex:1 1 0;min-width:0;background:var(--panel2);border:1px solid var(--border);color:var(--dim);" +
+        "border-radius:6px;padding:5px 2px;font-size:11.5px;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap}" +
+      ".bc-seg button:hover{color:var(--text);border-color:var(--accent)}" +
+      ".bc-seg button[aria-pressed=true]{color:#06121f;background:var(--accent);border-color:var(--accent)}" +
+      ".bc-tgl[aria-pressed=true]{color:var(--accent);border-color:var(--accent);background:rgba(102,199,255,.16)}" +
+      ".bc-tgl[aria-pressed=true]:hover{color:var(--accent)}" +
+      // ---- skills: typed, not slid (Shizu's call for this block only) ----
+      ".bc-skill{display:grid;grid-template-columns:110px minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) 26px;gap:7px;align-items:end;margin-bottom:7px}" +
+      "@media(max-width:640px){.bc-skill{grid-template-columns:1fr 1fr}" +
+      ".bc-skill .bc-x{justify-self:start;width:44px}" +
+      ".bc-sl,.bc-segrow{grid-template-columns:82px minmax(0,1fr) 46px;gap:7px}" +
+      ".bc-segrow{grid-template-columns:82px minmax(0,1fr)}}" +
+      ".bc-x{background:var(--panel2);border:1px solid var(--border);color:var(--dim);border-radius:6px;height:29px;width:100%;padding:0;cursor:pointer;font-family:inherit;font-size:14px;line-height:1}" +
+      ".bc-x:hover{color:var(--bad);border-color:var(--bad)}" +
+      // A checkbox has no field above it to line up with, and its label is a
+      // sentence rather than a caption — give it the whole row.
+      ".bc-chk{grid-column:1/-1}" +
+      ".bc-chk label{display:flex;align-items:center;gap:7px;text-transform:none;font-size:12.5px;color:var(--text);letter-spacing:0;padding:4px 0}" +
+      // .fld input is width:100% for text boxes; a checkbox must not inherit that.
+      ".bc-chk input{width:auto;flex:0 0 auto;margin:0;accent-color:var(--accent)}" +
+      // ---- bracelet line rows (the Advanced fold's fixed-line editor lives in
+      //      this deck; the Bracelet panel's granted rows use the same shape) ----
+      ".bc-fam{width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
+      // The family box carries the longest text on the row, so it gets the
+      // room: 430px fits nearly every label outright (the shrink last round
+      // went too far — Shizu, 2026-08-11).
+      ".bc-slot{display:grid;grid-template-columns:44px 168px minmax(0,430px) 120px;gap:8px;align-items:end;margin-bottom:8px;justify-content:start}" +
+      ".bc-slot .sn{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;padding-bottom:7px}" +
+      "@media(max-width:640px){.bc-slot{grid-template-columns:1fr;gap:5px}.bc-slot .sn{padding-bottom:0}}" +
+      "@media(max-width:900px) and (min-width:641px){.bc-slot{grid-template-columns:44px 150px minmax(0,1fr) 110px}}";
+  }
+
+  function injectStyle() {
+    if ($("bc-deck-css")) return;
+    var st = document.createElement("style");
+    st.id = "bc-deck-css";
+    st.appendChild(document.createTextNode(styleText()));
+    (document.head || document.documentElement).appendChild(st);
+  }
+
+  // ------------------------------------------------------------------
+  // markup helpers
+  // ------------------------------------------------------------------
+
+  function opts(list, sel) {
+    var h = "", i;
+    for (i = 0; i < list.length; i++) {
+      var o = list[i], v = (o && o.v !== undefined) ? o.v : o, t = (o && o.t !== undefined) ? o.t : o;
+      h += '<option value="' + esc(v) + '"' + (String(v) === String(sel) ? " selected" : "") + ">" + esc(t) + "</option>";
+    }
+    return h;
+  }
+  // Every field carries a stable id derived from its state path, so a re-render
+  // can put the cursor back where it was.
+  function fldId(path) { return "bc-fld-" + path.replace(/\./g, "-"); }
+  function fldNum(path, label, step, gloss) {
+    return '<div class="fld"><label' + (gloss ? ' data-gloss="' + esc(gloss) + '"' : "") + ">" + esc(label) + "</label>" +
+      '<input id="' + fldId(path) + '" type="number" step="' + (step || "any") + '" data-k="' + path + '" data-t="num" value="' + esc(getPath(S, path)) + '"></div>';
+  }
+  function fldSel(path, label, list, gloss) {
+    return '<div class="fld"><label' + (gloss ? ' data-gloss="' + esc(gloss) + '"' : "") + ">" + esc(label) + "</label>" +
+      '<select id="' + fldId(path) + '" data-k="' + path + '" data-t="sel">' + opts(list, getPath(S, path)) + "</select></div>";
+  }
+  function fldChk(path, label, gloss) {
+    return '<div class="fld bc-chk"><label' + (gloss ? ' data-gloss="' + esc(gloss) + '"' : "") + ">" +
+      '<input id="' + fldId(path) + '" type="checkbox" data-k="' + path + '" data-t="chk"' + (getPath(S, path) ? " checked" : "") + "> " + esc(label) + "</label></div>";
+  }
+
+  // ------------------------------------------------------------------
+  // mouse-first controls
+  //
+  // Sliders, segmented buttons and toggles all read and write S through the
+  // same data-k path the number fields use, so persistence comes for free.
+  // Sliders are native <input type=range>; there is no custom drag code.
+  // ------------------------------------------------------------------
+
+  function chipId(path) { return fldId(path) + "-chip"; }
+  // Chip formats live in a map keyed by name so a drag can re-render the chip
+  // from the DOM alone, without hunting for the function that drew it.
+  var FMT = {
+    plus: function (v) { return "+" + v; },
+    pct: function (v) { return v + "%"; },
+    pct1: function (v) { return fx(v, 1) + "%"; },
+    lv: function (v) { return "Lv " + v; },
+    raw: function (v) { return String(v); }
+  };
+
+  /**
+   * o.cls    extra class on the row ("wep" paints the weapon track accent)
+   * o.gloss  tooltip on the label
+   * o.ticks  labels drawn under the track, one per step
+   * o.edit   the value chip becomes a number input when clicked
+   */
+  function slider(path, label, min, max, step, fmtKey, o) {
+    o = o || {};
+    var fmt = FMT[fmtKey] || FMT.raw;
+    var v = num(getPath(S, path), min), t = "";
+    if (o.ticks) {
+      t = '<div class="bc-ticks" style="grid-template-columns:repeat(' + o.ticks.length + ',1fr)">';
+      for (var i = 0; i < o.ticks.length; i++) t += "<span>" + esc(o.ticks[i]) + "</span>";
+      t += "</div>";
+    }
+    return '<div class="bc-sl' + (o.cls ? " " + o.cls : "") + '">' +
+      '<label class="lb" for="' + fldId(path) + '"' + (o.gloss ? ' data-gloss="' + esc(o.gloss) + '"' : "") + ">" + esc(label) + "</label>" +
+      '<div class="tk"><input id="' + fldId(path) + '" type="range" data-k="' + path + '" data-t="rng" data-fmt="' + esc(fmtKey) + '"' +
+        ' min="' + min + '" max="' + max + '" step="' + step + '" value="' + esc(v) + '"' +
+        (o.disabled ? " disabled" : "") + ">" + t + "</div>" +
+      '<span class="chip' + (o.edit ? " ed" : "") + '" id="' + chipId(path) + '"' +
+        (o.edit ? ' data-editk="' + path + '" data-min="' + min + '" data-max="' + max + '" data-step="' + step + '" title="Click to type an exact value"' : "") +
+        ">" + esc(fmt(v)) + "</span>" +
+      "</div>";
+  }
+
+  function segmented(path, label, options, fmt, gloss) {
+    var cur = String(getPath(S, path)), h = "", i, v;
+    for (i = 0; i < options.length; i++) {
+      v = options[i];
+      h += '<button type="button" data-seg="' + path + '" data-v="' + esc(v) + '" aria-pressed="' +
+        (String(v) === cur ? "true" : "false") + '">' + esc(fmt(v)) + "</button>";
+    }
+    return '<div class="bc-segrow"><span class="lb"' + (gloss ? ' data-gloss="' + esc(gloss) + '"' : "") + ">" + esc(label) + "</span>" +
+      '<div class="bc-seg" role="group" aria-label="' + esc(label) + '">' + h + "</div></div>";
+  }
+
+  function toggle(path, label, gloss) {
+    var on = !!getPath(S, path);
+    return '<button type="button" class="mbtn bc-tgl" data-tgl="' + path + '" aria-pressed="' + (on ? "true" : "false") + '"' +
+      (gloss ? ' data-gloss="' + esc(gloss) + '"' : "") + ">" + esc(label) + " · " + (on ? "on" : "off") + "</button>";
+  }
+
+  // ------------------------------------------------------------------
+  // the deck itself
+  // ------------------------------------------------------------------
+
+  function deckMarkup() {
+    return '' +
+      '<div class="inputs" id="bc-inputs">' +
+      '  <div class="ihdr"><span>Character &amp; bracelet<span class="bc-busy" id="bc-busy"></span></span>' +
+      '    <span class="tgl" id="bc-toggle"><span id="bc-caret">&#9662;</span></span></div>' +
+      '  <div id="bc-inputs-body">' +
+      '    <div class="bc-prov" id="bc-prov" style="display:none"></div>' +
+      '    <div id="bc-top"></div>' +
+      '    <div class="bc-deck">' +
+      '      <div class="bc-col">' +
+      '        <div class="bc-gearhdr"><div class="subh">Gear</div>' +
+      '          <div class="bc-ilvl"><div class="k" data-gloss="The mean of your six pieces\' item levels, live. Serca level 0 is item level 1675 and every honing level is +5, so +25 across the board is 1800. Item level itself does not enter the damage math — the honing levels behind it do.">Item level</div>' +
+      '            <div class="v" id="bc-ilvl">—</div></div></div>' +
+      '        <div id="bc-gear"></div>' +
+      '        <div id="bc-kit"></div>' +
+      '        <div class="barrow">' +
+      '          <button class="mbtn" id="bc-advtoggle" type="button">Advanced ▾</button>' +
+      '          <button class="mbtn" id="bc-reset" type="button">Reset</button>' +
+      '        </div>' +
+      '      </div>' +
+      '      <div class="bc-col">' +
+      '        <div class="subh">Fight</div>' +
+      '        <div id="bc-fight"></div>' +
+      '        <div class="subh">Traits</div>' +
+      '        <div id="bc-traitw"></div>' +
+      '        <div class="subh">Skills — share, crit rate, crit damage</div>' +
+      '        <div id="bc-skills"></div>' +
+      '        <div class="barrow"><button class="mbtn" id="bc-addskill" type="button">+ Add skill</button></div>' +
+      '        <div class="subh">Economy</div>' +
+      '        <div id="bc-econ"></div>' +
+      '      </div>' +
+      '    </div>' +
+      '    <div id="bc-adv" style="display:none"></div>' +
+      '  </div>' +
+      '</div>';
+  }
+
+  // ------------------------------------------------------------------
+  // input rendering
+  // ------------------------------------------------------------------
+
+  function renderTop() {
+    var h = '<div class="ig">';
+    h += fldSel("grade", "Grade", [{ v: "ancient", t: "Ancient" }, { v: "relic", t: "Relic" }],
+      "Ancient bracelets roll 2 or 3 granted slots and higher line values; Relic rolls 1 or 2.");
+    h += fldSel("slots", "Granted slots", (function () {
+      var ch = slotChoices(), o = [], j;
+      for (j = 0; j < ch.length; j++) o.push({ v: ch[j], t: ch[j] + " slots" });
+      return o;
+    })(), "The rerollable lines. Ancient: 3 slots on 25% of drops, 2 on 75%. Slot count moves the value of an unrolled bracelet a lot.");
+    h += fldNum("rollsLeft", "Rolls left", "1",
+      "A fresh bracelet has 4 rolls plus up to 3 reconversion-ticket rolls = 7. The cut flow counts this down.");
+    h += "</div>";
+    h += fldChk("useOverride", "Enter WP / main stat directly",
+      "Skip the honing sliders and type the two raw numbers straight off your character sheet (before the % buckets).");
+    $("bc-top").innerHTML = h;
+  }
+
+  // ---- left column: GEAR ----
+
+  function renderGear() {
+    var h = "", i, k;
+    if (S.useOverride) {
+      h += '<div class="ig">';
+      h += fldNum("ov.mainStatRaw", "Main stat (raw)", "1", "Before the main-stat % bucket: the five armour pieces + accessories + base + roster.");
+      h += fldNum("ov.weaponPowerRaw", "Weapon power (raw)", "1", "Before the weapon-power % bucket: the weapon's table value.");
+      h += "</div>";
+      h += '<div class="note">The percentage buckets still apply on top: main stat ' + fx(S.adv.msPct, 1) +
+        "%, weapon power " + fx(wpPctOf(), 1) + "%, attack power " + fx(baseApPctOf(), 1) +
+        "%. Change them under Advanced.</div>";
+    } else {
+      for (i = 0; i < PIECES.length; i++) {
+        k = PIECES[i][0];
+        h += slider("gear." + k, PIECES[i][1], 0, 25, 1, "plus", {
+          cls: k === "weapon" ? "wep" : "",
+          gloss: k === "weapon"
+            ? "Serca honing level of the weapon. It alone sets weapon power; +25 is item level 1800."
+            : "Serca honing level of the " + PIECES[i][1].toLowerCase() + ". The five armour pieces feed main stat."
+        });
+      }
+    }
+    $("bc-gear").innerHTML = h;
+    updateIlvl();
+  }
+
+  /** The big number the eye checks after every slider move. */
+  function updateIlvl() {
+    var el = $("bc-ilvl");
+    if (!el) return;
+    el.textContent = S.useOverride ? "—" : fx(ilvlExact(), 2);
+  }
+
+  function renderKit() {
+    var box = $("bc-kit");
+    if (!box) return;
+    if (S.useOverride) { box.innerHTML = ""; return; }
+    var pc = function (v) { return v + "%"; };
+    var h = "";
+    h += segmented("kit.neck", "Neck dmg", [0, 0.7, 1.6, 2.6], pc,
+      "Your necklace's additional-damage line. It joins one additive pool with the weapon, pet and astrogem grid, and a bracelet line worth +3% is diluted against that whole pool. 0.7% is the low tier, 2.6% a high roll, 0% no line at all.");
+    h += segmented("kit.ear1", "Earring 1 WP", [0, 0.8, 1.8, 3], pc,
+      "The first earring's weapon-power line. Both earrings plus karma make the weapon-power percentage bucket, which multiplies your raw weapon power and every flat weapon-power line the bracelet gives you.");
+    h += segmented("kit.ear2", "Earring 2 WP", [0, 0.8, 1.8, 3], pc,
+      "The second earring's weapon-power line. Same bucket as the first.");
+    h += slider("kit.gems", "Damage gems", 6, 10, 1, "lv",
+      { ticks: ["6", "7", "8", "9", "10"],
+        gloss: "All eleven damage gems at this level. Per gem: lv6 0.4% · lv7 0.6% · lv8 0.8% · lv9 1.0% · lv10 1.2% attack power. It cancels out of most line ratios, but it shifts the balance between the square-root term and flat attack power." });
+    h += '<div class="barrow">' +
+      toggle("kit.stone", "9/7 stone",
+        "A 9/7 ability stone is +1.5% attack power on top of the eleven gems. Turn it off for a 9/6 or worse.") +
+      toggle("kit.master",
+        "Master", "The Master ark-grid node. Shizu's ruling: it counts as +7% additional damage and nothing else, which overrides the sheet reading that also credits crit rate.") +
+      "</div>";
+    h += '<div class="note" data-gloss="The two percentage buckets these controls add up to. Weapon power = earring 1 + earring 2 + karma. Attack power = eleven gems + the ability stone. Both are overridable under Advanced.">' +
+      "Weapon power bucket " + fx(wpPctOf(), 1) + "% · attack power bucket " + fx(baseApPctOf(), 1) + "%.</div>";
+    box.innerHTML = h;
+  }
+
+  /** The one derived line under the gem slider that a drag has to keep honest. */
+  function updateKitNote() {
+    var box = $("bc-kit");
+    if (!box) return;
+    var n = box.getElementsByClassName("note");
+    if (n.length) n[0].textContent = "Weapon power bucket " + fx(wpPctOf(), 1) +
+      "% · attack power bucket " + fx(baseApPctOf(), 1) + "%.";
+  }
+
+  // ---- right column: FIGHT / TRAITS / SKILLS / ECONOMY ----
+
+  function renderFight() {
+    var h = "";
+    h += slider("fight.back", "Back", 0, 100, 1, "pct",
+      { gloss: "How much of your damage lands from behind. A back-attack line is multiplied by this before it scores, so drop it to 0 if you never hit the back." });
+    h += slider("fight.front", "Front", 0, 100, 1, "pct",
+      { gloss: "How much of your damage lands on the head or front. Scales the front-attack lines the same way." });
+    h += slider("fight.nonDir", "Hitmaster", 0, 100, 1, "pct",
+      { gloss: "How much of your damage comes from skills with no positional requirement — what the Hitmaster lines pay for. Awakening does not count." });
+    h += slider("fight.cdWeight", "CD penalty wt", 0, 100, 1, "pct",
+      { gloss: "Family 15 buys damage with +2% cooldown. At 100% you are judged on burst, where the extra cooldown never bites; at 0% on sustained, where the damage is divided by 1.02. 70% is the shipped assumption." });
+    h += '<div class="barrow">' +
+      toggle("fight.demon", "Demon boss",
+        "On: the fight is a Demon or Archdemon boss, so demon-damage lines score in full — still diluted by the demon damage you already carry from cards and pets. Off: they score nothing.") +
+      "</div>";
+    $("bc-fight").innerHTML = h;
+  }
+
+  function renderTraitWeights() {
+    var h = "";
+    h += slider("fight.wSpec", "Spec weight", 0, 4, 0.1, "pct1",
+      { gloss: "What 100 points of Specialization is worth to your class, in % damage. There is no class table behind this — it is your call. A 120-point Spec line then scores value × weight ÷ 100." });
+    h += slider("fight.wSwift", "Swift weight", 0, 4, 0.1, "pct1",
+      { gloss: "What 100 points of Swiftness is worth to your class, in % damage. Crit needs no weight: it converts exactly, at 25 points of crit rate per 699 trait points, and is worth whatever that is to your skills." });
+    $("bc-traitw").innerHTML = h;
+  }
+
+  /**
+   * Skills stay TYPED (Shizu reversed the slider call for this block only):
+   * a narrow name box and three compact number fields per skill. The share
+   * field is still policed — the numbers always add to exactly 100.
+   */
+  function renderSkills() {
+    var h = "", i, one = S.skills.length < 2;
+    for (i = 0; i < S.skills.length; i++) {
+      var s = S.skills[i];
+      h += '<div class="bc-skill">' +
+        '<div class="fld"><label>Name</label>' +
+        '<input type="text" data-sk="' + i + '" data-f="name" value="' + esc(s.name || "") + '" placeholder="name" aria-label="Skill name"></div>' +
+        '<div class="fld"><label data-gloss="How much of your damage this skill deals. The shares always add to exactly 100 — type one and the others move to make room. With a single skill it is locked at 100.">Share %</label>' +
+        '<input id="bc-sk-share-' + i + '" type="number" step="1" min="0" max="100" data-sk="' + i + '" data-f="share" value="' + esc(s.share) + '"' +
+        (one ? " disabled" : "") + "></div>" +
+        '<div class="fld"><label data-gloss="This skill\'s crit rate before any bracelet line. A crit-rate line is capped at 100%, which is why it quietly dies on a high-crit build.">Crit rate %</label>' +
+        '<input id="bc-sk-cr-' + i + '" type="number" step="0.1" data-sk="' + i + '" data-f="cr" value="' + esc(s.cr) + '"></div>' +
+        '<div class="fld"><label data-gloss="What a crit deals, as a multiple. 280% means a crit hits for 2.8 times, not 3.8.">Crit dmg %</label>' +
+        '<input id="bc-sk-cd-' + i + '" type="number" step="1" data-sk="' + i + '" data-f="cd" value="' + esc(s.cd) + '"></div>' +
+        '<button class="bc-x" type="button" data-delsk="' + i + '"' + (one ? " disabled" : "") +
+        ' title="Remove this skill">&times;</button>' +
+        "</div>";
+    }
+    $("bc-skills").innerHTML = h;
+  }
+
+  // ---- economy: a linear baseline and a LOG gold slider ----
+  // Gold per 1% spans two orders of magnitude, so the track is log10: position
+  // 0-200 maps to 100k-10M, each step about +2.3%.
+  var GPD_MIN = 100000, GPD_MAX = 10000000, GPD_STEPS = 200;
+  function sig3(v) {
+    if (!(v > 0)) return 0;
+    var e = Math.pow(10, Math.floor(Math.log(v) / Math.LN10) - 2);
+    return Math.round(v / e) * e;
+  }
+  function gpdPos(v) {
+    v = clamp(num(v, GPD_MIN), GPD_MIN, GPD_MAX);
+    return Math.round(GPD_STEPS * (Math.log(v) / Math.LN10 - 5) / 2);
+  }
+  function gpdFromPos(pos) {
+    return sig3(Math.pow(10, 5 + (clamp(pos, 0, GPD_STEPS) / GPD_STEPS) * 2));
+  }
+
+  function renderEcon() {
+    var h = '<div class="bc-sl">' +
+      '<label class="lb" for="bc-gpd" data-gloss="What one percent of damage is worth to you in gold. It is a rate you choose, not a market read — the same convention the accessory and astrogem tools use, so a bracelet, an accessory and a gem can be priced against each other. Higher for a whale roster, lower for a fresh one. The track is logarithmic: 100k at the left, 10M at the right.">Gold per 1%</label>' +
+      '<div class="tk"><input id="bc-gpd" type="range" data-gpd="1" min="0" max="' + GPD_STEPS + '" step="1" value="' + gpdPos(S.econ.gpd) + '"></div>' +
+      '<span class="chip" id="bc-gpd-chip">' + esc(gold(num(S.econ.gpd, 0))) + "</span></div>";
+    h += slider("econ.baseline", "Baseline %", 0, 25, 0.5, "pct1", {
+      edit: true,
+      gloss: "The bracelet you would wear instead. Worth is (expected final − baseline) × gold per 1%, so leaving it at 0 prices this bracelet against no bracelet at all. Click the number to type an exact one."
+    });
+    $("bc-econ").innerHTML = h;
+  }
+
+  function renderAdvanced() {
+    var box = $("bc-adv");
+    if (!box) return;
+    box.style.display = S.advOpen ? "block" : "none";
+    var b = $("bc-advtoggle");
+    if (b) b.textContent = S.advOpen ? "Advanced ▴" : "Advanced ▾";
+    if (!S.advOpen) { box.innerHTML = ""; return; }
+
+    var h = '<div class="subh">Stat buckets</div><div class="ig">';
+    h += fldNum("adv.msPct", "Main stat %", "0.1", "Everything multiplying raw main stat: 8% skins + 1% stronghold ranch by default.");
+    h += fldNum("adv.karmaWp", "Karma weapon power %", "0.1", "Karma's share of the weapon-power bucket. The two earring lines are set in the Gear column.");
+    h += fldChk("adv.baseApOverride", "Override attack power % (ignore the gem slider)",
+      "By default the attack-power bucket is eleven gems at their level plus the ability stone. Tick this to type it instead.");
+    h += fldNum("adv.baseApPct", "Attack power %", "0.1", "It cancels out of most ratios but shifts the balance between the square-root term and flat attack power.");
+    h += fldNum("adv.flatAP", "Flat attack power", "1", "Ark-grid cores. Flat attack power is what stops a weapon-power line from being a pure square-root ratio.");
+    h += fldNum("adv.accessoryMainStat", "Accessory main stat", "1", "Neck 17,857 + two earrings 13,889 + two rings 12,897, all at the top of their range with no flat-stat rolls.");
+    h += fldNum("adv.rosterBonus", "Roster bonus", "1", "Main stat from roster level.");
+    h += "</div>";
+
+    h += '<div class="subh">Additional damage pool</div><div class="ig">';
+    h += fldNum("adv.addWeapon", "Weapon quality %", "0.1", "A 100-quality weapon gives 30%.");
+    h += fldNum("adv.addPet", "Pet %", "0.1", "Pet additional damage.");
+    h += fldNum("adv.addAstrogem", "Astrogem grid %", "0.01", "60 grid levels × 0.080667% per level.");
+    h += "</div>";
+    h += '<div class="note">The necklace line and the Master node are in the Gear column.</div>';
+
+    h += '<div class="subh">Fight assumptions</div><div class="ig">';
+    h += fldNum("adv.staggerShare", "Stagger windows %", "1", "Share of your damage dealt while the boss is staggered.");
+    h += fldNum("adv.demonBase", "Demon damage held %", "0.1", "Demon damage you already carry from cards and pets — it dilutes a demon line.");
+    h += fldNum("adv.shieldUptime", "Shield uptime %", "1", "How much of the fight your party sits under a shield, for the shielded-target line.");
+    h += fldNum("adv.enemyDR", "Enemy damage reduction %", "1", "The boss's damage reduction before any shred. It sets how much a defense shred is worth: gain = (D+K)/(D(1−A)+K).");
+    h += fldNum("adv.allyCount", "Ally DPS in party", "1", "How many other damage dealers share your party debuffs. Each is assumed to deal what you deal before the line.");
+    h += "</div>";
+    h += '<div class="note">The conditional weapon-power families (20, 21 and 22) are no longer knobs: they are scored at max stacks and full uptime.</div>';
+
+    h += '<div class="subh">Fixed lines (come with the drop, never rerolled)</div>';
+    h += '<div class="bc-sub">Optional, and separate from the two combat traits above. They score their own damage and they lock their family and category slot out of every future roll, so they change what an empty bracelet is worth.</div>';
+    h += '<div id="bc-fixedrows"></div>';
+    h += '<div class="barrow"><button class="mbtn" id="bc-addfixed" type="button"' + (S.fixedRows.length >= 2 ? " disabled" : "") + '>+ Add fixed line</button></div>';
+
+    box.innerHTML = h;
+    var apField = $(fldId("adv.baseApPct"));
+    if (apField && !S.adv.baseApOverride) { apField.value = fx(baseApPctOf(), 2); apField.disabled = true; }
+    fireAdvanced();
+  }
+
+  /**
+   * The fixed-line editor's ROWS are drawn by whoever owns the bracelet-line
+   * pickers (app.js): the fold is a deck control, but a bracelet row is not.
+   * Every hook is called after the fold renders, with #bc-fixedrows already in
+   * the document. Unregistered, the container simply stays empty.
+   */
+  var advHooks = [];
+  function fireAdvanced() {
+    for (var i = 0; i < advHooks.length; i++) {
+      try { advHooks[i]($("bc-fixedrows")); } catch (e) {}
+    }
+  }
+
+  /** Every input control, rebuilt. Used by mount, by Reset and by a shape change. */
+  function renderAll() {
+    if (!deckEl) return;
+    renderProvStrip();
+    renderTop(); renderGear(); renderKit(); renderFight(); renderTraitWeights();
+    renderSkills(); renderEcon(); renderAdvanced();
+    markProvenance();
+  }
+
+  // ------------------------------------------------------------------
+  // events
+  // ------------------------------------------------------------------
+
+  /** Rebuild markup, then put the cursor back on the element it was on. */
+  function keepFocus(fn) {
+    var a = document.activeElement, id = (a && a.id) ? a.id : null;
+    fn();
+    if (id) { var el = $(id); if (el && el.focus) el.focus(); }
+  }
+
+  var SHAPE_FIELDS = { grade: 1, slots: 1, useOverride: 1 };
+
+  function onFieldChange(el) {
+    var path = el.getAttribute && el.getAttribute("data-k"), t = el.getAttribute("data-t");
+    if (!path) return false;
+    if (t === "chk") setPath(S, path, !!el.checked);
+    else if (t === "rng") setPath(S, path, Number(el.value));
+    else if (t === "num") setPath(S, path, num(el.value, getPath(S, path)));
+    else setPath(S, path, isNaN(Number(el.value)) ? el.value : Number(el.value));
+    if (path === "rollsLeft") S.rollsTotal = Math.max(S.rollsTotal, num(el.value, 7));
+    if (path === "grade" || path === "slots") { S.locks = null; S.rolled = null; }
+    var unmarked = clearProv(path);
+    save();
+    if (t === "rng") {
+      // Mid-drag: repaint the chip and the derived read-outs only. Rebuilding
+      // the control would tear the slider out from under the mouse.
+      var chip = $(chipId(path)), f = FMT[el.getAttribute("data-fmt")] || FMT.raw;
+      if (chip) chip.textContent = f(Number(el.value));
+      if (path.indexOf("gear.") === 0) updateIlvl();
+      if (path === "kit.gems") updateKitNote();
+    }
+    if (SHAPE_FIELDS[path]) {
+      if (path === "grade") fitTraits();
+      fitRows();
+      keepFocus(renderAll);
+    } else if (path === "adv.baseApOverride") {
+      keepFocus(function () { renderKit(); renderAdvanced(); markProvenance(); });
+    } else if (path.indexOf("adv.") === 0) {
+      // Karma and the attack-power override feed the two derived buckets the
+      // Gear column prints; refresh that line without rebuilding the field.
+      updateKitNote();
+    }
+    if (unmarked) { renderProvStrip(); markProvenance(); }
+    notify({ path: path, shape: !!SHAPE_FIELDS[path], immediate: false });
+    return true;
+  }
+
+  /** Turn a value chip into a small number input, and back on blur or Enter. */
+  function editChip(chip, get, set) {
+    if (chip.getElementsByTagName("input").length) return;
+    var lo = Number(chip.getAttribute("data-min")), hi = Number(chip.getAttribute("data-max"));
+    var step = num(chip.getAttribute("data-step"), 1);
+    var inp = document.createElement("input");
+    inp.type = "number"; inp.min = lo; inp.max = hi; inp.step = step < 1 ? "0.01" : "1"; inp.value = get();
+    chip.textContent = "";
+    chip.appendChild(inp);
+    inp.focus();
+    inp.select();
+    // Blur and change both mean "done"; whichever lands first closes the box.
+    var closed = false;
+    function finish(keep) {
+      if (closed) return;
+      closed = true;
+      if (keep !== false) {
+        var v = clamp(num(inp.value, get()), lo, hi);
+        set(step < 1 ? Math.round(v * 100) / 100 : Math.round(v));
+        save();
+      }
+      renderAll();
+      notify({ immediate: true });
+    }
+    inp.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter") finish();
+      else if (ev.key === "Escape") finish(false);
+      ev.stopPropagation();
+    });
+    inp.addEventListener("blur", function () { finish(); });
+    inp.addEventListener("change", function (ev) { ev.stopPropagation(); finish(); });
+    inp.addEventListener("input", function (ev) { ev.stopPropagation(); });
+  }
+
+  function bindDeck(panel) {
+    function fieldEvent(e) {
+      var el = e.target;
+      if (el.id === "bc-gpd") {
+        S.econ.gpd = gpdFromPos(Number(el.value));
+        var gc = $("bc-gpd-chip");
+        if (gc) gc.textContent = gold(S.econ.gpd);
+        save();
+        notify({ path: "econ.gpd", immediate: false });   // gold is not in the solve key: a cache hit
+        return;
+      }
+      if (el.getAttribute && el.getAttribute("data-sk") !== null && el.getAttribute("data-f")) {
+        var i = Number(el.getAttribute("data-sk")), f = el.getAttribute("data-f");
+        if (!S.skills[i]) return;
+        if (f === "name") S.skills[i].name = el.value;
+        else if (f === "share") {
+          // An empty or half-typed box must not rebalance to nonsense; wait for
+          // a number, then move the others to keep the total at exactly 100.
+          if (el.value === "" || isNaN(Number(el.value))) return;
+          setShare(i, el.value);
+          syncShares(i);
+        } else S.skills[i][f] = num(el.value, S.skills[i][f]);
+        if (clearProv("skills." + i + "." + f)) { renderProvStrip(); markProvenance(); }
+        save();
+        notify({ path: "skills", immediate: false });
+        return;
+      }
+      onFieldChange(el);
+    }
+    // Selects fire input then change; both paths are idempotent.
+    panel.addEventListener("input", fieldEvent);
+    panel.addEventListener("change", fieldEvent);
+
+    // Leaving a share box snaps it to the number actually stored, so a typed
+    // 150 or an emptied box cannot sit there contradicting the total.
+    panel.addEventListener("focusout", function (e) {
+      var el = e.target;
+      if (!el.getAttribute || el.getAttribute("data-f") !== "share") return;
+      var i = Number(el.getAttribute("data-sk"));
+      if (!S.skills[i]) return;
+      if (el.value === "" || isNaN(Number(el.value))) { setShare(i, S.skills[i].share); save(); }
+      renderSkills(); markProvenance();
+      notify({ path: "skills", immediate: false });
+    });
+
+    panel.addEventListener("click", function (e) {
+      var t = e.target, d, seg, tgl, chip;
+      // A click can land on the chip's own text node in some browsers.
+      if (t && t.className && String(t.className).indexOf("chip") >= 0) chip = t;
+
+      if ((seg = t.getAttribute && t.getAttribute("data-seg"))) {
+        var raw = t.getAttribute("data-v");
+        setPath(S, seg, (raw !== "" && !isNaN(Number(raw))) ? Number(raw) : raw);
+        clearProv(seg);
+        save();
+        keepFocus(function () { renderProvStrip(); renderKit(); renderAdvanced(); markProvenance(); });
+        notify({ path: seg, immediate: true });
+        return;
+      }
+      if ((tgl = t.getAttribute && t.getAttribute("data-tgl"))) {
+        setPath(S, tgl, !getPath(S, tgl));
+        clearProv(tgl);
+        save();
+        keepFocus(function () { renderProvStrip(); renderKit(); renderFight(); renderAdvanced(); markProvenance(); });
+        notify({ path: tgl, immediate: true });
+        return;
+      }
+      if (chip && chip.getAttribute("data-editk")) {
+        var ep = chip.getAttribute("data-editk");
+        clearProv(ep);
+        editChip(chip, function () { return getPath(S, ep); }, function (v) { setPath(S, ep, v); });
+        return;
+      }
+
+      if (t.id === "bc-addskill") {
+        S.skills.push({ name: "", share: 0, cr: 90, cd: 280 });
+        normalizeShares();                       // a new skill enters at an equal share
+        var eq = distribute((function () { var w = [], j; for (j = 0; j < S.skills.length; j++) w.push(1); return w; })(), 100), j2;
+        for (j2 = 0; j2 < S.skills.length; j2++) S.skills[j2].share = eq[j2];
+        save(); renderSkills(); markProvenance();
+        notify({ path: "skills", immediate: true });
+      } else if (t.getAttribute && (d = t.getAttribute("data-delsk")) !== null && d !== "") {
+        if (S.skills.length > 1) {
+          S.skills.splice(Number(d), 1);
+          normalizeShares();
+          save(); renderSkills(); markProvenance();
+          notify({ path: "skills", immediate: true });
+        }
+      } else if (t.id === "bc-advtoggle") { S.advOpen = !S.advOpen; save(); renderAdvanced(); markProvenance(); }
+      else if (t.id === "bc-addfixed") {
+        if (S.fixedRows.length < 2) { S.fixedRows.push(blankRow()); save(); renderAdvanced(); notify({ path: "fixedRows", immediate: false }); }
+      } else if (t.id === "bc-prov-reimport") { resetToImported(); }
+      else if (t.id === "bc-prov-defaults" || t.id === "bc-reset") {
+        if (window.confirm("Reset every input, the bracelet and this session's rolls?")) Profile.reset();
+      }
+    });
+
+    // The whole header row collapses the panel, not just the little arrow.
+    var hdr = panel.getElementsByClassName("ihdr")[0];
+    if (hdr) hdr.addEventListener("click", function () {
+      var body = $("bc-inputs-body"), c = $("bc-caret");
+      var hidden = body.style.display === "none";
+      body.style.display = hidden ? "" : "none";
+      c.innerHTML = hidden ? "&#9662;" : "&#9656;";
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // the one deck element
+  // ------------------------------------------------------------------
+
+  var deckEl = null;
+  function buildDeck() {
+    if (deckEl) return deckEl;
+    injectStyle();
+    var tmp = document.createElement("div");
+    tmp.innerHTML = deckMarkup();
+    deckEl = tmp.firstChild;
+    while (deckEl && deckEl.nodeType !== 1) deckEl = deckEl.nextSibling;
+    bindDeck(deckEl);
+    return deckEl;
+  }
+
+  // ------------------------------------------------------------------
+  // public API
+  // ------------------------------------------------------------------
+
+  load();
+  fitRows();
+
+  var Profile = {
+    get: function () { return S; },
+    profile: function () { return buildProfile(); },
+
+    /** Merge a patch (one level deep for the nested blocks), persist, notify. */
+    set: function (patch) {
+      if (!patch) return S;
+      var k;
+      for (k in patch) if (Object.prototype.hasOwnProperty.call(patch, k)) {
+        if (NESTED[k] && patch[k] && S[k]) {
+          for (var a in patch[k]) if (Object.prototype.hasOwnProperty.call(patch[k], a)) S[k][a] = patch[k][a];
+        } else {
+          S[k] = patch[k];
+        }
+      }
+      fitRows();
+      save();
+      renderAll();
+      notify({ shape: true, immediate: true, set: true });
+      return S;
+    },
+
+    /**
+     * Put the control deck inside hostEl. There is ONE deck (see the header): this
+     * MOVES it, so the tab that called mount() last owns it.
+     */
+    mount: function (hostEl) {
+      if (!hostEl) return null;
+      var el = buildDeck();
+      if (el.parentNode !== hostEl) hostEl.appendChild(el);
+      renderAll();
+      return el;
+    },
+    /** Where the deck is right now, or null before the first mount. */
+    host: function () { return deckEl ? deckEl.parentNode : null; },
+
+    onChange: function (cb) {
+      if (typeof cb !== "function") return function () {};
+      listeners.push(cb);
+      return function () {
+        var i = listeners.indexOf(cb);
+        if (i !== -1) listeners.splice(i, 1);
+      };
+    },
+
+    reset: function () {
+      try { localStorage.removeItem(LS_KEY); } catch (e) { /* ignore */ }
+      assignInto(S, defaults());
+      fitRows();
+      renderAll();
+      notify({ reset: true, shape: true, immediate: true });
+    },
+
+    // ---- state maintenance the other modules need ----
+    save: save,                 // after a direct mutation (the cut flow rewrites rows)
+    fit: fitRows,               // re-fit rows / traits / shares after a direct mutation
+    render: renderAll,          // redraw every control (after a direct mutation)
+    blankRow: blankRow,
+    notify: notify,
+
+    // ---- derived numbers, shared with every tab ----
+    ilvl: ilvlExact,
+    baseStats: baseStats,
+    wpPct: wpPctOf,
+    baseApPct: baseApPctOf,
+    traitBand: traitBand,
+    traitValues: traitValues,
+    traitWeights: traitWeights,
+    traitOnCount: traitOnCount,
+    TRAIT_KEYS: TRAIT_KEYS,
+    TRAIT_LABELS: TRAIT_LABELS,
+
+    // ---- family letters (the picker's, and the Tier List's, single source) ----
+    famGrades: famGrades,
+    letterOf: letterOf,
+    GRADE_COLOR: GRADE_COLOR,
+    JUNK: JUNK,
+
+    // ---- provenance ----
+    applyImported: applyImported,
+    provCount: provCount,
+    character: function () { return S.char; },
+    setCharacter: function (c) { S.char = c || null; save(); renderProvStrip(); },
+
+    /** Register a renderer for the Advanced fold's fixed-line rows. */
+    onAdvancedRender: function (cb) {
+      if (typeof cb !== "function") return function () {};
+      advHooks.push(cb);
+      return function () {
+        var i = advHooks.indexOf(cb);
+        if (i !== -1) advHooks.splice(i, 1);
+      };
+    }
+  };
+
+  window.Profile = Profile;
+})();

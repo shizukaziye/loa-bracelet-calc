@@ -339,6 +339,41 @@ One localStorage key, one source of truth. Calculator and Tier List each `mount(
 subscribe; a slider moved on either tab moves it on both. This also sets up any later tab
 for free — the same reason Favorites pays for itself.
 
+### As built (Fable, phase 1)
+
+```
+Profile.get()        -> the LIVE state object; its identity never changes, not even
+                        across reset(), so a module may hold the reference forever
+Profile.profile()    -> Bracelet.normalizeProfile(...) over that state
+Profile.set(patch)   // merge (one level deep for adv/gear/ov/econ/kit/fight/traits),
+                     // fit, persist, re-render, notify
+Profile.mount(host)  // MOVE the one deck into host
+Profile.onChange(cb) -> unsubscribe; cb(detail) with {path, shape, immediate, reset}
+Profile.reset()
+```
+
+Plus the maintenance and derived helpers every tab needs: `save` `fit` `render`
+`blankRow` `ilvl` `baseStats` `wpPct` `baseApPct` `traitBand` `traitValues`
+`traitWeights` `traitOnCount` `famGrades` `letterOf` `GRADE_COLOR` `JUNK`
+`applyImported` `provCount` `character` `setCharacter` `onAdvancedRender`.
+
+**One deck, re-parented — not two instances.** Every control's id is derived from its
+state path (`bc-fld-gear-head`), and focus restoration, the mid-drag chip repaint and the
+derived read-outs all find their element by that id. Two live decks would mean two
+elements per id and `$()` repainting the wrong one; making that safe means prefixing every
+id and re-rendering both decks on every keystroke — a large change to code that has to
+behave exactly as it did before. So `mount(host)` **moves** the single deck element
+(`appendChild` on a node already in the document re-parents it, listeners and all), and a
+tab claims it on activation. `app.js` re-mounts on `tabselected` for `calculator`; the Tier
+List does the same in its own pane. Only one tab is visible, so nothing is lost.
+
+**Where the seam runs.** Profile owns the state, the deck and everything derived from the
+character. `app.js` owns the bracelet — rows, fixed rows, locks, the rolled set, the
+history — and mutates `Profile.get()` in place, then calls `Profile.save()`. The one place
+they interleave is the Advanced fold's fixed-line editor, which is a deck control holding
+bracelet rows: Profile renders the fold and calls `onAdvancedRender` hooks,
+and `app.js`'s hook fills `#bc-fixedrows` with its own pickers.
+
 ### What it ranks
 
 Two views, one toggle:
