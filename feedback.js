@@ -31,7 +31,7 @@
    * same constant. Empty is a supported state, not a bug: the tab then says so
    * and points at GitHub issues, which needs no server at all.
    */
-  var WORKER_URL = "";
+  var WORKER_URL = "https://bracelet-bible.shizukaziye.workers.dev";
 
   /** Where a note goes when there is no Worker to take it. */
   var ISSUES_URL = "https://github.com/shizukaziye/loa-bracelet-calc/issues";
