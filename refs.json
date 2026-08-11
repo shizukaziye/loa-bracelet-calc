@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generated": "2026-08-11T09:44:53.887Z",
+    "generated": "2026-08-11T20:56:25.893Z",
     "modelSig": "bracelet-v1",
     "floatTolerance": 1e-8,
     "note": "Captured references for the bracelet core. Regenerate with `node tools/gen-refs.js`. Scoring is % damage in log space (D = 100*ln(multiplier)); the solver's V is the expected final score under optimal play with free rerolls."
@@ -155,19 +155,19 @@
       "grade": "relic",
       "family": 1,
       "tier": "low",
-      "damage": 0
+      "damage": 0.299550898
     },
     {
       "grade": "relic",
       "family": 1,
       "tier": "mid",
-      "damage": 0
+      "damage": 0.399202127
     },
     {
       "grade": "relic",
       "family": 1,
       "tier": "high",
-      "damage": 0
+      "damage": 0.498754151
     },
     {
       "grade": "relic",
@@ -497,19 +497,19 @@
       "grade": "relic",
       "family": 20,
       "tier": "low",
-      "damage": 1.21192544
+      "damage": 1.810132608
     },
     {
       "grade": "relic",
       "family": 20,
       "tier": "mid",
-      "damage": 1.403118934
+      "damage": 2.001326102
     },
     {
       "grade": "relic",
       "family": 20,
       "tier": "high",
-      "damage": 1.593579422
+      "damage": 2.19178659
     },
     {
       "grade": "relic",
@@ -777,19 +777,19 @@
       "grade": "ancient",
       "family": 1,
       "tier": "low",
-      "damage": 0
+      "damage": 0.399202127
     },
     {
       "grade": "ancient",
       "family": 1,
       "tier": "mid",
-      "damage": 0
+      "damage": 0.498754151
     },
     {
       "grade": "ancient",
       "family": 1,
       "tier": "high",
-      "damage": 0
+      "damage": 0.598207168
     },
     {
       "grade": "ancient",
@@ -1119,19 +1119,19 @@
       "grade": "ancient",
       "family": 20,
       "tier": "low",
-      "damage": 1.403118934
+      "damage": 2.001326102
     },
     {
       "grade": "ancient",
       "family": 20,
       "tier": "mid",
-      "damage": 1.593579422
+      "damage": 2.19178659
     },
     {
       "grade": "ancient",
       "family": 20,
       "tier": "high",
-      "damage": 1.783312512
+      "damage": 2.38151968
     },
     {
       "grade": "ancient",
@@ -1618,11 +1618,11 @@
     "goldPer1Pct": 30000,
     "traitDamage": 5.905961107,
     "plainCurrent": 0,
-    "plainFinal": 1.957792049,
+    "plainFinal": 1.992291407,
     "traitCurrent": 5.905961107,
-    "traitFinal": 7.863753156,
-    "traitValueGold": 235912.594690111,
-    "states": 2526
+    "traitFinal": 7.898252514,
+    "traitValueGold": 236947.575408522,
+    "states": 2745
   },
   "familyGrades": [
     {
@@ -1670,8 +1670,8 @@
           "letter": "F"
         },
         "special:1": {
-          "avg": 0,
-          "share": 0,
+          "avg": 0.349366592,
+          "share": 0.097815793,
           "letter": "F"
         },
         "special:2": {
@@ -1765,9 +1765,9 @@
           "letter": "S"
         },
         "special:20": {
-          "avg": 1.307448887,
-          "share": 0.366060043,
-          "letter": "C"
+          "avg": 1.905656054,
+          "share": 0.533546316,
+          "letter": "B"
         },
         "special:21": {
           "avg": 1.748190618,
@@ -1881,9 +1881,9 @@
           "letter": "F"
         },
         "special:1": {
-          "avg": 0,
-          "share": 0,
-          "letter": "F"
+          "avg": 0.448968238,
+          "share": 0.110852154,
+          "letter": "D"
         },
         "special:2": {
           "avg": 0,
@@ -1976,9 +1976,9 @@
           "letter": "S"
         },
         "special:20": {
-          "avg": 1.498276438,
-          "share": 0.369930778,
-          "letter": "C"
+          "avg": 2.096483606,
+          "share": 0.517630653,
+          "letter": "B"
         },
         "special:21": {
           "avg": 1.967480079,
@@ -2053,7 +2053,7 @@
       "label": "empty bracelet",
       "grade": "ancient",
       "lines": [],
-      "entries": 90,
+      "entries": 92,
       "pSum": 1,
       "survivingMass": 100,
       "excludedMass": 0,
@@ -2084,7 +2084,7 @@
           "family": "spec"
         }
       ],
-      "entries": 84,
+      "entries": 86,
       "pSum": 1,
       "survivingMass": 65,
       "excludedMass": 35,
@@ -2120,7 +2120,7 @@
           "tier": "high"
         }
       ],
-      "entries": 81,
+      "entries": 83,
       "pSum": 1,
       "survivingMass": 64.454540873,
       "excludedMass": 35.545459127,
@@ -2151,7 +2151,7 @@
           "family": "vitality"
         }
       ],
-      "entries": 79,
+      "entries": 81,
       "pSum": 1,
       "survivingMass": 65,
       "excludedMass": 35,
@@ -2307,7 +2307,6 @@
             "value": 13888,
             "fixed": false,
             "raw": 13888,
-            "stat": "int",
             "source": {
               "type": 2,
               "index": 11
@@ -2826,32 +2825,32 @@
       "granted": [],
       "unrolled": true,
       "currentScore": 0,
-      "expectedFinal": 3.89174087,
-      "distMean": 3.89174087,
-      "valueGold": 116752.226111713,
-      "pImprove": 0.999825024,
+      "expectedFinal": 3.926954018,
+      "distMean": 3.926954018,
+      "valueGold": 117808.620553316,
+      "pImprove": 0.999939185,
       "quantiles": {
-        "p10": 1.087534346,
-        "p25": 2.848383964,
-        "p50": 3.76149031,
-        "p75": 5.057913922,
-        "p90": 6.217456507
+        "p10": 1.233797736,
+        "p25": 2.917340931,
+        "p50": 3.779281259,
+        "p75": 5.067531135,
+        "p90": 6.225815676
       },
       "evByRollsLeft": [
-        1.073068571,
-        1.760682471,
-        2.277179959,
-        2.700034131,
-        3.060526823,
-        3.373713305,
-        3.648640528,
-        3.89174087
+        1.109718552,
+        1.802008157,
+        2.318952058,
+        2.741774962,
+        3.101634146,
+        3.413417896,
+        3.686295192,
+        3.926954018
       ],
       "bestLockMask": null,
       "maskEVTop": [],
-      "states": 2453,
-      "stateAtoms": 73,
-      "lockMasks": 71
+      "states": 2669,
+      "stateAtoms": 76,
+      "lockMasks": 74
     },
     {
       "label": "unrolled ancient, 3 slots, 7 rolls",
@@ -2861,32 +2860,32 @@
       "granted": [],
       "unrolled": true,
       "currentScore": 0,
-      "expectedFinal": 5.768372521,
-      "distMean": 5.768372521,
-      "valueGold": 173051.175640504,
-      "pImprove": 0.999999312,
+      "expectedFinal": 5.825569529,
+      "distMean": 5.825569529,
+      "valueGold": 174767.085879334,
+      "pImprove": 0.999999889,
       "quantiles": {
-        "p10": 3.176534669,
-        "p25": 4.244952608,
-        "p50": 5.751586238,
-        "p75": 7.203556912,
-        "p90": 8.539765342
+        "p10": 3.22061538,
+        "p25": 4.337425515,
+        "p50": 5.789403727,
+        "p75": 7.236620827,
+        "p90": 8.563235057
       },
       "evByRollsLeft": [
-        1.656046074,
-        2.647061389,
-        3.404962374,
-        4.030492473,
-        4.56142152,
-        5.018930044,
-        5.417607051,
-        5.768372521
+        1.716407296,
+        2.714814484,
+        3.474657672,
+        4.099925819,
+        4.629067366,
+        5.083731308,
+        5.478840305,
+        5.825569529
       ],
       "bestLockMask": null,
       "maskEVTop": [],
-      "states": 52643,
-      "stateAtoms": 73,
-      "lockMasks": 2381
+      "states": 59999,
+      "stateAtoms": 76,
+      "lockMasks": 2594
     },
     {
       "label": "unrolled relic, 2 slots, 7 rolls",
@@ -2896,32 +2895,32 @@
       "granted": [],
       "unrolled": true,
       "currentScore": 0,
-      "expectedFinal": 3.209212761,
-      "distMean": 3.209212761,
-      "valueGold": 96276.382842086,
-      "pImprove": 0.999825024,
+      "expectedFinal": 3.242469842,
+      "distMean": 3.242469842,
+      "valueGold": 97274.09527201,
+      "pImprove": 0.999939185,
       "quantiles": {
-        "p10": 0.867520896,
-        "p25": 2.283953339,
-        "p50": 3.071473299,
-        "p75": 4.221950621,
-        "p90": 5.198601166
+        "p10": 0.912662067,
+        "p25": 2.32834921,
+        "p50": 3.095879267,
+        "p75": 4.239754658,
+        "p90": 5.227265559
       },
       "evByRollsLeft": [
-        0.854137892,
-        1.41858786,
-        1.849137435,
-        2.203734128,
-        2.506834619,
-        2.770785926,
-        3.003105696,
-        3.209212761
+        0.883783353,
+        1.452651378,
+        1.884206869,
+        2.239430746,
+        2.542722622,
+        2.806289345,
+        3.037682952,
+        3.242469842
       ],
       "bestLockMask": null,
       "maskEVTop": [],
-      "states": 2453,
-      "stateAtoms": 73,
-      "lockMasks": 71
+      "states": 2669,
+      "stateAtoms": 76,
+      "lockMasks": 74
     },
     {
       "label": "mid-roll ancient 3 slots, 4 left",
@@ -2947,9 +2946,9 @@
       ],
       "unrolled": false,
       "currentScore": 6.31333768,
-      "expectedFinal": 6.942329079,
-      "distMean": 6.942329079,
-      "valueGold": 208269.872378644,
+      "expectedFinal": 6.949899989,
+      "distMean": 6.949899989,
+      "valueGold": 208496.999664116,
       "pImprove": 0.429758489,
       "quantiles": {
         "p10": 6.31333768,
@@ -2960,17 +2959,17 @@
       },
       "evByRollsLeft": [
         6.31333768,
-        6.484052283,
-        6.645311937,
-        6.797849199,
-        6.942329079
+        6.486392341,
+        6.649671684,
+        6.803942327,
+        6.949899989
       ],
       "bestLockMask": {
         "lockedKeys": [
           "special:23:low",
           "special:32:high"
         ],
-        "ev": 6.942329079
+        "ev": 6.949899989
       },
       "maskEVTop": [
         {
@@ -2978,25 +2977,25 @@
             "special:23:low",
             "special:32:high"
           ],
-          "ev": 6.942329079
+          "ev": 6.949899989
         },
         {
           "lockedKeys": [
             "special:32:high"
           ],
-          "ev": 6.937535094
+          "ev": 6.946278107
         },
         {
           "lockedKeys": [
             "basic:mainStat:b6",
             "special:32:high"
           ],
-          "ev": 6.900891031
+          "ev": 6.907643201
         }
       ],
-      "states": 52642,
-      "stateAtoms": 73,
-      "lockMasks": 2381
+      "states": 59998,
+      "stateAtoms": 76,
+      "lockMasks": 2594
     },
     {
       "label": "near-final ancient 2 slots, 1 left",
@@ -3056,9 +3055,9 @@
           "ev": 8.189223492
         }
       ],
-      "states": 2452,
-      "stateAtoms": 73,
-      "lockMasks": 71
+      "states": 2668,
+      "stateAtoms": 76,
+      "lockMasks": 74
     }
   ],
   "adviseSetup": {
@@ -3120,7 +3119,7 @@
       ],
       "rollsLeft": 2,
       "verdict": "replace",
-      "vKeep": 5.50611858,
+      "vKeep": 5.506950192,
       "vNew": 8.208792152,
       "scoreKeep": 5.357694441,
       "scoreNew": 8.189177234
@@ -3151,8 +3150,8 @@
       ],
       "rollsLeft": 2,
       "verdict": "keep",
-      "vKeep": 5.50611858,
-      "vNew": 1.760682471,
+      "vKeep": 5.506950192,
+      "vNew": 1.802008157,
       "scoreKeep": 5.357694441,
       "scoreNew": 0
     },

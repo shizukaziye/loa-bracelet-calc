@@ -177,7 +177,9 @@ def _ap_wp(dw):
     return math.sqrt(703826 * 1.09 * (241367 + dw) * 1.085 / 6) * 1.125 + 2700
 
 
-check("analytic.f20.ancient.high", r9(_d(20, "high")), r9(_D(_ap_wp(1480 * 6) / _ap0)))
+# family 20 stacks 6x(+1% atk/move speed) alongside the weapon power, and log
+# space is additive, so the expected value carries both terms.
+check("analytic.f20.ancient.high", r9(_d(20, "high")), r9(_D(_ap_wp(1480 * 6) / _ap0) + _D(1.006)))
 check("analytic.f21.ancient.high", r9(_d(21, "high")),
       r9(_D((_ap_wp(9000) / _ap0) * (_ap_wp(2400 * 1.0) / _ap0))))
 check("analytic.f22.ancient.high", r9(_d(22, "high")),
@@ -202,7 +204,8 @@ for _id in (2, 3, 4, 5, 6, 7, 8, 9, 10):
     check("analytic.junk.%d" % _id, r9(_d(_id, "high")), 0)
 check("analytic.vitality", r9(B.line_damage({"cat": "basic", "family": "vitality", "value": 6000}, "ancient", P)), 0)
 check("analytic.trait", r9(B.line_damage({"cat": "trait", "family": "crit", "value": 120}, "ancient", P)), 0)
-check("analytic.f1.default", r9(_d(1, "high")), 0)
+# +6% atk/move speed at 0.1% damage per 1% = +0.600% damage = 100*ln(1.006)
+check("analytic.f1.default", r9(_d(1, "high")), 0.598207168)
 for _id in range(11, 34):
     if _id in (28, 29, 30):
         continue

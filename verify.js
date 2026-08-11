@@ -164,7 +164,9 @@ refs.profileVariants.forEach(function (c, i) {
   // Families 20/21/22: weapon power at the hard max-stack / full-uptime
   // assumption. Each component is its own attack-power ratio.
   function apWp(dw) { return Math.sqrt(703826 * 1.09 * (241367 + dw) * 1.085 / 6) * 1.125 + 2700; }
-  check("analytic.f20.ancient.high", r9(d(20, "high")), r9(D(apWp(1480 * 6) / ap0)));
+  // family 20 stacks 6x(+1% atk/move speed) alongside the weapon power, and log
+  // space is additive, so the expected value carries both terms.
+  check("analytic.f20.ancient.high", r9(d(20, "high")), r9(D(apWp(1480 * 6) / ap0) + D(1.006)));
   check("analytic.f21.ancient.high", r9(d(21, "high")), r9(D((apWp(9000) / ap0) * (apWp(2400 * 1.0) / ap0))));
   check("analytic.f22.ancient.high", r9(d(22, "high")), r9(D((apWp(8700) / ap0) * (apWp(150 * 30) / ap0))));
   // Family 14: additional damage plus a demon bucket that is GATED OFF by
@@ -198,7 +200,8 @@ refs.profileVariants.forEach(function (c, i) {
   check("analytic.vitality", r9(B.lineDamage({ cat: "basic", family: "vitality", value: 6000 }, "ancient", P)), 0);
   check("analytic.trait", r9(B.lineDamage({ cat: "trait", family: "crit", value: 120 }, "ancient", P)), 0);
   // Attack & move speed is out of scope in v1 and scores 0 by default.
-  check("analytic.f1.default", r9(d(1, "high")), 0);
+  // +6% atk/move speed at 0.1% damage per 1% = +0.600% damage = 100*ln(1.006)
+  check("analytic.f1.default", r9(d(1, "high")), 0.598207168);
   // Tiers are monotone within every scoring family.
   for (var id2 = 11; id2 <= 33; id2++) {
     if (id2 === 28 || id2 === 29 || id2 === 30) continue;   // pure ally-buff: 0 for a DPS

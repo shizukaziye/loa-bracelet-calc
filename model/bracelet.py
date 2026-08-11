@@ -78,7 +78,7 @@ DEFAULT_PROFILE = {
     "wpStacks22": 30,
 
     "cooldownPenaltyWeight": 0.7,
-    "atkMoveSpeedDamagePerPct": 0,
+    "atkMoveSpeedDamagePerPct": 0.1,  # 10% attack speed = 1% damage (Shizu)
 
     "allyApBuffDamagePerPct": 0.45,
     "allyDamageBuffDamagePerPct": 0.30,

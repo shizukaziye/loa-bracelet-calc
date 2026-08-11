@@ -184,6 +184,25 @@
         }
       }
     }
+    // Main stat is a real granted outcome — 17.5% of a roll before renormalisation,
+    // the single likeliest thing to land — so it belongs in the ranking even though it
+    // is not a "special family". It rolls a continuous value rather than three tiers,
+    // so it contributes ONE row in both views, scored at its expected band value.
+    (function () {
+      var msVal = B.basicBandExpected("mainStat", grade);
+      var msD = B.lineDamage({ cat: "basic", family: "mainStat", value: msVal }, grade, prof);
+      var bands = (DATA.BASIC && DATA.BASIC.bands) || [];
+      var lo = bands.length ? bands[0][grade].mainStat[0] : null;
+      var hi = bands.length ? bands[bands.length - 1][grade].mainStat[1] : null;
+      rows.push({
+        key: "basic:mainStat", fam: { id: 0, key: "mainStat" }, tier: null,
+        d: msD, tierD: [msD, msD, msD],
+        odds: 17.5, isBasic: true,
+        valsOverride: lo != null ? (lo.toLocaleString() + "–" + hi.toLocaleString()) : "",
+        name: "Str / Dex / Int"
+      });
+    })();
+
     rows.sort(function (a, b) { return b.d - a.d || a.fam.id - b.fam.id; });
     var best = rows.length ? rows[0].d : 0;
     for (i = 0; i < rows.length; i++) {
@@ -293,7 +312,7 @@
     REG[id] = { row: r, grade: grade, ghost: ghostPct };
     var letter = P.letterOf("sp:" + r.fam.id, grade) || "F";
     var barHue = view === "roll" && r.tier ? RARITY[r.tier].hue : r.band.hue;
-    var vals = tierValueText(r.fam, grade, r.tier || "mid");
+    var vals = r.valsOverride !== undefined ? r.valsOverride : tierValueText(r.fam, grade, r.tier || "mid");
     var ghost = "";
     if (ghostPct !== null && ghostPct !== undefined) {
       ghost = '<u class="tl-ghost" style="left:' + fx(Math.max(0, Math.min(100, ghostPct)), 2) + '%"></u>';
@@ -304,7 +323,7 @@
     return '<div class="tl-row" data-tip="' + id + '" data-key="' + esc(r.key) + '" tabindex="0" role="button" ' +
       'aria-label="' + esc(r.name + (r.tier ? " " + r.tier : "") + ", " + fx(r.dmg, 2) + " percent damage, band " + r.band.key) + '">' +
       '<span class="tl-rank">' + pad2(r.rank) + "</span>" +
-      '<span class="tl-gl" style="color:' + (P.GRADE_COLOR[letter] || "var(--dim)") + '" title="the Calculator picker\'s letter for this family">' + letter + "</span>" +
+      '<span class="tl-gl" style="color:' + r.band.hue + '" title="this row\'s band">' + r.band.key + "</span>" +
       '<span class="tl-nm">' + rar + esc(r.name) +
       (r.tier ? ' <em style="color:' + RARITY[r.tier].hue + '">' + RARITY[r.tier].name + "</em>" : "") + "</span>" +
       '<span class="tl-vals">' + esc(vals) + "</span>" +
@@ -545,7 +564,7 @@
   function headHTML() {
     return '<div class="tl-head">' +
       '<span class="tl-rank">#</span>' +
-      '<span class="tl-gl" data-gloss="The family letter from the canonical default character — the same one the Calculator picker shows. A coarser ladder than the bands, so a family can be graded A and still band F here.">gr</span>' +
+      '<span class="tl-gl" data-gloss="The band this row sits in, for your current character.">band</span>' +
       '<span class="tl-nm">Effect</span>' +
       '<span class="tl-vals">' + (view === "family" ? "Roll (mid)" : "Roll") + "</span>" +
       '<span class="tl-odds" data-gloss="Chance one granted slot lands this, from the official listed percentages: renormalised by their own sum and scaled to the special category\'s 30 points.">Odds</span>' +

@@ -194,7 +194,11 @@
     // case (no penalty) and the sustained case (damage ÷ 1.02). 0.7 = mostly
     // burst, which is how the line actually gets used.
     cooldownPenaltyWeight: 0.7,
-    atkMoveSpeedDamagePerPct: 0,    // attack & move speed is out of scope in v1
+    // Attack/move speed pays off through more casts. Shizu's rule (2026-08-11):
+    // 10% attack speed = 1% damage, i.e. 0.1% damage per 1% speed. The UI slider
+    // is expressed per TEN percent (default 1, max 3) because that is how it was
+    // specified; this constant stays per one percent.
+    atkMoveSpeedDamagePerPct: 0.1,
 
     // Support-role conversions — STUB, not calibrated. The tool ships DPS-only.
     allyApBuffDamagePerPct: 0.45,
