@@ -293,6 +293,72 @@ so the equivalent second axis is **the bracelet you have vs the one you're consi
 - This is the feature the tool is actually *for* — pricing a purchase — and it reuses
   the whole existing panel. Same toggle affordance as their preset pills.
 
+## 3.45 Tier List tab (Shizu, 2026-08-11)
+
+"All the different effects with their damage percentage, and the character & bracelet
+customizer carried over so people can adjust and watch the tier list change."
+
+**Why it's easy:** ranking effects is pure scoring — no DP, no worker. 99 rows score in
+well under a millisecond, so this tab recomputes **live on every slider drag**, unlike the
+Calculator which must debounce into a worker. That immediacy is the whole appeal: drag
+Back share to 0 and watch the positional lines fall through the table.
+
+### Shared profile state — the prerequisite
+
+The customizer currently lives inside `app.js`. Extract it to **`profile.js`**, a spine in
+the same shape as `favorites.js` (which is the proven pattern here):
+
+```
+Profile.get() -> the normalized profile + bracelet state
+Profile.set(patch)             // merge + persist + notify
+Profile.mount(hostEl, opts)    // render the control deck into any tab
+Profile.onChange(cb) -> unsubscribe
+Profile.reset()
+```
+
+One localStorage key, one source of truth. Calculator and Tier List each `mount()` it and
+subscribe; a slider moved on either tab moves it on both. This also sets up any later tab
+for free — the same reason Favorites pays for itself.
+
+### What it ranks
+
+Two views, one toggle:
+
+1. **By family** (33 rows, the default) — each family scored at its **odds-weighted
+   average** (tiers 6:3:1 → 0.6/0.3/0.1), which answers *"is landing on this family
+   good?"*. This is the same number `familyGrades()` already computes for the picker, so
+   the picker letters and the tier list can never disagree.
+2. **By roll** (99 rows) — every family×tier separately, answering *"what is this exact
+   roll worth?"*. Rarity-coloured (Rare blue / Epic purple / Legendary gold).
+
+Each row: tier letter · family name · the damage % · a bar · the roll values · and the
+odds of getting it (from the official listed probabilities, renormalized). Showing
+**value beside rarity** is the point — a Legendary junk line and a Rare crit line sit far
+apart, and that's the lesson the table teaches.
+
+### Banding — reuse the loa-tierlist house style
+
+Shizu's tier-list site (`loastuff/loa-tierlist`) already fixes this: **bands as a % of
+#1** — S ≥98 · A ≥95 · B ≥90 · C ≥85 · D ≥80 · F <80 — with empty bands rendered
+explicitly rather than skipped. Study it and match: the S-tier rainbow slide, the dot
+strip, the hover card popovers, the band pills. A user who knows that site should
+recognise this tab instantly.
+
+Note the bands here are relative to the best *family*, so they move as the profile
+changes — that is the feature. Call it out in the copy: "bands are % of the best line
+for **your** character."
+
+### Interactions
+
+- Row hover → popover: full effect text, all three tiers with values and odds, what it's
+  worth to you, and why (the same `data-tip` registry pattern).
+- Row click → drop that effect into a Calculator slot ("try this").
+- A "compare to defaults" ghost marker showing where the line sits on the canonical
+  profile, so a user can see *how their build differs from average* — cheap, since
+  default scores are already computed for the leaderboard.
+- Preset buttons for common builds (back-attack class, frontal, non-positional) that just
+  set the shares — the fastest way to show the table is alive.
+
 ## 3.6 Feedback tab
 
 A lazy tab (`feedback.js`), public, no sign-in. Copy astrogem's shape and its guards.
