@@ -17,8 +17,11 @@ Research consolidated 2026-08-11 (four-agent sweep). Companion to
   the DP: after each roll you hold max(old, new).
 - Relic→Ancient upgrade bumps existing lines: basics +1000, combat traits +20, special
   effects +1 tier.
-- Combat stat caps: Relic ~100 / Ancient ~120 — stated by maxroll for T3 only; live T4
-  observations (max seen 115) are consistent. UNVERIFIED, flag in UI copy if shown.
+- Combat stat caps: Relic 100 / Ancient 120 — stated by maxroll for T3 only, but every T4
+  observation agrees: across 63 bracelets on 30 character pages the highest combat trait
+  seen is **119** and **none exceeds 120**. Still not officially published, so flag it in
+  UI copy if shown — but it is now load-bearing, because the cap is what
+  `decodeWithGradeCheck` uses to tell Relic from Ancient (see Loadouts, below).
 - Modeling assumption for this tool (Shizu's spec): the bracelet already has the two
   desired combat traits (e.g. crit+spec) as fixed lines → trait cap full → granted pool
   renormalizes over basic (35) + special (30). NOTE basics stay in the pool (~53.85% per
@@ -63,6 +66,93 @@ Decode rules (verified on 4 characters):
   4 is unidentified. Mapping these three (in `model/bracelet.js` AND the Python mirror,
   with a refs regeneration) is the highest-value single fix in this area.
 - Family numbering matches maxroll's 1–33 and `official-probabilities.md`.
+
+## Loadouts — one character, several brackets (2026-08-11, 30 saved pages)
+
+The single biggest source of wrong numbers so far, and it has nothing to do with
+the decode. **A character page carries one LOADOUT per lostark.bible tab, each
+with its own `items` array — so each can hold a different bracelet.**
+
+```js
+{type:"data", data:{ loadouts:[
+  { classification:"most_recent_raid", lastUpdated:1786337374000, itemLevel:1791.6661,
+    items:[ …, {slot:"bracelet", data:{type:"bracelet", stats:[…]}} ], … },
+  { classification:"raid_merged",              … },
+  { classification:"most_recent_chaos_dungeon", … } ] }}
+```
+
+Classifications seen, with the button label bible prints for each. **Treat the
+list as open** — read whatever `classification` strings turn up rather than
+matching a fixed set.
+
+| `classification` | bible's button | pages carrying it (of 30) |
+|---|---|---|
+| `most_recent_raid` | "Raid Loadout" | 30 |
+| `most_recent_chaos_dungeon` | "Current Loadout (Chaos Dungeon)" | 27 |
+| `raid_merged` | "Estimated Raid Loadout" | 2 (Bean, Venoms) |
+
+An empty bracelet slot appears as `data: void 0`, not as a missing entry.
+
+**How much it matters. 9 of the 30 characters carry a different bracelet payload
+across their loadouts** (Bean, Kayamix, Kyulo, Subsz, Theschmeatdragon, Astoryu,
+Bydsalvation, Chamchis, Venoms), and 8 of those 9 score differently:
+
+| character | best | worst | spread |
+|---|---|---|---|
+| Bydsalvation | 12.58% | 6.83% | 5.76pp |
+| Chamchis | 11.76% | 7.60% | 4.16pp |
+| Astoryu | 11.08% | 7.13% | 3.95pp |
+| Venoms | 10.84% | 7.41% | 3.43pp |
+| Kyulo | 9.73% | 7.32% | 2.41pp |
+| Theschmeatdragon | 7.41% | 5.98% | 1.43pp |
+| Bean | 9.68% | 8.95% | 0.73pp |
+| Subsz | 9.76% | 9.05% | 0.71pp |
+| Kayamix | 7.35% | 7.35% | 0.00pp |
+
+Kayamix is the instructive one: both payloads score the same, but the chaos copy
+writes the main stat as type:2 index **4** (Dexterity) and the raid copy as index
+**11** (the class's main stat). Same number, different index — so "match the
+tooltip's trait values" is not enough to tell two loadouts apart, and bible
+renders index 11 under the class's own stat name ("Dexterity +12,352"), which
+makes the two indistinguishable from the rendered text alone.
+
+The other 21 characters hold the same bracelet in every loadout, so the pick is
+free — but you cannot know which case you are in without reading them all.
+
+**THE RENDERED DOM SHOWS THE NEWEST LOADOUT, NOT THE RAID ONE.** The bracelet
+tooltip the page draws — and the "Bracelet Effects +X%" figure beside it —
+belongs to the loadout with the greatest `lastUpdated`, on **all 30 pages without
+exception**. Run a chaos dungeon after your last raid and the page draws your
+chaos bracelet. So:
+
+- Reading the rendered DOM gives you the *displayed* bracelet, which is the right
+  thing to validate a decode against (bible's own words for each line) and the
+  wrong thing to rank on.
+- Reading the hydration blob in **document order** is worse still: the order is
+  not fixed. Chaos comes first on 16 of the 30 pages, so a "first hit wins" rule
+  picked the wrong bracelet for 5 of 30 characters (Bean, Kayamix, Subsz,
+  Theschmeatdragon, Chamchis) — that was `worker/bracelet.js`'s bug until now.
+- **The rule the board uses (Shizu's): rank the HIGHEST loadout.** Ties go to the
+  one bible draws, then raid > est. raid > chaos, then newest. `data/leaderboard-seed.json`
+  carries every loadout per entry plus `chosenLoadout`; the import panel shows
+  them as pills and loads the highest first.
+
+Two other things the 30-page sweep settled:
+
+- **`numRerolls` / `numTicketRerolls` are the counts USED, not left.** 4 and 3
+  mean a fully-rolled bracelet. `rollsRemaining = 4−base / 3−ticket` reproduces
+  bible's rendered "N+M rolls remaining" on all four pages that print it (bible
+  omits the line at 0+0). `bible-import.js` reads them the other way round and
+  says so in a comment — that comment is now answered, and the panel's
+  `rollsLeft` is wrong for a fully-rolled bracelet.
+- **The combat-trait cap outranks the slot count when guessing the grade.**
+  Relic tops out at 100, Ancient at 120. `decodeWithGradeCheck` used the granted-
+  slot count alone (Ancient 2–3, Relic 1–2) and so called four of the thirty
+  characters Relic while they wore Crit +116 / Spec +119 — they lock four of five
+  lines, which leaves one granted line, which reads as Relic. Players lock granted
+  lines, so the slot count is a guess about behaviour; the cap is a fact about the
+  item. Fixed in both `worker/bracelet.js` and `bible-import.js`; it moved the
+  Worker's seed parity from 24/30 to 28/30.
 
 The astrogem worker (`loastuff/loa-astrogem-calc/worker/astrogem-bible.js`) already
 fetches + parses these character pages with a sanctioned `BIBLE_TOKEN`; its

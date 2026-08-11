@@ -49,8 +49,21 @@ Companion docs — read before changing anything here:
   bracelet: {              // null when the character has no bracelet equipped
     grade: "ancient"|"relic",
     stats: [ {type, index, value, fixed} ],   // RAW, exactly as the page gave it
-    numRerolls, numTicketRerolls
+    numRerolls, numTicketRerolls              // counts USED, not left (4/3 = fully rolled)
   },
+  loadouts: [              // ONE PER lostark.bible TAB, each with its OWN bracelet
+    { classification,      // "most_recent_raid" | "most_recent_chaos_dungeon" |
+                           // "raid_merged" | whatever else turns up — an OPEN list
+      label,               // bible's own button wording: "Raid" | "Chaos" | "Est. Raid"
+      itemLevel, lastUpdated,
+      isRendered,          // the page draws the NEWEST lastUpdated, not the raid one
+      stats: [ … ], numRerolls, numTicketRerolls,
+      score: { grade, pct, linesPct, granted, unmapped } }   // canonical default profile
+  ],
+  chosenLoadout: N,        // index of the HIGHEST — what the board ranks, and what
+                           // `bracelet` above mirrors. 9 of 30 seeded characters carry
+                           // different brackets per loadout, by up to 5.76pp.
+
   profile: {               // for grader auto-fill; every field optional
     weaponPower, mainStat, critRate, critDamage, gemLevels, combatPower
   },
@@ -279,7 +292,7 @@ loadout header alone is what makes a pulled character feel like *your* character
 | **Field rank** — "Top 8% of Bards (#4 of 51) · #37 of 6,214 tracked", conservative estimator, class line only when n≥5 | Same sentence off our own snapshot: "Top 12% of Reapers (#3 of 24) · #9 of 58 tracked" |
 | **Weakest 3**, worst first, click to scroll + flash the card | **Weakest lines** — the rerollable ones ranked by what they cost you, click to focus that slot |
 | **Rank badges + grade bands** (F−…S+, `SUBRANK_ORDINAL`) | We already grade families F→S; extend the same ladder to a whole-bracelet rank so a character gets one letter |
-| **Raid vs Chaos preset toggle** | **No 1:1 analogue** — a character has one bracelet. The real analogue is **compare mode**: your current bracelet vs a candidate you're pricing. See below |
+| **Raid vs Chaos preset toggle** | **There IS a 1:1 analogue after all**: lostark.bible keeps a raid loadout and a chaos loadout (and sometimes an estimated-raid one), each with its own bracelet, and 9 of 30 seeded characters wear different ones. The import panel shows them as pills; the board ranks the highest. **Compare mode** — your current bracelet vs a candidate you're pricing — is still the other axis. See below |
 | **DPS / Support axis toggle**, auto-detected from the build | Deferred with support scoring; keep the toggle's slot in the layout so it can appear later without a redesign |
 | **`gpd` auto-set from combat power**, with wording that downgrades from "auto-set" to "suggests" once you touch it | Same trick for every imported profile value (§3.2) |
 | **Method `<details>` per tab**, verdict → arithmetic → what's left out, admitting inconsistencies in place | Already built; extend as features land |
@@ -289,8 +302,9 @@ loadout header alone is what makes a pulled character feel like *your* character
 
 ### Compare mode — the preset analogue
 
-Raid/Chaos exists because a character owns two gem sets. A character owns one bracelet,
-so the equivalent second axis is **the bracelet you have vs the one you're considering**:
+Raid/Chaos exists because a character owns two gem sets — and, it turns out, two
+bracelets, one per loadout; that axis is the loadout pills in the import panel. The
+remaining axis is **the bracelet you have vs the one you're considering**:
 
 - Slot A = imported/current, slot B = hand-entered candidate.
 - Header shows both scores, the delta in % and gold, and the DP's verdict on B's

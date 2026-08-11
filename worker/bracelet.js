@@ -200,19 +200,40 @@ function slotChoices(grade) { return grade === "relic" ? [1, 2] : [2, 3]; }
  */
 function decodeWithGradeCheck(stats) {
   const dec = Bracelet.decodeBibleBracelet(stats);
+
+  // THE TRAIT CAP OUTRANKS EVERYTHING. Relic combat traits stop at 100 and
+  // Ancient at 120, so a bracelet showing Crit +116 cannot be Relic whatever the
+  // slot count says. Four of the thirty seeded characters were coming out Relic
+  // on exactly this — they lock four of five lines, which leaves one granted
+  // line, which the slot rule below reads as Relic.
+  if (traitsBreakCap(dec, dec.grade)) {
+    const forced = dec.grade === "relic" ? "ancient" : "relic";
+    const fdec = Bracelet.decodeBibleBracelet(stats, { grade: forced });
+    if (!traitsBreakCap(fdec, forced)) return fdec;
+  }
+
   let granted = 0;
   for (const l of dec.lines) if (!l.fixed) granted++;
   if (slotChoices(dec.grade).indexOf(granted) >= 0) return dec;
   const other = dec.grade === "relic" ? "ancient" : "relic";
   if (slotChoices(other).indexOf(granted) < 0) return dec;   // fits neither; leave the guess alone
+  // The slot count is only ONE witness, and the weakest of the three. Refuse the
+  // switch if the other grade cannot hold what this one held — either because a
+  // trait sits above its cap, or because its value table cannot place a line
+  // this one placed (Crit Damage +10% exists on Ancient and not on Relic). Seen
+  // live on a chaos-dungeon loadout with four locked lines: the player locked
+  // granted lines, so "1 granted" was a player's choice, not a Relic drop.
   const alt = Bracelet.decodeBibleBracelet(stats, { grade: other });
-  // The slot count is only ONE witness. If the other table cannot place a value
-  // this one placed — Crit Damage +10% exists on Ancient and not on Relic — then
-  // the slot count is the thing that is wrong, not the grade. Seen live on a
-  // chaos-dungeon loadout with four locked lines: the player locked granted
-  // lines, so "1 granted" was a player's choice, not a Relic drop.
+  if (traitsBreakCap(alt, other)) return dec;
   if (unplaced(alt) > unplaced(dec)) return dec;
   return alt;
+}
+
+/** Combat-trait caps: Relic 100, Ancient 120. A value above the cap rules the grade out. */
+const TRAIT_CAP = { relic: 100, ancient: 120 };
+function traitsBreakCap(dec, grade) {
+  for (const l of dec.lines) if (l.cat === "trait" && l.value > TRAIT_CAP[grade]) return true;
+  return false;
 }
 
 /** Lines the grade's value table could not place: no tier, or a value off the table. */

@@ -277,29 +277,60 @@
   }
 
   /**
+   * Combat-trait caps: Relic 100, Ancient 120. A bracelet showing Crit +116 is
+   * not Relic whatever else says otherwise — 63 brackets read off character
+   * pages top out at 119 and none passes 120.
+   */
+  var TRAIT_CAP = { relic: 100, ancient: 120 };
+  function traitsBreakCap(dec, grade) {
+    for (var i = 0; i < dec.lines.length; i++) {
+      var l = dec.lines[i];
+      if (l.cat === "trait" && l.value > TRAIT_CAP[grade]) return true;
+    }
+    return false;
+  }
+
+  /**
+   * The decoder guesses Relic or Ancient by matching special-effect values
+   * against both tables, and the two tables overlap enough that it can land on
+   * the wrong one. Two further witnesses settle it, strongest first:
+   *
+   *   1. the combat-trait cap above — a fact about the item;
+   *   2. the granted-slot count (Ancient 2–3, Relic 1–2) — a guess about the
+   *      player, because locking granted lines is allowed and four of the thirty
+   *      seeded characters lock four of five, leaving one granted line that
+   *      reads as Relic while they wear Crit +116.
+   *
+   * A grade change is a RE-DECODE, not a relabel: tiers have to come from the
+   * right value table.
+   */
+  function decodeWithGradeCheck(stats) {
+    var dec = B.decodeBibleBracelet(stats), i;
+
+    // The cap is a hard fact about the item; the slot count is a guess about how
+    // the player has been playing. The fact wins.
+    if (traitsBreakCap(dec, dec.grade)) {
+      var forced = dec.grade === "relic" ? "ancient" : "relic";
+      var fdec = B.decodeBibleBracelet(stats, { grade: forced });
+      if (!traitsBreakCap(fdec, forced)) return fdec;
+    }
+
+    var granted = 0;
+    for (i = 0; i < dec.lines.length; i++) if (!dec.lines[i].fixed) granted++;
+    if (slotChoices(dec.grade).indexOf(granted) >= 0) return dec;
+    var other = dec.grade === "relic" ? "ancient" : "relic";
+    if (slotChoices(other).indexOf(granted) < 0) return dec;   // fits neither; leave the guess alone
+    var alt = B.decodeBibleBracelet(stats, { grade: other });
+    if (traitsBreakCap(alt, other)) return dec;                // the slot count is the thing that is wrong
+    return alt;
+  }
+
+  /**
    * decodeBibleBracelet's lines -> the state patch app.js merges.
    * Fixed lines split two ways: a Crit / Spec / Swiftness trait is one of the two
    * combat traits the panel shows at the top, anything else is a fixed line in
    * the Advanced fold. Unlocked lines are the granted slots.
    */
-  /**
-   * The decoder guesses Relic or Ancient by matching special-effect values
-   * against both tables, and the two tables overlap enough that it can land on
-   * the wrong one. The slot count is a second, independent witness: Ancient
-   * grants 2–3 lines, Relic 1–2. When the guess cannot hold the lines it just
-   * decoded and the other grade can, re-decode against that table — the tiers
-   * have to come from the right value table, so this is a re-run, not a relabel.
-   */
-  function decodeWithGradeCheck(stats) {
-    var dec = B.decodeBibleBracelet(stats);
-    var granted = 0, i;
-    for (i = 0; i < dec.lines.length; i++) if (!dec.lines[i].fixed) granted++;
-    if (slotChoices(dec.grade).indexOf(granted) >= 0) return dec;
-    var other = dec.grade === "relic" ? "ancient" : "relic";
-    if (slotChoices(other).indexOf(granted) < 0) return dec;   // fits neither; leave the guess alone
-    return B.decodeBibleBracelet(stats, { grade: other });
-  }
-
   function buildPatch(data) {
     var dec = decodeWithGradeCheck(data.stats || []);
     var grade = dec.grade;

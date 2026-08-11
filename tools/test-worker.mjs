@@ -50,16 +50,25 @@ for (const e of seed.entries) {
   const s = score(e.rawStats);
   const d = Math.abs(s.pct - e.damagePct);
   if (d < TOL) matched++;
-  else diverged.push({ name: e.name, seed: e.damagePct, worker: s.pct, delta: s.pct - e.damagePct, unmapped: s.unmapped.map(u => u.index) });
+  else diverged.push({
+    name: e.name, seed: e.damagePct, worker: s.pct, delta: s.pct - e.damagePct,
+    unmapped: s.unmapped.map(u => u.index),
+    // The OTHER known reason the two scorers differ: the seed adds a combat
+    // trait that landed in a GRANTED slot at its rolled value, while the Worker
+    // follows the model's rule and scores it zero. Written down in the seed's
+    // own notes[] and in score()'s header — so it is an explanation, not a shrug.
+    grantedTrait: (e.traits || []).some(t => !t.fixed)
+  });
 }
 console.log("     " + matched + "/" + seed.entries.length + " reproduce the seed's damagePct exactly");
 for (const d of diverged) {
   console.log("     ~ " + d.name.padEnd(12) + " seed " + d.seed.toFixed(3) + "  worker " + d.worker.toFixed(3) +
-    "  (" + d.delta.toFixed(3) + ")  unmapped indices: " + (d.unmapped.join(",") || "none"));
+    "  (" + d.delta.toFixed(3) + ")  " +
+    (d.unmapped.length ? "unmapped indices: " + d.unmapped.join(",") : d.grantedTrait ? "a combat trait sits in a granted slot" : "UNEXPLAINED"));
 }
-ok("every divergence is explained by an unmapped stat index",
-  diverged.every(d => d.unmapped.length > 0),
-  "an entry differs with nothing unmapped — the scorer disagrees with the seed for a reason nobody has written down");
+ok("every divergence has a written-down cause (an unmapped index, or a trait in a granted slot)",
+  diverged.every(d => d.unmapped.length > 0 || d.grantedTrait),
+  "an entry differs for a reason nobody has written down");
 ok("no divergence is an INCREASE (an unmapped line can only be missing damage)",
   diverged.every(d => d.delta <= TOL));
 ok("at least half the seed reproduces exactly", matched * 2 >= seed.entries.length,
@@ -82,9 +91,9 @@ if (white) {
 console.log("\n2. the character-page bracelet parser");
 // ---------------------------------------------------------------------------
 // Built in the exact style of the hydration blob documented in
-// docs/research/mechanics-bible-leaderboard.md, with the equipment block
-// repeated per loadout (raid first, then a stripped chaos set) the way a real
-// page carries it.
+// docs/research/mechanics-bible-leaderboard.md. extractBracelets() is now only
+// the fallback for a page whose loadouts array will not parse; the loadout-aware
+// path it fell out of is section 2b.
 const RAID = '{id:213400033,slot:"bracelet",data:{type:"bracelet",stats:[' +
   '{type:2,index:15,id:213400023,value:101,fixed:true},' +
   '{type:2,index:18,id:213400023,value:81,fixed:true},' +
@@ -99,7 +108,10 @@ const HTML = 'junk before {slot:"neck",data:{type:"tier4_accessory",stats:[]}}' 
 
 const found = extractBracelets(HTML);
 ok("finds both loadouts' bracelets", found.length === 2, String(found.length));
-ok("the FIRST hit is the raid bracelet", found[0] && found[0].stats.length === 5, JSON.stringify(found[0] && found[0].stats.length));
+// NOT "the first hit is the raid bracelet" — that was the bug. This fixture is
+// written raid-first, so all this asserts is that document order is preserved;
+// which loadout a bracelet belongs to is section 2b's job.
+ok("hits come back in document order", found[0] && found[0].stats.length === 5, JSON.stringify(found[0] && found[0].stats.length));
 ok("rerolls come through", found[0] && found[0].numRerolls === 4 && found[0].numTicketRerolls === 3);
 ok("fixed flags survive the key-quoting", found[0] && found[0].stats[0].fixed === true && found[0].stats[2].fixed === false);
 ok("a page with no bracelet yields nothing", extractBracelets('slot:"neck",data:{type:"tier4_accessory",stats:[]}').length === 0);
@@ -108,6 +120,78 @@ ok("a truncated payload does not throw", extractBracelets('slot:"bracelet",data:
 const decodedFromPage = score(found[0].stats);
 ok("the documented payload decodes and scores", decodedFromPage.pct > 0 && decodedFromPage.granted === 3,
   JSON.stringify({ pct: decodedFromPage.pct, granted: decodedFromPage.granted }));
+
+// ---------------------------------------------------------------------------
+console.log("\n2b. loadouts — one bracelet per lostark.bible tab");
+// ---------------------------------------------------------------------------
+// The parser above reads the page in DOCUMENT ORDER, and this file used to
+// assert that order was "raid first, then chaos". It is not: across the 30 saved
+// character pages the chaos loadout comes first on 16 of them, which is how the
+// old first-hit rule picked the wrong bracelet for 5 of 30 characters. The real
+// structure is a `loadouts:[…]` array where each element has its own `items`,
+// so the bracelet is found through the loadout, not through document order.
+//
+// The fixture below is built chaos-FIRST on purpose, with the better bracelet in
+// the raid loadout, so a regression to "take hit #0" fails here loudly.
+function LD(classification, lastUpdated, itemLevel, braceletJs) {
+  return '{classification:"' + classification + '",canGenerateSkillCode:true,lastUpdated:' + lastUpdated +
+    ',itemLevel:' + itemLevel + ',items:[{id:1,slot:"neck",data:{type:"tier4_accessory",stats:[]}},' +
+    braceletJs + '],type:"equipment"}';
+}
+const BR_RAID = '{id:213400033,slot:"bracelet",data:{type:"bracelet",stats:[' +
+  '{type:2,index:15,id:213400023,value:101,fixed:true},' +
+  '{type:2,index:18,id:213400023,value:81,fixed:true},' +
+  '{type:3,index:11051,id:213400023,value:5,fixed:false},' +
+  '{type:2,index:11,id:213400023,value:13888,fixed:false},' +
+  '{type:2,index:76,id:213400023,value:840,fixed:false}],numRerolls:4,numTicketRerolls:3}}';
+const BR_CHAOS = '{id:213400034,slot:"bracelet",data:{type:"bracelet",stats:[' +
+  '{type:2,index:15,id:213400023,value:61,fixed:true},' +
+  '{type:2,index:18,id:213400023,value:61,fixed:true},' +
+  '{type:3,index:11053,id:213400023,value:5,fixed:false},' +
+  '{type:2,index:11,id:213400023,value:9600,fixed:false},' +
+  '{type:2,index:76,id:213400023,value:500,fixed:false}],numRerolls:0,numTicketRerolls:0}}';
+const BR_NONE = '{id:0,slot:"bracelet",data:void 0}';
+
+const PAGE = 'header:{id:1},{type:"data",data:{loadouts:[' +
+  LD("most_recent_chaos_dungeon", 1786422780000, 1791.6661, BR_CHAOS) + "," +
+  LD("most_recent_raid", 1786337374000, 1791.6661, BR_RAID) + "," +
+  LD("raid_merged", 1786337374000, 1791.6661, BR_RAID) +
+  "],stale:false}} trailing junk";
+
+const lds = extractLoadouts(PAGE);
+ok("reads every loadout that carries a bracelet", lds.length === 3, String(lds.length));
+ok("keeps each loadout's own classification",
+  lds.map(l => l.classification).join(",") === "most_recent_chaos_dungeon,most_recent_raid,raid_merged",
+  lds.map(l => l.classification).join(","));
+ok("labels them the way lostark.bible's own buttons do",
+  lds.map(l => l.label).join(" · ") === "Chaos · Raid · Est. Raid", lds.map(l => l.label).join(" · "));
+ok("an unknown classification still gets a readable label",
+  loadoutLabel("most_recent_guardian_raid") === "Guardian Raid", loadoutLabel("most_recent_guardian_raid"));
+ok("itemLevel and lastUpdated come through",
+  lds[1].itemLevel === 1791.6661 && lds[1].lastUpdated === 1786337374000);
+ok("the rendered loadout is the NEWEST, not the raid one",
+  lds[0].isRendered && !lds[1].isRendered, JSON.stringify(lds.map(l => l.isRendered)));
+ok("each loadout keeps its own rerolls", lds[0].numRerolls === 0 && lds[1].numRerolls === 4);
+
+for (const l of lds) l.score = briefScore(score(l.stats));
+const best = pickBestLoadout(lds);
+ok("the board takes the HIGHEST loadout, not the first and not the rendered one",
+  lds[best].classification === "most_recent_raid", lds[best].classification);
+ok("the highest really is higher than the one the page draws",
+  lds[best].score.pct > lds[0].score.pct,
+  lds[best].score.pct + " vs " + lds[0].score.pct);
+ok("a tie goes to raid over est. raid",
+  lds[1].score.pct === lds[2].score.pct && lds[best].classification === "most_recent_raid");
+ok("the old first-hit rule would have taken the WRONG bracelet here",
+  extractBracelets(PAGE)[0].stats[0].value === 61);
+
+const EMPTY_SLOT = 'loadouts:[' + LD("most_recent_raid", 1, 1700, BR_RAID) + "," +
+  LD("most_recent_chaos_dungeon", 2, 1700, BR_NONE) + "]";
+const one = extractLoadouts(EMPTY_SLOT);
+ok("`data: void 0` is an empty slot, not a bracelet", one.length === 1, String(one.length));
+ok("a page with no loadouts array yields nothing rather than throwing",
+  extractLoadouts('slot:"bracelet",data:{type:"bracelet",stats:[]}').length === 0);
+ok("a truncated loadouts array does not throw", extractLoadouts("loadouts:[{classification:\"x\"").length === 0);
 
 // ---------------------------------------------------------------------------
 console.log("\n3. the consent gate");
