@@ -761,6 +761,13 @@ def solve(opts):
             ev_by_rolls_left.append(sum(p * layers[r][c] for c, p in zip(all0["codes"], all0["probs"])))
         expected_final = ev_by_rolls_left[R]
         cur = fixed_damage
+    elif R == 0:
+        # No attempts left. Nothing to lock, nothing to roll: the bracelet is what
+        # it is. (Without this branch layers[R - 1] would wrap round to layers[-1]
+        # and quietly report the wrong mask values.)
+        expected_final = layers[0][start_code]
+        ev_by_rolls_left = [expected_final]
+        cur = score[start_code]
     else:
         root_prev = layers[R - 1]
         root_fs = {}

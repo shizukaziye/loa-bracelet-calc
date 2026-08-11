@@ -969,6 +969,13 @@
       }
       expectedFinal = evByRollsLeft[R];
       cur = fixedDamage;
+    } else if (R === 0) {
+      // No attempts left. Nothing to lock, nothing to roll: the bracelet is what
+      // it is. (Without this branch the mask readout below would reach for
+      // layers[−1].)
+      expectedFinal = layers[0][startCode];
+      evByRollsLeft.push(expectedFinal);
+      cur = score[startCode];
     } else {
       var rootMasks = masksOf[startCode];
       var rootPrev = layers[R - 1];

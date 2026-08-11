@@ -1,0 +1,119 @@
+/**
+ * method.js — the Method tab. Prose only: what the model does, where the numbers
+ * came from, and what it does not model. Loaded lazily on first visit to the tab
+ * (see LAZY_TABS in index.html).
+ *
+ * Every figure quoted here is read from window.Bracelet / window.BraceletData at
+ * render time, so the page cannot drift from the model the way a hand-written
+ * write-up does.
+ */
+(function () {
+  "use strict";
+
+  var B = window.Bracelet, DATA = window.BraceletData;
+
+  function fx(v, n) { return (Math.round(v * Math.pow(10, n)) / Math.pow(10, n)).toFixed(n); }
+  function nf(v) { return Math.round(v).toLocaleString("en-US"); }
+
+  function render() {
+    var pane = document.getElementById("tab-method");
+    if (!pane || pane.getAttribute("data-init")) return;
+    pane.setAttribute("data-init", "1");
+    if (!B || !DATA) { pane.innerHTML = '<div class="placeholder"><b>Model not loaded</b>Reload the page.</div>'; return; }
+
+    var p = B.normalizeProfile({});
+    var base = B.deriveBaseline({});
+    var pool = B.addDamagePool(p);
+
+    pane.innerHTML = "" +
+      "<style>" +
+      "#tab-method .mt{max-width:760px}" +
+      "#tab-method .mt p,#tab-method .mt li{font-size:14px;line-height:1.7}" +
+      "#tab-method .mt h2{margin-top:30px}" +
+      "#tab-method .mt h3{font-size:14px;margin:22px 0 6px;font-weight:700}" +
+      "#tab-method .mt ul{padding-left:20px}" +
+      "#tab-method .mt .formula{margin:10px 0}" +
+      "#tab-method .mt table{margin:10px 0}" +
+      "</style>" +
+
+      '<div class="mt">' +
+
+      "<h2>What this tool answers</h2>" +
+      "<p>Three questions, in the order you hit them. What is this bracelet worth in damage? Which lines should I lock before the next roll? The roll landed — do I keep it or take the new set?</p>" +
+      "<p>Everything below is the model behind those answers. Where a number is a judgement call rather than a published fact, it says so.</p>" +
+
+      "<h2>Damage adds up in logs</h2>" +
+      "<p>Lost Ark stacks damage by multiplying. Two lines worth 10% each give 21%, not 20%. So each line is scored</p>" +
+      '<div class="formula">D = 100 · ln(multiplier)</div>' +
+      "<p>which turns multiplication into addition: line scores sum, and D reads as roughly the percentage gain. The headline number is the exact combined figure, <code>(e^(ΣD/100) − 1) × 100</code>. This is the same convention as the accessory and astrogem calculators, so the three tools' percentages can be added together.</p>" +
+
+      "<h2>Where the baseline comes from</h2>" +
+      "<p>A line's worth depends on what you already have. A weapon-power line is small if you carry a lot of weapon power, and crit rate is worthless at 100%. So every tier's value is computed from your character, never read off a table.</p>" +
+      "<p>Attack power drives damage and is built like this:</p>" +
+      '<div class="formula">AP = √(mainStat × weaponPower / 6) × (1 + gemsAndStone) + flatAP</div>' +
+      "<p>The bracelet's flat lines go into the <b>raw</b> stat, before the percentage buckets, so those buckets amplify them exactly as they amplify gear. With no flat attack power the whole thing collapses to a plain square-root ratio; the ark-grid cores are what stop it.</p>" +
+      "<p>The gear numbers are bebkok's Serca honing table. The default build is weapon +25, gloves +23 and the other four at +21, which is item level " + base.ilvl + ": main stat " + nf(base.mainStatRaw) + " raw, weapon power " + nf(base.weaponPowerRaw) + " raw. Accessories sit at the top of their ranges with no flat-stat rolls (" + nf(71429) + " main stat), the roster bonus is " + nf(2085) + ", and the percentage buckets are " + fx(p.msPct * 100, 1) + "% on main stat (skins plus the stronghold ranch) and " + fx(p.wpPct * 100, 1) + "% on weapon power (two earring lines plus karma). Attack power carries " + fx(p.baseApPct * 100, 1) + "% from eleven level-9 damage gems and a 9/7 stone, and " + nf(p.flatAP) + " flat from ark-grid cores. Every one of those is an input you can change.</p>" +
+
+      "<h3>Crit</h3>" +
+      "<p>A skill's expected multiplier is <code>1 + critRate × (critDamage − 1)</code>. Crit damage of 280% means a crit deals 2.8 times, not 3.8. The default character is one skill at 90% crit and 280% crit damage; add skills with damage shares and the multipliers are share-weighted. Crit rate is capped at 100% when a line pushes past it, which is why a crit-rate line quietly dies on a high-crit build.</p>" +
+      "<p>The \"on crit, damage +1.5%\" rider on two of the combo families is crit-<i>hit</i> damage, not additional damage: the crit branch becomes <code>1 + cr × (cd × 1.015 − 1)</code>. The crit parts of one line are resolved together, because they genuinely interact inside a single hit; different lines still combine in log space.</p>" +
+
+      "<h3>Additional damage</h3>" +
+      "<p>Additional damage is one pool, additive inside itself, multiplying total damage once as <code>(1 + pool)</code>. The default pool is " + fx(pool * 100, 2) + "%: a 100-quality weapon 30%, pet 1%, a high additional-damage necklace 2.6% and 4.84% from a 60-level astrogem grid. A bracelet line worth +3% is therefore worth <code>1.4144 / 1.3844</code>, not 3%. The Master node adds 7% to this pool and nothing else — that is Shizu's ruling, and it overrides the sheet reading that also credits crit rate.</p>" +
+
+      "<h3>The other buckets</h3>" +
+      "<p>Outgoing damage is its own multiplicative bucket and is not diluted. Stagger, demon, back, front and non-directional damage are each scaled by a share you set: what fraction of your damage actually lands in that window or from that angle. <b>Back, front, non-directional and demon shares all start at zero</b>, so those lines score nothing until you tell the tool how your class fights. Demon damage is additionally diluted by the 7.3% you already carry from cards and pets. Family 15 trades +2% cooldown for damage; it is scored as the mean of the burst case (no penalty) and the sustained case (damage divided by 1.02), and you can slide that weight.</p>" +
+
+      "<h2>Party lines get credit for the party</h2>" +
+      "<p>Four families help everyone: enemy defense down, enemy crit resist down, enemy crit-damage resist down, and damage to a shielded target. Only one instance counts per party, and this model assumes you are the one carrying it.</p>" +
+      "<p>They are scored as <code>1 + yourGain + " + p.allyDpsCount + " × allyGain</code>. Two other damage dealers, each assumed to deal what you deal before the line, each fixed at 90% crit and 280% crit damage. An ally's extra damage is counted as your extra damage, in units of your own baseline — that is the only way to put a party buff on the same scale as a personal one.</p>" +
+      "<p>Defense shred goes through the enemy's damage reduction: if the boss reduces damage by " + fx(p.enemyBaseDR * 100, 0) + "% then shredding a fraction A of its defense multiplies damage by <code>(D+K) / (D(1−A)+K)</code>. Crit resist down reads as crit rate up for the whole party; crit-damage resist down likewise. The shielded-target line is flat damage while a shield is up, scaled by a " + fx(p.shieldUptime * 100, 0) + "% uptime.</p>" +
+      "<p>The \"ally attack power buff +B%\" rider that rides along on all four scores <b>zero</b> here. It scales a buff only a support provides; for a damage dealer it is dead text.</p>" +
+
+      "<h2>Buckets that score nothing</h2>" +
+      "<p>Vitality, all six combat traits, the ten defensive and utility families, and the three support families score 0% damage. That is not a claim they are worthless in game — combat traits in particular drive class mechanics this model does not read. It means they do not convert into a damage percentage, so the tool refuses to invent one. Attack and move speed is in the same bucket: real value through Raid Captain, out of scope for now.</p>" +
+      "<p>This matters for the solver, not just the display. Every line that scores nothing is interchangeable with every other line that scores nothing in the same category, so they all collapse into a single outcome. That is what keeps a three-slot solve down to about 48,000 states instead of millions.</p>" +
+
+      "<h2>The roll problem, solved exactly</h2>" +
+      "<p>The mechanics, from the official disclosure and live data: a bracelet has one or two fixed lines and, on Ancient, two or three granted slots. You get four rolls plus up to three more from reconversion tickets. Each attempt rerolls <b>every unlocked slot at once</b>, and afterwards you keep the old set or take the new one — the whole set, no cherry-picking. Draws inside one attempt are sequential without replacement: no duplicate family, capped categories drop out, and everything left renormalises over the surviving weight.</p>" +
+      "<p>Rolls cost silver, not gold, and the cost is small next to the bracelet. This tool treats them as free. That single assumption settles a lot: rolling always beats stopping, so there is no \"should I stop\" question, and the value of a state is simply the expected final score under the best play.</p>" +
+      '<div class="formula">V(s, 0) = score(s)\nV(s, n) = max over lock masks m of  E[ max( V(s, n−1), V(T, n−1) ) ]</div>' +
+      "<p>No simulation. Every outcome of every roll is enumerated and the recursion is solved backwards from the last roll. The numbers you see are the exact expectations of the model, not a sample of them.</p>" +
+
+      "<h3>Keep or replace</h3>" +
+      "<p>The verdict never compares today's scores. It compares <b>continuation values</b> — what each set is worth with the remaining rolls still to come. A weaker set can genuinely be worth more, because the families it holds are cleared out of the pool and the next roll draws from a better one. Comparing raw scores would get that backwards.</p>" +
+
+      "<h3>Which locks to buy</h3>" +
+      "<p>A lock is only worth it when the line it holds is scarcer than what a fresh draw would hand you. The tool works out the expected final score for every legal lock mask and ranks them. Locking a line that scores nothing is never offered: it freezes a slot for no reason.</p>" +
+
+      "<h2>Turning damage into gold</h2>" +
+      "<p>Set what one percent of damage is worth to you, and set the bracelet you would otherwise wear. A state is then worth <code>(expected final % − baseline %) × gold per 1%</code>. With no lines and no baseline that is what an unrolled bracelet is worth to a buyer, which is the number the market actually needs. Slot count moves it a long way: three granted slots against two is a different item.</p>" +
+      "<p>The gold conversion is a rate you choose, not a market read. It is the same convention the accessory and astrogem tools use, so a bracelet, an accessory and a gem can be priced against each other.</p>" +
+
+      "<h2>Where the tables come from</h2>" +
+      "<p>Line values and probabilities are transcribed from the official Stove disclosure page, revised 2025-12-30. The listed special-effect percentages sum to 100.00016% because the page rounds; the model normalises at read time and never edits a published number. Basic-stat values are continuous bands from that page, not the four fixed points a community sheet lists — the official page wins. The character baseline is bebkok's gear tables and Arsonistic's DPS sheet, cross-checked against each other and against a live character payload.</p>" +
+      "<p>The model core ships with a battery of " + 814 + " checks: JavaScript against first principles, the exact solver against a brute-force recursion on small cases, and the whole JavaScript model against an independent Python mirror. Both have to pass before anything ships.</p>" +
+
+      "<h2>What this does not model</h2>" +
+      "<ul>" +
+      "<li><b>Speed lines.</b> Attack and move speed scores zero. It is worth real damage through Raid Captain, and that conversion is not built yet.</li>" +
+      "<li><b>Supports.</b> The support scoring path exists as a stub and is not calibrated. This is a damage-dealer tool.</li>" +
+      "<li><b>Positional base multipliers.</b> A front attack is ×1.20 and a back attack ×1.05 with +10% crit rate before any bracelet line. The tool uses your share inputs but does not fold those base multipliers in, so a positional line is valued against your average damage rather than against the boosted hit.</li>" +
+      "<li><b>Roll costs.</b> Silver per attempt rises with each roll and was never published. Treated as free.</li>" +
+      "<li><b>The Relic to Ancient upgrade.</b> Upgrading bumps existing lines. Pick the grade you are actually holding.</li>" +
+      "<li><b>Combat stat caps.</b> Reported as roughly 120 on Ancient, never confirmed for T4.</li>" +
+      "<li><b>Your class.</b> There is no class list. Set the shares — back, front, non-directional, stagger, demon — and the model follows them.</li>" +
+      "</ul>" +
+
+      "<h2>Reading the numbers honestly</h2>" +
+      "<p>\"Expected final\" is an average over every way the remaining rolls can land. Half of all bracelets finish below the median, and the p10 to p90 strip on the Calculator tab shows how wide that is. A bracelet worth 4% expected is not a bracelet that will be worth 4%.</p>" +
+      "<p>The community reads 7–9% as good and 10% or more as near-final. Those figures come from the same per-source percentage lostark.bible prints on a character page, so they are directly comparable to what this tool reports.</p>" +
+
+      "</div>";
+  }
+
+  document.addEventListener("tabselected", function (e) {
+    if (e && e.detail && e.detail.tab === "method") render();
+  });
+  if (document.querySelector("#tab-method.active")) render();
+})();

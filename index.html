@@ -11,25 +11,30 @@
 <meta property="og:description" content="Score any T4 bracelet in % damage, get exact keep-or-replace and lock advice, and price an unrolled bracelet.">
 <meta property="og:url" content="https://www.loseii.com/loa-bracelet-calc/">
 <!--
-  App shell for the Lost Ark T4 bracelet tool. PHASE 1: shell only — the panes
-  are empty and no UI module exists yet. The math lives in model/bracelet.js
-  (window.Bracelet), a pure core the UI will read and never mutate.
+  App shell for the Lost Ark T4 bracelet tool. The math lives in
+  model/bracelet.js (window.Bracelet), a pure core the UI reads and never mutates.
 
-  Three tabs: "Calculator" (#tab-calculator, first/default), "Leaderboard"
-  (#tab-leaderboard) and "Method" (#tab-method). The tab bar toggles .active on
-  the panes and fires a 'tabselected' event so a pane can act on activation.
+  Three tabs: "Calculator" (#tab-calculator, first/default, built by app.js),
+  "Leaderboard" (#tab-leaderboard, still a stub — phase 4) and "Method"
+  (#tab-method, method.js). The tab bar toggles .active on the panes and fires a
+  'tabselected' event so a pane can act on activation.
 
   Scripts load in two sets:
     EAGER (bottom of <body>, in order): data/bracelet-data.js and
-    data/gear-data.js (the official tables), model/bracelet.js (the core), then
-    tip.js. The Calculator module joins this list when it lands.
+    data/gear-data.js (the official tables), model/bracelet.js (the core), tip.js
+    (the shared tooltip), then app.js (the Calculator tab).
     LAZY (the LAZY_TABS map below): heavier per-tab modules load on FIRST
-    activation of their tab.
+    activation of their tab — method.js today.
+
+  The solver never runs on this thread: app.js spawns solver-worker.js, which
+  importScripts the same data + model files. Bump solver-worker.js's own ?v= on
+  those imports whenever the data or model changes, or the worker will keep
+  running yesterday's model out of cache.
 
   Deploy note: bump a file's ?v= whenever you edit it — the loseii edge caches
   JS for 4h and browsers cache-bust on that query.
 -->
-<link rel="stylesheet" href="styles.css?v=1">
+<link rel="stylesheet" href="styles.css?v=3">
 </head><body>
 <div class="wrap">
   <div class="appbar">
@@ -48,7 +53,9 @@
 
   <!-- Tab panes -->
   <section id="tab-calculator" class="tabpane active"></section>
-  <section id="tab-leaderboard" class="tabpane"></section>
+  <section id="tab-leaderboard" class="tabpane">
+    <div class="placeholder"><b>Leaderboard</b>Not built yet. It will rank bracelets by the same % damage figure the Calculator reports.</div>
+  </section>
   <section id="tab-method" class="tabpane"></section>
 </div>
 
@@ -58,7 +65,7 @@
 // Heavy, rarely-used modules load on FIRST activation of their tab instead of on
 // every visit. Empty until those modules exist; the loader is already wired so a
 // module only has to be added to the map.
-var LAZY_TABS = {};
+var LAZY_TABS = { method: ['method.js?v=1'] };
 var lazyLoaded = {};
 function loadScriptsSeq(list, done){
   if (!list.length) { done(); return; }
@@ -95,10 +102,11 @@ function selectTab(name){
      Order matters — model/bracelet.js reads window.BraceletData and
      window.BraceletGearData at parse time. -->
 <!-- ?v= cache-buster: bump on each deploy so browsers load fresh JS without a hard-refresh -->
-<script src="data/bracelet-data.js?v=1"></script>
-<script src="data/gear-data.js?v=1"></script>
-<script src="model/bracelet.js?v=1"></script>
+<script src="data/bracelet-data.js?v=2"></script>
+<script src="data/gear-data.js?v=2"></script>
+<script src="model/bracelet.js?v=2"></script>
 <script src="tip.js?v=1"></script>
+<script src="app.js?v=7"></script>
 <script src="https://www.loseii.com/nav.js" defer></script>
 <script src="https://www.loseii.com/social-bar.js" defer></script>
 </body></html>

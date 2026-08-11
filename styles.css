@@ -43,9 +43,12 @@ code,.mono{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-
 .tabpane{display:none}
 .tabpane.active{display:block}
 
-/* ---- sticky, collapsible input panel (for the UI phase) ---- */
-.inputs{position:sticky;top:var(--loseii-nav-offset,0px);z-index:20;background:rgba(13,16,23,.97);
-  border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:6px;backdrop-filter:blur(6px)}
+/* ---- sticky, collapsible input panel ----
+   No backdrop-filter. Chrome stops painting this panel's contents entirely once
+   the page scrolls (the panel keeps its box and its layout, and goes blank), and
+   the 97%-opaque background makes the blur invisible anyway. */
+.inputs{position:sticky;top:var(--loseii-nav-offset,0px);z-index:20;background:rgba(13,16,23,.985);
+  border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:6px}
 .ihdr{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);font-weight:700;user-select:none;margin-bottom:10px}
 .ihdr .tgl{cursor:pointer}
 .ig{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px 14px}
@@ -64,6 +67,17 @@ button.primary:hover{filter:brightness(1.08)}
 .mbtn{background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;color:var(--dim)}
 .mbtn.active{color:#06121f;background:var(--accent)}
 .note{color:var(--dim);font-size:11px;margin-top:6px}
+
+/* Sub-labels that just caption a value; smaller and quieter than .fld label. */
+.fld .hint{font-size:10px;color:var(--dim);margin-top:2px}
+/* Native selects render their popup with the OS palette unless told otherwise;
+   this keeps the grouped, priced family pickers dark instead of a white flash. */
+select{color-scheme:dark}
+optgroup{background:var(--panel2);color:var(--dim);font-style:normal;font-weight:700}
+option{background:var(--panel2);color:var(--text)}
+/* A disabled control still has to read as text, not as a hole in the panel. */
+button.mbtn:disabled,button.primary:disabled{opacity:.42;cursor:not-allowed}
+button.mbtn:hover:not(:disabled){color:var(--text);border-color:var(--accent)}
 
 /* placeholder block for stub tabs */
 .placeholder{border:1px dashed var(--border);border-radius:10px;padding:40px 20px;text-align:center;color:var(--dim)}
