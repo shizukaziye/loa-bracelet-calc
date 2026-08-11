@@ -54,7 +54,7 @@
 
   // Kept in sync BY HAND with bible-import.js's own WORKER_URL. Empty = no Worker;
   // the board then reads the baked seed, which is the state this ships in.
-  var WORKER_URL = "";
+  var WORKER_URL = "https://bracelet-bible.shizukaziye.workers.dev";
 
   // The baked board. ?v= for the same reason every other file carries one: the
   // loseii zone edge-caches for four hours, so a re-baked seed needs a new URL.

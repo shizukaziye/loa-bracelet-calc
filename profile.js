@@ -119,7 +119,7 @@
         accessoryMainStat: 71429, rosterBonus: 2085,
         addWeapon: 30, addPet: 1, addAstrogem: 4.84,
         staggerShare: 10, demonBase: 7.3, shieldUptime: 60, enemyDR: 50,
-        allyCount: 2
+        allyCount: 2, atkSpeedPer10: 1
       },
       skills: [{ name: "", share: 100, cr: 90, cd: 280 }],
       econ: { gpd: 1500000, baseline: 0 },
@@ -369,7 +369,13 @@
       cooldownPenaltyWeight: S.fight.cdWeight / 100,
       // Families 20/21/22 are hard assumptions now (max stacks, full uptime);
       // leaving them out lets the model's own defaults stand.
-      atkMoveSpeedDamagePerPct: 0
+      //
+      // Attack speed pays off through extra casts and is scored: Shizu's rule is
+      // 10% speed = 1% damage. This used to hard-code 0, which silently zeroed
+      // families 1 and 20's speed component for the LIVE profile while the ghost
+      // markers (canonical default) still counted it — the rows looked wrong and
+      // the tick moved. The deck's own slider is per TEN percent, so divide by 10.
+      atkMoveSpeedDamagePerPct: (a.atkSpeedPer10 == null ? 1 : a.atkSpeedPer10) / 10
     });
   }
 
@@ -1171,6 +1177,10 @@
     h += fldNum("adv.shieldUptime", "Shield uptime %", "1", "How much of the fight your party sits under a shield, for the shielded-target line.");
     h += fldNum("adv.enemyDR", "Enemy damage reduction %", "1", "The boss's damage reduction before any shred. It sets how much a defense shred is worth: gain = (D+K)/(D(1−A)+K).");
     h += fldNum("adv.allyCount", "Ally DPS in party", "1", "How many other damage dealers share your party debuffs. Each is assumed to deal what you deal before the line.");
+    h += slider("adv.atkSpeedPer10", "Attack speed value", 0, 3, 0.1, "pct1", {
+      edit: true,
+      gloss: "What 10% attack speed is worth in damage, through the extra casts it buys. Default 1%. It drives the Attack & Move Speed line and the speed half of the stacking weapon-power line."
+    });
     h += "</div>";
     h += '<div class="note">The conditional weapon-power families (20, 21 and 22) are no longer knobs: they are scored at max stacks and full uptime.</div>';
 
