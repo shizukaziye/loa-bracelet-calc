@@ -1817,6 +1817,9 @@
       }
       next.locks = null; next.rolled = null;      // a new bracelet voids the cut in progress
       lastVerdict = null;
+      // The banner and the cards read lastSolve. It belongs to the bracelet being
+      // replaced, so drop it: "—" for a moment beats the previous character's score.
+      lastSolve = null; lastSolveKey = null; freshSolve = null; freshSolveKey = null;
       if (patch.character) next.char = patch.character;
       P.set(next);                                 // merges, persists, re-renders the deck, notifies
       if (patch.character) importProfileValues(patch.character);
