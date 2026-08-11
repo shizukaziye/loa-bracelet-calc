@@ -814,7 +814,9 @@
         "color:var(--dim);font-weight:700;margin:0 0 8px}" +
       "#bc-import .bi-favs .lab .lab-star{color:var(--high);margin-right:3px}" +
       "#bc-import .bi-favs .lab+.bi-favlist{margin-bottom:12px}" +
-      "#bc-import .bi-favlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}" +
+      "#bc-import .bi-favlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;"
+      // three rows of chips, then scroll: 3*32px chip + 2*6px gap (measured)
+      + "max-height:108px;overflow-y:auto;padding-right:4px}" +
       "#bc-import .bi-favlist.bi-board{max-height:186px;overflow-y:auto;padding-right:4px}" +
       "#bc-import .bi-favrow{display:flex;align-items:stretch;gap:5px}" +
       "#bc-import .bi-favrow .bi-favbtn{flex:1 1 auto;min-width:0}" +
@@ -1107,14 +1109,10 @@
       h += '<span class="bi-favempty">No saved characters yet — grade one and tap its ★.</span>';
     }
     if (boardChars && boardChars.length) {
-      var rest = boardChars.filter(function (c) { return !(F && F.has(c.region, c.name)); });
-      if (rest.length) {
-        h += '<span class="lab">On the board (' + rest.length + ")</span>" +
-          '<div class="bi-favlist bi-board" data-set="board">' + rest.map(function (c, i) {
-            return favRowHtml(c, i, false, "board");
-          }).join("") + "</div>";
-      }
-      boardRest = rest;
+      // The "On the board" list was removed (Shizu, 2026-08-11): the Leaderboard tab
+      // already lists everyone, and 59 extra chips buried the saved characters. The
+      // board index is still fetched — it feeds class icons and the field rank.
+      boardRest = [];
     }
     host.innerHTML = h;
     ensureFavClasses(favs);

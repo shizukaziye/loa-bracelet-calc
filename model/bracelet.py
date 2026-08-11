@@ -1168,7 +1168,10 @@ def decode_bible_bracelet(stats, opts=None):
             base = 11000 if t == 3 else 605100000
             off = st["index"] - base
             gd = off % 10
-            fam = (off - gd) // 10 + 10
+            n = (off - gd) // 10
+            # See bracelet.js: n 1-23 are damage families 11-33; n 26-35 are the ten
+            # utility families 1-10.
+            fam = (n - 25) if 26 <= n <= 35 else (n + 10)
             tier = GRADE_DIGIT.get(gd)
             if tier and fam in DATA.SPECIAL_BY_ID:
                 line = {"cat": "special", "family": fam, "tier": tier,

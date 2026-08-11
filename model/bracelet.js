@@ -1484,7 +1484,13 @@
       if (st.type === 3 || st.type === 4) {
         var basePt = st.type === 3 ? 11000 : 605100000;
         var off = st.index - basePt;
-        var gd = off % 10, fam = ((off - gd) / 10) + 10;
+        var gd = off % 10, n = (off - gd) / 10, fam;
+        // Two blocks. n = 1..23 are the damage families 11-33 (family = n + 10);
+        // n = 26..35 are the ten utility families 1-10 (family = n - 25). Confirmed
+        // against rendered tooltips: 11261 -> n 26 -> family 1 "Atk./Move Speed +6%",
+        // 11342 -> n 34 -> family 9 "Movement Skill cooldown -10%".
+        if (n >= 26 && n <= 35) fam = n - 25;
+        else fam = n + 10;
         var tier = GRADE_DIGIT[gd];
         if (tier && DATA.SPECIAL_BY_ID[fam]) {
           line = { cat: "special", family: fam, tier: tier, value: DATA.SPECIAL_BY_ID[fam].values[grade][tier],
