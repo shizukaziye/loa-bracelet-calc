@@ -711,6 +711,337 @@ function braceletInLoadout(loadoutSrc) {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// The LEFT COLUMN — everything the control deck's gear panel holds
+// ---------------------------------------------------------------------------
+
+/**
+ * The calculator's left column is not just item level. It is six honing levels,
+ * a necklace additional-damage line, two earring weapon-power lines, one gem
+ * level, a 9/7 ability stone and the Master ark-passive node — and every one of
+ * them is on the character page, inside the SAME loadout object the bracelet
+ * came from. parseCharacterProfile() below reads all of it.
+ *
+ * Where each field lives, all of it confirmed against 59 saved pages
+ * (117 loadouts) rather than assumed:
+ *
+ *   HONING      items[].data {type:"equipment", honing, advancedHoning}. Six
+ *               slots, page names on the left, deck names on the right:
+ *               weapon·head·shoulder pass through; upper_body=chest,
+ *               lower_body=pants, hand=gloves. `honing` is the exact +N (12…25
+ *               across the corpus). `advancedHoning` is the Aegir track and the
+ *               deck has no control for it, so it is reported, never applied.
+ *
+ *   ACCESSORY   items[neck|ear1|ear2].data.stats[]. Accessory stats carry a
+ *   LINES       `base` flag; the ROLLED grinding lines are `base:false` (the
+ *               bracelet's own stats use `fixed` instead — that is the
+ *               structural discriminator between the two). Index 50 on the neck
+ *               is Additional Damage and index 152 on an earring is Weapon
+ *               Power, both in centi-percent. The corpus holds exactly
+ *               {70,160,260} and {80,180,300}, i.e. the deck's own segmented
+ *               options 0.7/1.6/2.6 and 0.8/1.8/3 — so the snap below is a
+ *               guard, not a routine approximation. Index 49 (crit rate) and
+ *               151/124/27/28/34/106 are the other rolled lines; the deck has
+ *               no control for them.
+ *
+ *   GEMS        loadout.gems[] {slot, id, effects[]}. The level is NOT reliably
+ *               decodable from the id — the 6503x/6504x families encode it in
+ *               digits 6-7 but the 6509x family does not — so read the gem's
+ *               attack-power effect instead: {type:2, id:150, value}, in
+ *               centi-percent, one per gem. 45→lv6, 60→lv7, 80→lv8, 100→lv9,
+ *               120→lv10, checked against the "Lv. N" the page prints. The deck
+ *               has ONE gem slider, so the MODAL level is what it gets and the
+ *               whole spread rides along in gemLevels[] for the note.
+ *
+ *   9/7 STONE   items[slot="ability_stone"].data.engravings[] {id, nodes}.
+ *               Three engravings, always. "9/7" is the two damage engravings at
+ *               9 and 7 nodes, so the toggle goes on when the top two node
+ *               counts clear 9 and 7 — a 9/8 or 10/7 stone is a 9/7 or better
+ *               and counts.
+ *
+ *   MASTER      loadout.arkPassive.evolution[] {id, level}. The node ids are
+ *               opaque, but the page also RENDERS the same list by name, in the
+ *               same order, under its "Evolution" heading — so aligning the two
+ *               across all 59 pages names every id. Master is 1032200
+ *               (unanimous, 15 of 59 characters have it; its tier-4 neighbours
+ *               are 1032100 Critical and 1032300 Pulverize).
+ *
+ * NOT ON THE PAGE, and therefore never emitted:
+ *
+ *   mainStat / weaponPower as the deck means them — its two override fields are
+ *   RAW, before the main-stat and weapon-power percentage buckets. The page
+ *   carries battlePoint.parts[0].{mainStat,weaponPower}, which are the TOTALS
+ *   after those buckets; handing them over would double-count ~9% and would
+ *   flip the override switch that hides the six honing sliders we just filled
+ *   exactly. They ride in `raw` under their honest names instead.
+ *
+ *   critRate / critDamage. lostark.bible prints neither for the character; the
+ *   only "Crit Rate" strings on the page belong to accessory and elixir lines.
+ */
+
+// page slot -> deck path under `gear`
+const GEAR_SLOTS = {
+  weapon: "weapon", head: "head", shoulder: "shoulder",
+  upper_body: "chest", lower_body: "pants", hand: "gloves"
+};
+const GEAR_PIECES = ["head", "shoulder", "chest", "pants", "gloves", "weapon"];
+
+const ACC_ADD_DAMAGE = 50;        // neck, centi-%
+const ACC_WEAPON_POWER = 152;     // earring, centi-%
+const NECK_OPTIONS = [0, 0.7, 1.6, 2.6];
+const EAR_OPTIONS = [0, 0.8, 1.8, 3];
+
+// A gem's attack-power effect -> its level. The effect is {type:2, id:150}.
+const GEM_AP_LEVEL = { 45: 6, 60: 7, 80: 8, 100: 9, 120: 10 };
+
+const MASTER_NODE_ID = 1032200;   // Ark Passive · Evolution · T4 · "Master"
+
+/** The nearest legal option, for a value the page could in principle drift off. */
+function snapTo(options, v) {
+  let best = options[0], d = Infinity;
+  for (let i = 0; i < options.length; i++) {
+    const dd = Math.abs(options[i] - v);
+    if (dd < d) { d = dd; best = options[i]; }
+  }
+  return best;
+}
+
+/** The rolled (`base:false`) stat lines of one accessory `data` source. */
+function rolledAccessoryLines(dataSrc) {
+  const stats = field(dataSrc, "stats");
+  if (!stats || stats[0] !== "[") return [];
+  const out = [];
+  const els = splitTop(stats);
+  for (let i = 0; i < els.length; i++) {
+    if (field(els[i], "base") !== "false") continue;      // base:true is the accessory's own stat block
+    out.push({
+      type: numOrNull(field(els[i], "type")),
+      index: numOrNull(field(els[i], "index")),
+      value: numOrNull(field(els[i], "value"))
+    });
+  }
+  return out;
+}
+
+/** The centi-% value of one rolled index on an accessory, or null. */
+function rolledLine(dataSrc, index) {
+  const lines = rolledAccessoryLines(dataSrc);
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].type === 2 && lines[i].index === index) return lines[i].value;
+  }
+  return null;
+}
+
+/** The most common value in a list; ties fall to the highest. */
+function modal(list) {
+  const count = {};
+  let best = null, bestN = 0;
+  for (let i = 0; i < list.length; i++) {
+    const v = list[i];
+    count[v] = (count[v] || 0) + 1;
+    if (count[v] > bestN || (count[v] === bestN && v > best)) { best = v; bestN = count[v]; }
+  }
+  return best;
+}
+
+/** "9,9,9,10,9" — a spread, printed the way the provenance note wants it. */
+function spreadText(list) {
+  const sorted = list.slice().sort(function (a, b) { return b - a; });
+  return sorted.join(",");
+}
+
+/**
+ * Everything the deck's left column can honestly hold, read off ONE loadout.
+ *
+ *   parseCharacterProfile(html)              the first loadout on the page
+ *   parseCharacterProfile(html, loadoutSrc)  that loadout's source text
+ *
+ * EVERY FIELD IS OPTIONAL. A field that could not be read is absent, never a
+ * guess and never a default — a missing honing level leaves the deck's own
+ * item-level derivation in place, which is the honest fallback.
+ *
+ * `raw` carries the unsnapped, uncollapsed readings, so the UI can say what it
+ * actually saw ("read 2.60% from the neck", "gems are 10,10,9,… — set to 10")
+ * rather than only what it set.
+ */
+function parseCharacterProfile(html, loadoutSrc) {
+  let src = loadoutSrc;
+  if (!src) {
+    const at = html.indexOf("loadouts:[");
+    if (at !== -1) {
+      const arrAt = html.indexOf("[", at);
+      const end = matchSpan(html, arrAt);
+      if (end !== -1) src = splitTop(html.slice(arrAt, end + 1))[0] || null;
+    }
+  }
+  if (!src) return null;
+
+  const out = { raw: {}, missing: [] };
+
+  // ---- item level, class, combat power -------------------------------------
+  const ilvl = numOrNull(field(src, "itemLevel"));
+  if (ilvl != null) out.itemLevel = ilvl;
+  const classId = unquote(field(src, "classId"));
+  if (classId) out.classId = classId;
+  const cp = field(src, "combatPower");
+  if (cp && cp[0] === "{") {
+    const sc = numOrNull(field(cp, "score"));
+    if (sc != null) out.combatPower = sc;
+  }
+  const ap = field(src, "apPoints");
+  if (ap && ap[0] === "{") {
+    out.apPoints = {
+      enlightenment: numOrNull(field(ap, "enlightenment")),
+      evolution: numOrNull(field(ap, "evolution")),
+      leap: numOrNull(field(ap, "leap"))
+    };
+  }
+
+  // ---- one pass over items: honing, accessories, the stone ------------------
+  const itemsSrc = field(src, "items");
+  const honing = {}, advanced = {};
+  let neckData = null, ear1Data = null, ear2Data = null, stoneSrc = null;
+  if (itemsSrc && itemsSrc[0] === "[") {
+    const els = splitTop(itemsSrc);
+    for (let i = 0; i < els.length; i++) {
+      const slot = unquote(field(els[i], "slot"));
+      if (!slot) continue;
+      const data = field(els[i], "data");
+      if (!data || data[0] !== "{") continue;             // `data: void 0` — empty slot
+      if (GEAR_SLOTS[slot]) {
+        const h = numOrNull(field(data, "honing"));
+        if (h != null) honing[GEAR_SLOTS[slot]] = h;
+        const a = numOrNull(field(data, "advancedHoning"));
+        if (a != null) advanced[GEAR_SLOTS[slot]] = a;
+      } else if (slot === "neck") neckData = data;
+      else if (slot === "ear1") ear1Data = data;
+      else if (slot === "ear2") ear2Data = data;
+      else if (slot === "ability_stone") stoneSrc = data;
+    }
+  }
+
+  let honingCount = 0;
+  for (let i = 0; i < GEAR_PIECES.length; i++) if (honing[GEAR_PIECES[i]] != null) honingCount++;
+  if (honingCount) {
+    out.honing = honing;
+    out.raw.honingPieces = honingCount;
+    if (honingCount < GEAR_PIECES.length) out.missing.push("honing:" + (GEAR_PIECES.length - honingCount));
+  } else out.missing.push("honing");
+  for (const k in advanced) { out.advancedHoning = advanced; break; }
+
+  // ---- the necklace's additional damage, the earrings' weapon power ---------
+  const neckRaw = neckData ? rolledLine(neckData, ACC_ADD_DAMAGE) : null;
+  if (neckRaw != null) {
+    out.raw.neckAddDmg = neckRaw / 100;
+    out.neckAddDmg = snapTo(NECK_OPTIONS, neckRaw / 100);
+  } else if (neckData) {
+    // The necklace is there and simply has no additional-damage line: that is a
+    // reading of 0%, not a failure to read.
+    out.raw.neckAddDmg = 0;
+    out.neckAddDmg = 0;
+  } else out.missing.push("neck");
+
+  const earPairs = [["earring1Wp", ear1Data], ["earring2Wp", ear2Data]];
+  for (let i = 0; i < earPairs.length; i++) {
+    const key = earPairs[i][0], data = earPairs[i][1];
+    if (!data) { out.missing.push(key); continue; }
+    const v = rolledLine(data, ACC_WEAPON_POWER);
+    const pct = v == null ? 0 : v / 100;
+    out.raw[key] = pct;
+    out[key] = snapTo(EAR_OPTIONS, pct);
+  }
+
+  // ---- the 9/7 stone -------------------------------------------------------
+  if (stoneSrc) {
+    const eng = field(stoneSrc, "engravings");
+    if (eng && eng[0] === "[") {
+      const els = splitTop(eng), nodes = [];
+      for (let i = 0; i < els.length; i++) {
+        const n = numOrNull(field(els[i], "nodes"));
+        if (n != null) nodes.push(n);
+      }
+      nodes.sort(function (a, b) { return b - a; });
+      if (nodes.length >= 2) {
+        out.raw.stoneNodes = nodes;
+        out.stone97 = nodes[0] >= 9 && nodes[1] >= 7;
+      } else out.missing.push("stone");
+    } else out.missing.push("stone");
+  } else out.missing.push("stone");
+
+  // ---- the gems ------------------------------------------------------------
+  const gemsSrc = field(src, "gems");
+  if (gemsSrc && gemsSrc[0] === "[") {
+    const els = splitTop(gemsSrc), levels = [];
+    let unreadable = 0;
+    for (let i = 0; i < els.length; i++) {
+      const effects = field(els[i], "effects");
+      let lv = null;
+      if (effects && effects[0] === "[") {
+        const fx = splitTop(effects);
+        for (let j = 0; j < fx.length; j++) {
+          if (numOrNull(field(fx[j], "type")) !== 2) continue;
+          if (numOrNull(field(fx[j], "id")) !== 150) continue;
+          const v = numOrNull(field(fx[j], "value"));
+          if (v != null && GEM_AP_LEVEL[v]) lv = GEM_AP_LEVEL[v];
+          break;
+        }
+      }
+      if (lv == null) unreadable++; else levels.push(lv);
+    }
+    if (levels.length) {
+      out.gemLevels = levels;
+      out.gemLevel = modal(levels);
+      out.raw.gemCount = levels.length + unreadable;
+      out.raw.gemSpread = spreadText(levels);
+      out.raw.gemMixed = levels.length > 1 && Math.min.apply(null, levels) !== Math.max.apply(null, levels);
+      if (unreadable) out.raw.gemsUnreadable = unreadable;
+    } else if (els.length) {
+      // A whole set of gems with no attack-power effect — the pre-T4 family.
+      // Reading nothing is right; guessing a level would move the whole attack
+      // power bucket.
+      out.missing.push("gems");
+      out.raw.gemsUnreadable = els.length;
+    } else out.missing.push("gems");
+  } else out.missing.push("gems");
+
+  // ---- Master ---------------------------------------------------------------
+  const arkSrc = field(src, "arkPassive");
+  if (arkSrc && arkSrc[0] === "{") {
+    const evo = field(arkSrc, "evolution");
+    if (evo && evo[0] === "[") {
+      const els = splitTop(evo), ids = [];
+      for (let i = 0; i < els.length; i++) {
+        const id = numOrNull(field(els[i], "id"));
+        if (id != null) ids.push(id);
+      }
+      out.master = ids.indexOf(MASTER_NODE_ID) !== -1;
+      out.raw.evolutionNodes = ids.length;
+    } else out.missing.push("master");
+  } else out.missing.push("master");
+
+  // ---- the two numbers the page has but the deck cannot take ----------------
+  const bp = field(src, "battlePoint");
+  if (bp && bp[0] === "{") {
+    const parts = field(bp, "parts");
+    if (parts && parts[0] === "[") {
+      const els = splitTop(parts);
+      for (let i = 0; i < els.length; i++) {
+        if (numOrNull(field(els[i], "type")) !== 1) continue;
+        const ms = numOrNull(field(els[i], "mainStat"));
+        const wp = numOrNull(field(els[i], "weaponPower"));
+        // TOTALS, after the % buckets — see the header. Named so no reader can
+        // mistake them for the deck's raw override pair.
+        if (ms != null) out.raw.mainStatTotal = ms;
+        if (wp != null) out.raw.weaponPowerTotal = wp;
+        break;
+      }
+    }
+  }
+
+  if (!out.missing.length) delete out.missing;
+  return out;
+}
+
 /**
  * Every loadout on the page that has a bracelet, newest-rendered flagged.
  * Returns [] when the loadouts array is absent or unparseable, which is the
@@ -733,6 +1064,10 @@ function extractLoadouts(html) {
       label: loadoutLabel(classification),
       itemLevel: numOrNull(field(srcs[i], "itemLevel")),
       lastUpdated: numOrNull(field(srcs[i], "lastUpdated")),
+      // The left column BELONGS TO THE LOADOUT, not to the character: a chaos
+      // loadout can wear different accessories and different gems from the raid
+      // one, so each pill carries its own.
+      profile: parseCharacterProfile(html, srcs[i]),
       stats: br.stats,
       numRerolls: typeof br.numRerolls === "number" ? br.numRerolls : null,
       numTicketRerolls: typeof br.numTicketRerolls === "number" ? br.numTicketRerolls : null
@@ -880,6 +1215,10 @@ async function fetchCharacterPage(env, region, name, userToken) {
     loadouts: loadouts,
     chosenLoadout: bestIdx,
     chosenClassification: b.classification,
+    // ARCHITECTURE §1.1 — the grader auto-fill block, for the CHOSEN loadout.
+    // Each loadout carries its own copy too; this one is the default the client
+    // uses before the user clicks a different pill.
+    profile: b.profile || null,
     source: "lostark.bible",
     url: url
   } };
@@ -1007,10 +1346,15 @@ function characterResponse(r) {
         classification: l.classification, label: l.label,
         itemLevel: l.itemLevel, lastUpdated: l.lastUpdated, isRendered: !!l.isRendered,
         bracelet: { type: "bracelet", stats: l.stats, numRerolls: l.numRerolls, numTicketRerolls: l.numTicketRerolls },
-        defaultScore: l.score || null
+        defaultScore: l.score || null,
+        // Each tab has its OWN gear, accessories and gems — a pill click must
+        // refill the deck, not just the bracelet.
+        profile: l.profile || null
       };
     }),
     chosenLoadout: typeof rec.chosenLoadout === "number" ? rec.chosenLoadout : null,
+    // ARCHITECTURE §1.1 — the chosen loadout's grader auto-fill block.
+    profile: rec.profile || null,
     grade: rec.score && rec.score.grade,
     defaultScore: rec.score,          // CANONICAL DEFAULT profile — the leaderboard number
     published: !!rec.published,
@@ -1484,5 +1828,7 @@ export const __test = {
   ownsCharacter: ownsCharacter, normRegion: normRegion, decodeWithGradeCheck: decodeWithGradeCheck,
   DEFAULT_PROFILE: DEFAULT_PROFILE,
   extractLoadouts: extractLoadouts, pickBestLoadout: pickBestLoadout,
-  briefScore: briefScore, loadoutLabel: loadoutLabel
+  briefScore: briefScore, loadoutLabel: loadoutLabel,
+  parseCharacterProfile: parseCharacterProfile, snapTo: snapTo, modal: modal,
+  MASTER_NODE_ID: MASTER_NODE_ID, GEM_AP_LEVEL: GEM_AP_LEVEL
 };

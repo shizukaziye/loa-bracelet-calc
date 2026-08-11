@@ -24,7 +24,7 @@
  * bindings, CORS stamping, the OAuth round trip, and whether a real character
  * page still matches the parser.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { __test } from "../worker/bracelet.js";
@@ -32,7 +32,8 @@ import { __test } from "../worker/bracelet.js";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 const { score, extractBracelets, collectRosterChars, ownsCharacter, normRegion,
-        extractLoadouts, pickBestLoadout, briefScore, loadoutLabel } = __test;
+        extractLoadouts, pickBestLoadout, briefScore, loadoutLabel,
+        parseCharacterProfile, snapTo, modal, MASTER_NODE_ID, GEM_AP_LEVEL } = __test;
 
 let pass = 0, fail = 0;
 function ok(name, cond, detail) {
@@ -192,6 +193,102 @@ ok("`data: void 0` is an empty slot, not a bracelet", one.length === 1, String(o
 ok("a page with no loadouts array yields nothing rather than throwing",
   extractLoadouts('slot:"bracelet",data:{type:"bracelet",stats:[]}').length === 0);
 ok("a truncated loadouts array does not throw", extractLoadouts("loadouts:[{classification:\"x\"").length === 0);
+
+// ---------------------------------------------------------------------------
+console.log("\n2c. the LEFT COLUMN — parseCharacterProfile");
+// ---------------------------------------------------------------------------
+// One hand-built loadout in the exact hydration-blob style, carrying one of
+// everything the deck's gear panel holds. The real corpus lives in .corpus/
+// (gitignored, 59 pages); the optional sweep at the end of this section runs
+// over it when it is there, so a shape change upstream shows up as a coverage
+// drop rather than as silence.
+const GEAR = ["weapon:25", "head:21", "upper_body:22", "lower_body:20", "hand:23", "shoulder:19"]
+  .map(s => s.split(":"))
+  .map(([slot, h]) => '{id:1,slot:"' + slot + '",data:{type:"equipment",stats:[],honing:' + h + ',advancedHoning:40}}')
+  .join(",");
+const ACC =
+  '{id:2,slot:"neck",data:{type:"tier4_accessory",stats:[' +
+    "{type:2,index:6,base:true,id:6003,value:3835}," +          // base block, not a roll
+    "{type:2,index:27,base:false,id:6009,value:1300}," +        // a roll the deck has no control for
+    "{type:2,index:50,base:false,id:6009,value:260}]}}," +      // Additional Damage 2.60%
+  '{id:3,slot:"ear1",data:{type:"tier4_accessory",stats:[' +
+    "{type:2,index:152,base:false,id:6109,value:180}]}}," +     // Weapon Power 1.80%
+  '{id:4,slot:"ear2",data:{type:"tier4_accessory",stats:[' +
+    "{type:2,index:49,base:false,id:6109,value:155}]}}";        // crit rate only: no WP line at all
+const STONE = '{id:5,slot:"ability_stone",data:{engravings:[{id:141,nodes:7},{id:247,nodes:9},{id:800,nodes:1}],type:"ability_stone"}}';
+const GEMS = "gems:[" +
+  Array.from({ length: 10 }, (_, i) => "{slot:" + i + ",id:65032100,effects:[{type:27,id:47250,value:2400},{type:2,id:150,value:120}]}").join(",") +
+  ",{slot:10,id:65032090,effects:[{type:27,id:47250,value:2200},{type:2,id:150,value:100}]}]";
+const APASS = "arkPassive:{evolution:[{id:1010100,level:10},{id:1032200,level:1},{id:1032300,level:1}],enlightenment:[],leap:[]}";
+const PROFILE_HTML = "loadouts:[{classification:\"most_recent_raid\",lastUpdated:1,itemLevel:1789.1661," +
+  "combatPower:{id:1,score:7200.5},classId:\"blade\",apPoints:{enlightenment:101,evolution:140,leap:70}," +
+  GEMS + ",items:[" + GEAR + "," + ACC + "," + STONE + "," +
+  '{id:9,slot:"bracelet",data:{type:"bracelet",stats:[{type:2,index:15,id:1,value:101,fixed:true}],numRerolls:1,numTicketRerolls:0}}],' +
+  "battlePoint:{parts:[{type:1,value:1,mainStat:827342,weaponPower:265706}]}," + APASS + "}]";
+
+const pf = parseCharacterProfile(PROFILE_HTML);
+ok("reads all six honing levels", pf && pf.honing &&
+  pf.honing.weapon === 25 && pf.honing.head === 21 && pf.honing.chest === 22 &&
+  pf.honing.pants === 20 && pf.honing.gloves === 23 && pf.honing.shoulder === 19,
+  JSON.stringify(pf && pf.honing));
+ok("upper_body/lower_body/hand become chest/pants/gloves",
+  pf.honing.chest === 22 && pf.honing.pants === 20 && pf.honing.gloves === 23);
+ok("advanced honing is reported, never applied", pf.advancedHoning && pf.advancedHoning.weapon === 40);
+ok("the neck's additional damage is 2.6%", pf.neckAddDmg === 2.6, String(pf.neckAddDmg));
+ok("a base:true line is not mistaken for a roll", pf.raw.neckAddDmg === 2.6);
+ok("earring 1's weapon power is 1.8%", pf.earring1Wp === 1.8, String(pf.earring1Wp));
+ok("an earring with no weapon-power line reads 0, not nothing",
+  pf.earring2Wp === 0, String(pf.earring2Wp));
+ok("nine gems at 10 and one at 9 collapse to the modal 10", pf.gemLevel === 10, String(pf.gemLevel));
+ok("the whole gem spread rides along", pf.gemLevels.length === 11 && pf.raw.gemMixed === true,
+  JSON.stringify(pf.gemLevels));
+ok("a 9/7 stone turns the toggle on", pf.stone97 === true, JSON.stringify(pf.raw.stoneNodes));
+ok("the top TWO nodes decide it, not the third", pf.raw.stoneNodes.join("/") === "9/7/1");
+ok("the Master evolution node is found", pf.master === true);
+ok("item level, class and combat power come through",
+  pf.itemLevel === 1789.1661 && pf.classId === "blade" && pf.combatPower === 7200.5);
+ok("the page's post-bucket totals are NOT offered as the deck's raw pair",
+  pf.mainStat === undefined && pf.weaponPower === undefined &&
+  pf.raw.mainStatTotal === 827342 && pf.raw.weaponPowerTotal === 265706);
+ok("a stone one node short of 9/7 turns the toggle off",
+  parseCharacterProfile(PROFILE_HTML.replace("nodes:7}", "nodes:6}")).stone97 === false);
+ok("no Master node means the toggle is off, not unknown",
+  parseCharacterProfile(PROFILE_HTML.replace("{id:1032200,level:1},", "")).master === false);
+ok("gems with no attack-power effect are read as UNKNOWN, not as a level",
+  parseCharacterProfile(PROFILE_HTML.replace(/,\{type:2,id:150,value:\d+\}/g, "")).gemLevel === undefined);
+ok("a page with no loadouts array yields null rather than throwing",
+  parseCharacterProfile("nothing here at all") === null);
+ok("a truncated loadout does not throw",
+  parseCharacterProfile('loadouts:[{classification:"x",items:[{id:1,slot:"head"') !== undefined);
+ok("snapTo picks the nearest legal option", snapTo([0, 0.7, 1.6, 2.6], 1.59) === 1.6 &&
+  snapTo([0, 0.8, 1.8, 3], 2.9) === 3 && snapTo([0, 0.7, 1.6, 2.6], 0.1) === 0);
+ok("modal breaks a tie upwards", modal([9, 9, 10, 10]) === 10 && modal([8, 9, 9]) === 9);
+ok("the Master node id is the one the corpus named", MASTER_NODE_ID === 1032200);
+ok("the gem attack-power ladder covers 6…10",
+  [45, 60, 80, 100, 120].every((v, i) => GEM_AP_LEVEL[v] === i + 6));
+
+// Optional: the real corpus, when it is on this machine.
+const corpusDir = join(root, ".corpus");
+let corpusFiles = [];
+try { corpusFiles = readdirSync(corpusDir).filter(f => f.endsWith(".html")); } catch (e) { corpusFiles = []; }
+if (!corpusFiles.length) {
+  console.log("  --   .corpus/ is not here (it is gitignored); skipping the real-page sweep");
+} else {
+  const need = ["honing", "neckAddDmg", "earring1Wp", "earring2Wp", "stone97", "master", "itemLevel"];
+  const missed = {};
+  let los = 0, gems = 0;
+  for (const f of corpusFiles) {
+    for (const l of extractLoadouts(readFileSync(join(corpusDir, f), "utf8"))) {
+      los++;
+      if (!l.profile) { missed.PROFILE = (missed.PROFILE || 0) + 1; continue; }
+      for (const k of need) if (l.profile[k] === undefined) missed[k] = (missed[k] || 0) + 1;
+      if (l.profile.gemLevel !== undefined) gems++;
+    }
+  }
+  ok("every loadout in .corpus yields every non-gem field (" + corpusFiles.length + " pages, " + los + " loadouts)",
+    Object.keys(missed).length === 0, JSON.stringify(missed));
+  ok("gems read on all but the loadouts that have none", gems >= los - 15, gems + "/" + los);
+}
 
 // ---------------------------------------------------------------------------
 console.log("\n3. the consent gate");

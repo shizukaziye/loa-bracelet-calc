@@ -17,6 +17,10 @@
  *   mount(hostEl)      -> put the control deck inside hostEl and render it
  *   onChange(cb)       -> unsubscribe fn; cb(detail) after every change the deck makes
  *   reset()            -> back to defaults, wiping the stored state
+ *   resetCharacter()   -> the gear / accessory / fight / skill / economy half only
+ *   resetBracelet()    -> the granted rows, fixed lines, locks, rolls and traits only
+ *   applyCharacterProfile(profileBlock, char)
+ *                      -> fill the WHOLE left column from a lostark.bible page
  *
  * ONE DECK, RE-PARENTED — the multi-mount decision.
  * Every control in the deck carries a stable id derived from its state path
@@ -35,6 +39,21 @@
  * them. Editing a field clears its marker for good and the count drops — after that
  * the label reads "<Name> suggests +21" instead, the honest downgrade astrogem's
  * gold-per-damage note makes. Nothing is imported silently.
+ * Each mark can also carry a NOTE — what the page actually said, in words — because
+ * three of these controls cannot hold the page's reading exactly: the necklace and
+ * earring pills are four-way, and one gem slider stands in for eleven gems. So the
+ * tooltip says "read 2.60% from the neck" or "gems are 10,10,9,… — set to 10", and
+ * the user can disagree with a number they can see.
+ *
+ * COLLAPSED FIRST. The deck's body starts shut, on every tab that mounts it: the
+ * score and the table under it are what a visitor came for. The open/shut choice is
+ * part of the saved state, so it sticks after the first click.
+ *
+ * TWO RESETS, NEITHER OF WHICH ASKS. "Reset character" clears gear, accessories,
+ * gems, the two nodes, fight, skills and economy; "Reset bracelet" (adopted into
+ * app.js's Grader panel header) clears the rows, locks, rolls and traits. Each
+ * leaves the other alone, and neither opens a confirm box for an action that is one
+ * click from being undone.
  *
  * THE MATH IS NOT HERE either: profile() is a normalizeProfile call over the state,
  * and every derived number (item level, the two percentage buckets, the trait
@@ -110,10 +129,12 @@
       locks: null,                   // per-slot booleans in the cut flow; null = follow the model
       rolled: null,                  // per-slot rows entered in the cut flow
       history: [],
+      deckOpen: false,               // the deck starts COLLAPSED; the results come first
       // ---- import provenance (see the header) ----
       char: null,                    // { name, region, class, itemLevel, source, pulledAt, cached }
       prov: {},                      // state path -> the character name it came from, while untouched
-      provWas: {}                    // state path -> the value that character suggested, kept after
+      provWas: {},                   // state path -> the value that character suggested, kept after
+      provNote: {}                   // state path -> what the page ACTUALLY said, in words
     };
   }
 
@@ -187,6 +208,7 @@
     if (!S.skills.length) S.skills = [{ name: "", share: 100, cr: 90, cd: 280 }];
     if (!S.prov) S.prov = {};
     if (!S.provWas) S.provWas = {};
+    if (!S.provNote) S.provNote = {};
     normalizeShares();
     fitTraits();
     migrateJunkRows();
@@ -432,19 +454,132 @@
   /**
    * Apply values read off a character page. `values` is a map of state path ->
    * value; every one is marked as imported until the user edits it.
+   *
+   * A value may also be given as `{ value: v, note: "…" }`. The note is what the
+   * page ACTUALLY said, in words, and it goes on the field's tooltip — because
+   * several of these controls cannot hold the page's reading exactly. The gem
+   * slider is one number for eleven gems; the necklace and earring controls are
+   * four-way segmented pills. "Auto-set from Kyulo" is true but thin; "read
+   * 2.60% from the neck" is what the user needs in order to disagree with us.
    */
   function applyImported(values, character) {
     if (character) S.char = character;
-    var k;
+    var k, v, note;
     for (k in values) if (Object.prototype.hasOwnProperty.call(values, k)) {
-      try { setPath(S, k, values[k]); } catch (e) { continue; }
+      v = values[k]; note = null;
+      if (v && typeof v === "object" && !(v instanceof Array) && "value" in v) { note = v.note || null; v = v.value; }
+      try { setPath(S, k, v); } catch (e) { continue; }
       S.prov[k] = provWho() || "the character page";
-      S.provWas[k] = values[k];
+      S.provWas[k] = v;
+      if (note) S.provNote[k] = note; else delete S.provNote[k];
     }
     fitRows();
     save();
     renderAll();
     notify({ shape: true, immediate: true, imported: true });
+  }
+
+  // ------------------------------------------------------------------
+  // the character page -> the left column
+  // ------------------------------------------------------------------
+
+  /**
+   * Turn the Worker's `profile` block (ARCHITECTURE §1.1, produced by
+   * parseCharacterProfile in worker/bracelet.js) into the deck's own paths.
+   *
+   * ONE RULE, and it is the whole design: a field the page did not carry is a
+   * field this function does not touch. Item level already gives app.js a
+   * uniform honing guess, and leaving that guess standing beats overwriting it
+   * with a zero. So every branch below is `if we actually read it`.
+   *
+   * Everything it sets is MARKED, editable, and reverts to a "suggests" note the
+   * moment the user drags the control — the same contract item level has had.
+   */
+  function applyCharacterProfile(pr, character) {
+    if (!pr) {
+      if (character) { S.char = character; save(); renderProvStrip(); }
+      return 0;
+    }
+    var vals = {}, n = 0, i, k, raw = pr.raw || {};
+
+    // ---- the six honing sliders, exact rather than derived ----
+    if (pr.honing) {
+      for (i = 0; i < PIECES.length; i++) {
+        k = PIECES[i][0];
+        if (pr.honing[k] == null) continue;                 // a piece we could not read keeps app.js's guess
+        vals["gear." + k] = {
+          value: clamp(Math.round(num(pr.honing[k], 0)), 0, 25),
+          note: "the page has the " + PIECES[i][1].toLowerCase() + " at +" + pr.honing[k] +
+            (pr.advancedHoning && pr.advancedHoning[k] != null
+              ? " (advanced honing " + pr.advancedHoning[k] + ", which this model does not use)" : "")
+        };
+        n++;
+      }
+    }
+
+    // ---- the necklace and the two earrings ----
+    if (pr.neckAddDmg != null) {
+      vals["kit.neck"] = { value: pr.neckAddDmg, note: accNote(raw.neckAddDmg, pr.neckAddDmg, "the neck") };
+      n++;
+    }
+    if (pr.earring1Wp != null) {
+      vals["kit.ear1"] = { value: pr.earring1Wp, note: accNote(raw.earring1Wp, pr.earring1Wp, "earring 1") };
+      n++;
+    }
+    if (pr.earring2Wp != null) {
+      vals["kit.ear2"] = { value: pr.earring2Wp, note: accNote(raw.earring2Wp, pr.earring2Wp, "earring 2") };
+      n++;
+    }
+
+    // ---- the one gem slider, out of eleven gems ----
+    if (pr.gemLevel != null) {
+      var lv = clamp(Math.round(num(pr.gemLevel, 9)), 6, 10);
+      var spread = raw.gemSpread || (pr.gemLevels || []).join(",");
+      vals["kit.gems"] = {
+        value: lv,
+        note: raw.gemMixed
+          ? "gems are " + spread + " — the deck holds one level, so it is set to " + lv
+          : "all " + (pr.gemLevels ? pr.gemLevels.length : 11) + " gems are level " + lv
+      };
+      n++;
+    }
+
+    // ---- the two on/off nodes ----
+    if (pr.stone97 != null) {
+      var nodes = raw.stoneNodes || [];
+      vals["kit.stone"] = {
+        value: !!pr.stone97,
+        note: nodes.length
+          ? "the ability stone's engraving nodes are " + nodes.join("/") +
+            (pr.stone97 ? " — 9/7 or better" : " — short of 9/7")
+          : (pr.stone97 ? "the ability stone is 9/7 or better" : "the ability stone is short of 9/7")
+      };
+      n++;
+    }
+    if (pr.master != null) {
+      vals["kit.master"] = {
+        value: !!pr.master,
+        note: pr.master
+          ? "the Master node is on the character's Evolution ark passive"
+          : "the character's Evolution ark passive does not have Master"
+      };
+      n++;
+    }
+
+    if (!n) {
+      if (character) { S.char = character; save(); renderProvStrip(); }
+      return 0;
+    }
+    applyImported(vals, character);
+    return n;
+  }
+
+  /** "read 2.60% from the neck", plus the snap when the page is off the pills. */
+  function accNote(rawPct, snapped, where) {
+    if (rawPct == null) return "read nothing on " + where;
+    var txt = "read " + fx(rawPct, 2) + "% from " + where;
+    if (Math.abs(rawPct - snapped) > 1e-9) txt += " — snapped to the nearest option, " + snapped + "%";
+    return txt;
   }
 
   /** Put every imported value back, marks and all. */
@@ -477,22 +612,30 @@
       var el = $(fldId(k)) ||
         (deckEl && deckEl.querySelector('[data-seg="' + k + '"],[data-tgl="' + k + '"]'));
       if (!el) continue;
-      var row = el.parentNode;
-      while (row && row !== document.body && !(row.className && /\b(bc-sl|bc-segrow|fld)\b/.test(String(row.className)))) row = row.parentNode;
-      if (!row || row === document.body) continue;
+      // A TOGGLE has no row and no label: the button is the whole control, and
+      // it carries the gloss itself. The 9/7 stone and Master are both toggles,
+      // and both are imported now, so this is not a corner case.
+      var isTgl = !!(el.getAttribute && el.getAttribute("data-tgl"));
+      var row = isTgl ? el : el.parentNode;
+      if (!isTgl) {
+        while (row && row !== document.body && !(row.className && /\b(bc-sl|bc-segrow|fld)\b/.test(String(row.className)))) row = row.parentNode;
+        if (!row || row === document.body) continue;
+      }
       var live = !!S.prov[k], was = S.provWas[k];
       row.className = String(row.className).replace(/\s*\bbc-imp\b/g, "") + (live ? " bc-imp" : "");
-      var lab = row.getElementsByTagName("label")[0] ||
-        (row.getElementsByClassName("lb")[0] || null);
+      var lab = isTgl ? row : (row.getElementsByTagName("label")[0] ||
+        (row.getElementsByClassName("lb")[0] || null));
       if (!lab) continue;
       var base = lab.getAttribute("data-provbase");
       if (base === null) {
         base = lab.getAttribute("data-gloss") || "";
         lab.setAttribute("data-provbase", base);
       }
+      var note = S.provNote[k] ? " — " + S.provNote[k] : "";
+      var shown = (typeof was === "boolean") ? (was ? "on" : "off") : was;
       var tail = live
-        ? " Auto-set from " + who + "."
-        : (was === undefined ? "" : " " + who + " suggests " + was + ".");
+        ? " Auto-set from " + who + note + "."
+        : (was === undefined ? "" : " " + who + " suggests " + shown + note + ".");
       lab.setAttribute("data-gloss", (base + tail).replace(/^\s+/, ""));
     }
   }
@@ -513,6 +656,55 @@
       txt + "</span>" +
       '<button type="button" class="mbtn" id="bc-prov-reimport">Reset to imported</button>' +
       '<button type="button" class="mbtn" id="bc-prov-defaults">Reset to defaults</button>';
+  }
+
+  // ------------------------------------------------------------------
+  // the two resets
+  //
+  // Neither asks. A confirm box on a reset button is a second click for a
+  // reversible action — every number it clears is either a default anybody can
+  // read off the panel or an import one click away again — so both act at once.
+  //
+  // They are also SCOPED, which the single old reset was not. The character and
+  // the bracelet are two different things: retuning your gear must not throw
+  // away the bracelet you spent ten minutes typing in, and clearing a bracelet
+  // must not forget who you are.
+  // ------------------------------------------------------------------
+
+  /** Everything that describes the PLAYER. The bracelet is untouched. */
+  var CHARACTER_BLOCKS = ["gear", "ov", "kit", "fight", "adv", "econ"];
+
+  function resetCharacter() {
+    var d = defaults(), i, k;
+    for (i = 0; i < CHARACTER_BLOCKS.length; i++) {
+      k = CHARACTER_BLOCKS[i];
+      S[k] = d[k];
+    }
+    S.useOverride = d.useOverride;
+    S.skills = d.skills;
+    // The import described a character; with the character gone, so are its marks.
+    S.char = null; S.prov = {}; S.provWas = {}; S.provNote = {};
+    fitRows();
+    save();
+    renderAll();
+    notify({ shape: true, immediate: true, reset: "character" });
+  }
+
+  /** Everything that describes the BRACELET. The character is untouched. */
+  function resetBracelet() {
+    var d = defaults();
+    S.rows = d.rows;
+    S.fixedRows = d.fixedRows;
+    S.traits = d.traits;
+    S.locks = null;
+    S.rolled = null;
+    S.history = [];
+    S.rollsLeft = d.rollsLeft;
+    S.rollsTotal = d.rollsTotal;
+    fitRows();
+    save();
+    renderAll();
+    notify({ shape: true, immediate: true, reset: "bracelet" });
   }
 
   // ------------------------------------------------------------------
@@ -558,6 +750,9 @@
       ".bc-prov b{color:var(--accent)}" +
       ".bc-imp .lb,.bc-imp>label{color:var(--accent)}" +
       ".bc-imp .lb::after,.bc-imp>label::after{content:'\\2022';color:var(--accent);margin-left:5px}" +
+      // A toggle is its own label, so it takes the accent and the dot directly.
+      "button.bc-tgl.bc-imp{color:var(--accent);border-color:var(--accent)}" +
+      "button.bc-tgl.bc-imp::after{content:'\\2022';margin-left:5px}" +
       // ---- the two-column control deck -------------------------------
       ".bc-deck{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px 22px}" +
       "@media(max-width:900px){.bc-deck{grid-template-columns:1fr;gap:0}}" +
@@ -675,6 +870,11 @@
     pct: function (v) { return v + "%"; },
     pct1: function (v) { return fx(v, 1) + "%"; },
     lv: function (v) { return "Lv " + v; },
+    slots: function (v) { return v + (v === 1 ? " slot" : " slots"); },
+    // 4 base rolls + up to 3 reconversion tickets. The split only tells you
+    // anything while some ticket rolls are still on the bracelet, so below 4 the
+    // chip just says the number.
+    rolls: function (v) { return v > 3 ? v + " · " + (v - 3) + "+3" : String(v); },
     raw: function (v) { return String(v); }
   };
 
@@ -728,9 +928,9 @@
   function deckMarkup() {
     return '' +
       '<div class="inputs" id="bc-inputs">' +
-      '  <div class="ihdr"><span>Character &amp; bracelet<span class="bc-busy" id="bc-busy"></span></span>' +
-      '    <span class="tgl" id="bc-toggle"><span id="bc-caret">&#9662;</span></span></div>' +
-      '  <div id="bc-inputs-body">' +
+      '  <div class="ihdr"><span>Character<span class="bc-busy" id="bc-busy"></span></span>' +
+      '    <span class="tgl" id="bc-toggle"><span id="bc-caret">&#9656;</span></span></div>' +
+      '  <div id="bc-inputs-body" style="display:none">' +
       '    <div class="bc-prov" id="bc-prov" style="display:none"></div>' +
       '    <div id="bc-top"></div>' +
       '    <div class="bc-deck">' +
@@ -742,7 +942,7 @@
       '        <div id="bc-kit"></div>' +
       '        <div class="barrow">' +
       '          <button class="mbtn" id="bc-advtoggle" type="button">Advanced ▾</button>' +
-      '          <button class="mbtn" id="bc-reset" type="button">Reset</button>' +
+      '          <button class="mbtn" id="bc-reset" type="button">Reset character</button>' +
       '        </div>' +
       '      </div>' +
       '      <div class="bc-col">' +
@@ -767,17 +967,21 @@
   // ------------------------------------------------------------------
 
   function renderTop() {
+    var ch = slotChoices(), ticks = [], j;
     var h = '<div class="ig">';
     h += fldSel("grade", "Grade", [{ v: "ancient", t: "Ancient" }, { v: "relic", t: "Relic" }],
       "Ancient bracelets roll 2 or 3 granted slots and higher line values; Relic rolls 1 or 2.");
-    h += fldSel("slots", "Granted slots", (function () {
-      var ch = slotChoices(), o = [], j;
-      for (j = 0; j < ch.length; j++) o.push({ v: ch[j], t: ch[j] + " slots" });
-      return o;
-    })(), "The rerollable lines. Ancient: 3 slots on 25% of drops, 2 on 75%. Slot count moves the value of an unrolled bracelet a lot.");
-    h += fldNum("rollsLeft", "Rolls left", "1",
-      "A fresh bracelet has 4 rolls plus up to 3 reconversion-ticket rolls = 7. The cut flow counts this down.");
     h += "</div>";
+    // Sliders, not boxes: both are short integer ranges, and the grade already
+    // decides which slot counts are legal, so a track that cannot leave the band
+    // says more than a select that lists two options.
+    for (j = 0; j < ch.length; j++) ticks.push(String(ch[j]));
+    h += slider("slots", "Granted slots", ch[0], ch[ch.length - 1], 1, "slots",
+      { ticks: ticks,
+        gloss: "The rerollable lines. Ancient: 3 slots on 25% of drops, 2 on 75%. Slot count moves the value of an unrolled bracelet a lot." });
+    h += slider("rollsLeft", "Rolls left", 0, 7, 1, "rolls",
+      { ticks: ["0", "1", "2", "3", "4", "5", "6", "7"],
+        gloss: "A fresh bracelet has 4 rolls plus up to 3 reconversion-ticket rolls = 7. The chip splits the two while the ticket rolls are still there. The cut flow counts this down." });
     h += fldChk("useOverride", "Enter WP / main stat directly",
       "Skip the honing sliders and type the two raw numbers straight off your character sheet (before the % buckets).");
     $("bc-top").innerHTML = h;
@@ -1001,6 +1205,7 @@
     renderTop(); renderGear(); renderKit(); renderFight(); renderTraitWeights();
     renderSkills(); renderEcon(); renderAdvanced();
     markProvenance();
+    applyFold();
   }
 
   // ------------------------------------------------------------------
@@ -1016,7 +1221,13 @@
 
   var SHAPE_FIELDS = { grade: 1, slots: 1, useOverride: 1 };
 
-  function onFieldChange(el) {
+  /**
+   * `settled` is false while a range is still under the mouse. It matters for
+   * the two shape fields that are now sliders: rebuilding the whole deck on
+   * every step of a drag tears the slider out from under the cursor, so the
+   * rebuild waits for the change event the browser fires on release.
+   */
+  function onFieldChange(el, settled) {
     var path = el.getAttribute && el.getAttribute("data-k"), t = el.getAttribute("data-t");
     if (!path) return false;
     if (t === "chk") setPath(S, path, !!el.checked);
@@ -1038,7 +1249,7 @@
     if (SHAPE_FIELDS[path]) {
       if (path === "grade") fitTraits();
       fitRows();
-      keepFocus(renderAll);
+      if (t !== "rng" || settled !== false) keepFocus(renderAll);
     } else if (path === "adv.baseApOverride") {
       keepFocus(function () { renderKit(); renderAdvanced(); markProvenance(); });
     } else if (path.indexOf("adv.") === 0) {
@@ -1112,7 +1323,7 @@
         notify({ path: "skills", immediate: false });
         return;
       }
-      onFieldChange(el);
+      onFieldChange(el, e.type !== "input");
     }
     // Selects fire input then change; both paths are idempotent.
     panel.addEventListener("input", fieldEvent);
@@ -1177,19 +1388,57 @@
       else if (t.id === "bc-addfixed") {
         if (S.fixedRows.length < 2) { S.fixedRows.push(blankRow()); save(); renderAdvanced(); notify({ path: "fixedRows", immediate: false }); }
       } else if (t.id === "bc-prov-reimport") { resetToImported(); }
-      else if (t.id === "bc-prov-defaults" || t.id === "bc-reset") {
-        if (window.confirm("Reset every input, the bracelet and this session's rolls?")) Profile.reset();
-      }
+      else if (t.id === "bc-prov-defaults" || t.id === "bc-reset") { resetCharacter(); }
     });
 
     // The whole header row collapses the panel, not just the little arrow.
     var hdr = panel.getElementsByClassName("ihdr")[0];
     if (hdr) hdr.addEventListener("click", function () {
-      var body = $("bc-inputs-body"), c = $("bc-caret");
-      var hidden = body.style.display === "none";
-      body.style.display = hidden ? "" : "none";
-      c.innerHTML = hidden ? "&#9662;" : "&#9656;";
+      S.deckOpen = !S.deckOpen;
+      save();
+      applyFold();
     });
+  }
+
+  /**
+   * Open or shut the deck body to match S.deckOpen.
+   *
+   * The deck starts SHUT — on every tab that mounts it. The thing a visitor came
+   * for is the score and the table under it, not thirty controls; the controls
+   * are one click away and the choice sticks from then on.
+   */
+  function applyFold() {
+    var body = $("bc-inputs-body"), c = $("bc-caret");
+    if (!body) return;
+    body.style.display = S.deckOpen ? "" : "none";
+    if (c) c.innerHTML = S.deckOpen ? "&#9662;" : "&#9656;";
+  }
+
+  /**
+   * The Bracelet panel is app.js's markup, but two of its parts belong to the
+   * deck's own vocabulary: the panel is the GRADER (astrogem's word for the
+   * "score a finished item" panel), and it needs the bracelet-scoped reset that
+   * pairs with the character-scoped one down in the deck. Both are added here,
+   * once, by adoption rather than by editing another module's markup — and both
+   * checks are exact, so if app.js ever grows them itself this quietly does
+   * nothing.
+   */
+  function adoptBraceletPanel() {
+    var panel = document.getElementById("bc-braceletpanel");
+    if (!panel) return;
+    var hdr = panel.getElementsByClassName("bc-hdrow")[0];
+    if (!hdr) return;
+    var h2 = hdr.getElementsByTagName("h2")[0];
+    if (h2 && h2.firstChild && h2.textContent === "Bracelet") h2.textContent = "Grader — score a bracelet";
+    if (document.getElementById("bc-resetbracelet")) return;
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "mbtn";
+    b.id = "bc-resetbracelet";
+    b.textContent = "Reset bracelet";
+    b.setAttribute("data-gloss", "Clears the granted rows, the fixed lines, any locks and this session's rolls, and puts the two combat traits back to their default values. Your character settings are left alone.");
+    b.addEventListener("click", function () { resetBracelet(); });
+    hdr.appendChild(b);
   }
 
   // ------------------------------------------------------------------
@@ -1246,6 +1495,7 @@
       var el = buildDeck();
       if (el.parentNode !== hostEl) hostEl.appendChild(el);
       renderAll();
+      adoptBraceletPanel();
       return el;
     },
     /** Where the deck is right now, or null before the first mount. */
@@ -1260,6 +1510,7 @@
       };
     },
 
+    /** Everything, character and bracelet, back to defaults. No UI reaches this. */
     reset: function () {
       try { localStorage.removeItem(LS_KEY); } catch (e) { /* ignore */ }
       assignInto(S, defaults());
@@ -1267,6 +1518,9 @@
       renderAll();
       notify({ reset: true, shape: true, immediate: true });
     },
+    /** The two scoped resets the panel's buttons call. Neither asks first. */
+    resetCharacter: resetCharacter,
+    resetBracelet: resetBracelet,
 
     // ---- state maintenance the other modules need ----
     save: save,                 // after a direct mutation (the cut flow rewrites rows)
@@ -1295,6 +1549,8 @@
 
     // ---- provenance ----
     applyImported: applyImported,
+    /** The Worker's §1.1 `profile` block -> every control in the left column. */
+    applyCharacterProfile: applyCharacterProfile,
     provCount: provCount,
     character: function () { return S.char; },
     setCharacter: function (c) { S.char = c || null; save(); renderProvStrip(); },

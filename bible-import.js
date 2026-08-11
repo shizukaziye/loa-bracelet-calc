@@ -80,15 +80,14 @@
   if (!OA || !B || !DATA) return;               // a dependency failed to load; leave the panel alone
 
   /**
-   * The deployed bracelet-bible Worker (worker/bracelet.js). EMPTY until Shizu
-   * deploys it and pastes the printed URL here — see docs/deploy-worker.md.
+   * The deployed bracelet-bible Worker (worker/bracelet.js), live 2026-08-11.
    *
-   * Empty is a supported state, not a bug: the seeded characters still load
+   * Empty is still a supported state, not a bug: the seeded characters load
    * instantly by chip or by name, signing in and listing characters still works,
    * and a live pull lands on one honest sentence rather than a broken request.
-   * Deploying it is the ONLY change needed to switch the whole pull path on.
+   * So blanking this line is the whole kill switch.
    */
-  var WORKER_URL = "";
+  var WORKER_URL = "https://bracelet-bible.shizukaziye.workers.dev";
 
   /** The baked board, used as a free instant cache. ?v= for the edge, as everywhere. */
   var SEED_URL = "data/leaderboard-seed.json?v=2";
@@ -644,7 +643,12 @@
         numTicketRerolls: br.numTicketRerolls || 0,
         pct: s ? s.pct : (l.defaultScore && typeof l.defaultScore.pct === "number" ? l.defaultScore.pct : null),
         grade: s ? s.grade : (l.defaultScore && l.defaultScore.grade) || null,
-        unmapped: s ? s.unmapped : 0
+        unmapped: s ? s.unmapped : 0,
+        // The left column belongs to the LOADOUT: a chaos tab can wear other
+        // accessories and other gems than the raid tab, so switching pills has
+        // to refill the deck, not just the bracelet. Falls back to the record's
+        // own block for a Worker old enough to send only that one.
+        profile: l.profile || d.profile || null
       };
     }).filter(function (l) { return l.stats && l.stats.length; });
     if (!los.length) return null;
@@ -1268,10 +1272,26 @@
       defaultPct: l.pct,
       grade: l.grade,
       loadoutLabel: rec.loadouts.length > 1 ? (l.label || l.classification) : null,
-      // ARCHITECTURE §1.1: whatever of the grader profile the record carried.
-      profile: rec.profile || null
+      // ARCHITECTURE §1.1: THIS loadout's grader profile, falling back to the
+      // record's. app.js reads a couple of fields off it; profile.js reads the
+      // rest, below.
+      profile: l.profile || rec.profile || null
     };
     app.applyImport(built.patch);
+
+    // The whole left column, from the same loadout the bracelet came from: six
+    // honing levels, the necklace's additional damage, both earrings' weapon
+    // power, the gem level, the 9/7 stone and Master. app.applyImport has just
+    // put item level in as a uniform honing guess; this replaces it with what
+    // the page actually says, field by field, and only where the page said
+    // anything. Every one lands marked, editable and reversible.
+    var filled = 0;
+    if (root.Profile && root.Profile.applyCharacterProfile) {
+      try {
+        filled = root.Profile.applyCharacterProfile(
+          built.patch.character.profile, built.patch.character) || 0;
+      } catch (e) { filled = 0; }     // a shape change upstream must not cost the bracelet
+    }
 
     state.picked = rec.name;
     state.error = null;
@@ -1283,6 +1303,11 @@
       (built.patch.character.loadoutLabel ? " (" + built.patch.character.loadoutLabel + " loadout)" : "") +
       " — " + (built.patch.grade === "relic" ? "Relic" : "Ancient") + ", " +
       n + " granted slot" + (n === 1 ? "" : "s") + ".";
+    if (filled) {
+      note += " " + filled + " gear setting" + (filled === 1 ? "" : "s") +
+        " came off the page too — honing, accessories, gems and the two nodes. " +
+        "Each is marked in the Character panel; hover one to see what the page said, edit it to drop the mark.";
+    }
     // The loadout/score commentary that used to live here is gone (Shizu,
     // 2026-08-11): the pills already show each loadout and its score, and the
     // banner shows what the bracelet is worth. Saying it again in prose was noise.
