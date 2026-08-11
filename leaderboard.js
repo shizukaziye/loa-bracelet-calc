@@ -438,7 +438,6 @@
       c._pct = b ? b.pct : (c.storedPct != null ? c.storedPct : null);
       c._grade = c._s ? c._s.grade : null;
       c._rolls = b ? b.rollsRemaining : null;
-      c._computed = !!(b && b.score);           // false = the file's stored number
       if (b && b.itemLevel != null && c.itemLevel == null) c.itemLevel = Math.round(b.itemLevel);
     });
     return chars;
