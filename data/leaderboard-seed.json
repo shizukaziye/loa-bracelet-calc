@@ -1,6 +1,6 @@
 {
-  "_note": "Seed data for the Phase 4 bracelet leaderboard. SOURCE: public / 公開 lostark.bible CHARACTER pages (https://lostark.bible/character/NA/<name>), read once each on 2026-08-11 with a browser User-Agent, sequentially, ~3s apart. Raid-statistics endpoints were NOT touched. The data is therefore self-reported: it is whatever the owner's roster last synced to lostark.bible, not a verified snapshot. SCORING: model/bracelet.js on the CANONICAL DEFAULT profile, normalizeProfile({}) — no per-player knobs. damagePct = whole bracelet (two combat traits + granted lines). linesPct = granted/fixed effect lines only, which is the figure comparable to lostark.bible's own 'Bracelet Effects +X%' and to the 7-9% good / 10%+ near-final benchmark. goldAt1_5M = damagePct x 1,500,000 gold per 1% damage, baseline 0. Three type:2 indices (4, 74, 151) are NOT yet in model TYPE2_INDEX and were decoded with a local extension map; see notes[] per entry.",
-  "_scoredAt": "2026-08-11T09:58:49.351Z",
+  "_note": "Seed data for the Phase 4 bracelet leaderboard. SOURCE: public lostark.bible CHARACTER pages (https://lostark.bible/character/{NA|CE}/<name>), read once each with a browser User-Agent, strictly sequentially, at least 3s apart. Raid-statistics endpoints were NOT touched. The data is self-reported: it is whatever the owner's roster last synced to lostark.bible, not a verified snapshot. PAYLOAD PICK: a character page embeds SEVERAL bracelet payloads and the first is not always the one the page displays. Each entry uses the payload whose combat-trait values match the page's RENDERED bracelet tooltip, and every decoded line is validated positionally against that tooltip's own words (kept here as bibleLines). SCORING: model/bracelet.js on the CANONICAL DEFAULT profile, normalizeProfile({}) — no per-player knobs. damagePct = whole bracelet (combat traits + effect lines). linesPct = effect lines only, the figure comparable to lostark.bible's own 'Bracelet Effects +X%' (biblePct) and to the 7-9% good / 10%+ near-final benchmark. goldAt1_5M = damagePct x 1,500,000 gold per 1% damage, baseline 0. KNOWN GAP: linesPct runs about +0.8pp above biblePct across the board, and about -1.5pp BELOW it for bracelets carrying family 14 (Additional Damage / Demon-Archdemon). The default profile sets demonShare=0; at demonShare=1 the family-14 gap disappears (-2.34pp spread collapses to +0.20pp), so bible values that clause at full uptime. type:2 indices 3, 4, 74, 149, 151 and type:3 index 11261 are NOT in model TYPE2_INDEX and were decoded with a local extension map; see notes[] per entry.",
+  "_scoredAt": "2026-08-11T10:24:01.865Z",
   "_model": {
     "version": "0.1.0",
     "signature": "bracelet-v1",
@@ -9,6 +9,1095 @@
   "_goldPer1Pct": 1500000,
   "_sortedBy": "damagePct desc",
   "entries": [
+    {
+      "name": "Lazy",
+      "region": "NA",
+      "class": "Sorceress",
+      "itemLevel": 1800,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "swiftness",
+          "value": 95,
+          "fixed": true
+        },
+        {
+          "trait": "crit",
+          "value": 116,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "critDmgOnCrit",
+          "familyId": 12,
+          "label": "Crit Damage +A%; on crit, damage +1.5%",
+          "tier": "mid",
+          "value": [
+            8.4
+          ],
+          "fixed": true,
+          "damage": 4.278671967170241,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "cdUpDmgUp",
+          "familyId": 15,
+          "label": "Skill cooldown +2% but damage +A%",
+          "tier": "high",
+          "value": [
+            5.5
+          ],
+          "fixed": true,
+          "damage": 4.764104480084147,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "critRateOnCrit",
+          "familyId": 11,
+          "label": "Crit Rate +A%; on crit, damage +1.5%",
+          "tier": "low",
+          "value": [
+            3.4
+          ],
+          "fixed": false,
+          "damage": 3.7614903097401466,
+          "familyLetter": "S"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "rollsRemaining": null,
+      "damage": 17.989710791056027,
+      "damagePct": 19.709418526292733,
+      "linesDamage": 12.804266756994535,
+      "linesPct": 13.660149768637385,
+      "goldAt1_5M": 29564127.7894391,
+      "benchmark": "near-final",
+      "biblePct": 12.48,
+      "biblePctDelta": 1.180149768637385,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Swiftness +95"
+        },
+        {
+          "locked": true,
+          "text": "Crit +116"
+        },
+        {
+          "locked": true,
+          "text": "Crit Damage +8.4%. Crit Hit Damage +1.5%."
+        },
+        {
+          "locked": true,
+          "text": "Skill cooldown +2%. Outgoing Damage +5.5%."
+        },
+        {
+          "locked": false,
+          "text": "Crit Rate +3.4%. Crit Hit Damage +1.5%."
+        }
+      ],
+      "notes": [
+        "4 of 5 lines are locked (fixed:true = bible's lock icon). Players can lock granted lines, so the drop's fixed/granted split cannot be read off this payload."
+      ],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 18,
+          "id": 213400023,
+          "value": 95,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 116,
+          "fixed": true
+        },
+        {
+          "type": 3,
+          "index": 11022,
+          "id": 213400023,
+          "value": 5,
+          "fixed": true
+        },
+        {
+          "type": 3,
+          "index": 11051,
+          "id": 213400023,
+          "value": 5,
+          "fixed": true
+        },
+        {
+          "type": 3,
+          "index": 11013,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T10:24:01.865Z"
+    },
+    {
+      "name": "Bydsalvation",
+      "region": "NA",
+      "class": "Deathblade",
+      "itemLevel": 1770,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "crit",
+          "value": 99,
+          "fixed": true
+        },
+        {
+          "trait": "spec",
+          "value": 99,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "critDmgOnCrit",
+          "familyId": 12,
+          "label": "Crit Damage +A%; on crit, damage +1.5%",
+          "tier": "mid",
+          "value": [
+            8.4
+          ],
+          "fixed": false,
+          "damage": 4.278671967170241,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "critRateOnCrit",
+          "familyId": 11,
+          "label": "Crit Rate +A%; on crit, damage +1.5%",
+          "tier": "low",
+          "value": [
+            3.4
+          ],
+          "fixed": false,
+          "damage": 3.7614903097401466,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "cdUpDmgUp",
+          "familyId": 15,
+          "label": "Skill cooldown +2% but damage +A%",
+          "tier": "low",
+          "value": [
+            4.5
+          ],
+          "fixed": false,
+          "damage": 3.811716328958588,
+          "familyLetter": "S"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 0
+      },
+      "rollsRemaining": {
+        "base": 0,
+        "ticket": 3
+      },
+      "damage": 16.73035414890446,
+      "damagePct": 18.211303120515066,
+      "linesDamage": 11.851878605868976,
+      "linesPct": 12.582802377465452,
+      "goldAt1_5M": 27316954.6807726,
+      "benchmark": "near-final",
+      "biblePct": 11.41,
+      "biblePctDelta": 1.1728023774654517,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Crit +99"
+        },
+        {
+          "locked": true,
+          "text": "Specialization +99"
+        },
+        {
+          "locked": false,
+          "text": "Crit Damage +8.4%. Crit Hit Damage +1.5%."
+        },
+        {
+          "locked": false,
+          "text": "Crit Rate +3.4%. Crit Hit Damage +1.5%."
+        },
+        {
+          "locked": false,
+          "text": "Skill cooldown +2%. Outgoing Damage +4.5%."
+        }
+      ],
+      "notes": [
+        "page carried 2 bracelet payloads (2 distinct); took payload #0, the one matching the rendered tooltip"
+      ],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 99,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 16,
+          "id": 213400023,
+          "value": 99,
+          "fixed": true
+        },
+        {
+          "type": 3,
+          "index": 11022,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11013,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11053,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T10:24:01.865Z"
+    },
+    {
+      "name": "Chamchis",
+      "region": "NA",
+      "class": "Gunlancer",
+      "itemLevel": 1800,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "spec",
+          "value": 101,
+          "fixed": true
+        },
+        {
+          "trait": "crit",
+          "value": 110,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "cdUpDmgUp",
+          "familyId": 15,
+          "label": "Skill cooldown +2% but damage +A%",
+          "tier": "low",
+          "value": [
+            4.5
+          ],
+          "fixed": false,
+          "damage": 3.811716328958588,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "addDmgDemon",
+          "familyId": 14,
+          "label": "Additional Damage +A%; Demon/Archdemon damage +B%",
+          "tier": "high",
+          "value": [
+            3.5,
+            2.5
+          ],
+          "fixed": false,
+          "damage": 2.496741432969326,
+          "familyLetter": "C"
+        },
+        {
+          "cat": "special",
+          "family": "critDmgOnCrit",
+          "familyId": 12,
+          "label": "Crit Damage +A%; on crit, damage +1.5%",
+          "tier": "high",
+          "value": [
+            10
+          ],
+          "fixed": false,
+          "damage": 4.8117455217942835,
+          "familyLetter": "S"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "rollsRemaining": null,
+      "damage": 16.312200424312493,
+      "damagePct": 17.718030191939537,
+      "linesDamage": 11.120203283722198,
+      "linesPct": 11.762068012382665,
+      "goldAt1_5M": 26577045.287909307,
+      "benchmark": "near-final",
+      "biblePct": 13.02,
+      "biblePctDelta": -1.2579319876173347,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Specialization +101"
+        },
+        {
+          "locked": true,
+          "text": "Crit +110"
+        },
+        {
+          "locked": false,
+          "text": "Skill cooldown +2%. Outgoing Damage +4.5%."
+        },
+        {
+          "locked": false,
+          "text": "Additional Damage +3.5%. Bonus vs. Demon/Archdemon +2.5%."
+        },
+        {
+          "locked": false,
+          "text": "Crit Damage +10%. Crit Hit Damage +1.5%."
+        }
+      ],
+      "notes": [
+        "page carried 2 bracelet payloads (2 distinct); took payload #1, the one matching the rendered tooltip"
+      ],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 16,
+          "id": 213400023,
+          "value": 101,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 110,
+          "fixed": true
+        },
+        {
+          "type": 3,
+          "index": 11053,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11041,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11021,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T10:24:01.865Z"
+    },
+    {
+      "name": "Shazion",
+      "region": "NA",
+      "class": "Deathblade",
+      "itemLevel": 1784,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "crit",
+          "value": 82,
+          "fixed": true
+        },
+        {
+          "trait": "spec",
+          "value": 119,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "critRateOnCrit",
+          "familyId": 11,
+          "label": "Crit Rate +A%; on crit, damage +1.5%",
+          "tier": "high",
+          "value": [
+            5
+          ],
+          "fixed": false,
+          "damage": 4.839022960793766,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "cdUpDmgUp",
+          "familyId": 15,
+          "label": "Skill cooldown +2% but damage +A%",
+          "tier": "high",
+          "value": [
+            5.5
+          ],
+          "fixed": false,
+          "damage": 4.764104480084147,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "wpStackHit",
+          "familyId": 20,
+          "label": "On-hit per sec for 10s: Weapon Power +A, atk/move speed +1% (max 6 stacks)",
+          "tier": "low",
+          "value": [
+            1160
+          ],
+          "fixed": false,
+          "damage": 1.4031189339755805,
+          "familyLetter": "C"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "rollsRemaining": null,
+      "damage": 15.97609042313025,
+      "damagePct": 17.323032304828523,
+      "linesDamage": 11.006246374853493,
+      "linesPct": 11.634779954930696,
+      "goldAt1_5M": 25984548.457242783,
+      "benchmark": "near-final",
+      "biblePct": 11.26,
+      "biblePctDelta": 0.3747799549306965,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Crit +82"
+        },
+        {
+          "locked": true,
+          "text": "Specialization +119"
+        },
+        {
+          "locked": false,
+          "text": "Crit Rate +5%. Crit Hit Damage +1.5%."
+        },
+        {
+          "locked": false,
+          "text": "Skill cooldown +2%. Outgoing Damage +5.5%."
+        },
+        {
+          "locked": false,
+          "text": "On hit, Weapon Power +1,160, Atk./Move Speed +1% for 10s. (Max. 6 stacks)"
+        }
+      ],
+      "notes": [],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 82,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 16,
+          "id": 213400023,
+          "value": 119,
+          "fixed": true
+        },
+        {
+          "type": 3,
+          "index": 11011,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11051,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 4,
+          "index": 605100103,
+          "id": 213400023,
+          "value": 0,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T10:24:01.865Z"
+    },
+    {
+      "name": "Tellerluck",
+      "region": "CE",
+      "class": "Arcanist",
+      "itemLevel": 1780,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "swiftness",
+          "value": 75,
+          "fixed": true
+        },
+        {
+          "trait": "crit",
+          "value": 83,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "critDmgOnCrit",
+          "familyId": 12,
+          "label": "Crit Damage +A%; on crit, damage +1.5%",
+          "tier": "low",
+          "value": [
+            6.8
+          ],
+          "fixed": false,
+          "damage": 3.7427415021645127,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "critRateOnCrit",
+          "familyId": 11,
+          "label": "Crit Rate +A%; on crit, damage +1.5%",
+          "tier": "mid",
+          "value": [
+            4.2
+          ],
+          "fixed": false,
+          "damage": 4.30170797401326,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "cdUpDmgUp",
+          "familyId": 15,
+          "label": "Skill cooldown +2% but damage +A%",
+          "tier": "low",
+          "value": [
+            4.5
+          ],
+          "fixed": false,
+          "damage": 3.811716328958588,
+          "familyLetter": "S"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "rollsRemaining": null,
+      "damage": 15.750093278513674,
+      "damagePct": 17.058184988253533,
+      "linesDamage": 11.85616580513636,
+      "linesPct": 12.587629130009681,
+      "goldAt1_5M": 25587277.4823803,
+      "benchmark": "near-final",
+      "biblePct": 11.41,
+      "biblePctDelta": 1.1776291300096808,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Swiftness +75"
+        },
+        {
+          "locked": true,
+          "text": "Crit +83"
+        },
+        {
+          "locked": false,
+          "text": "Crit Damage +6.8%. Crit Hit Damage +1.5%."
+        },
+        {
+          "locked": false,
+          "text": "Crit Rate +4.2%. Crit Hit Damage +1.5%."
+        },
+        {
+          "locked": false,
+          "text": "Skill cooldown +2%. Outgoing Damage +4.5%."
+        }
+      ],
+      "notes": [],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 18,
+          "id": 213400023,
+          "value": 75,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 83,
+          "fixed": true
+        },
+        {
+          "type": 3,
+          "index": 11023,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11012,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11053,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T10:24:01.865Z"
+    },
+    {
+      "name": "Omg",
+      "region": "NA",
+      "class": "Guardianknight",
+      "itemLevel": 1740,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "spec",
+          "value": 77,
+          "fixed": true
+        },
+        {
+          "trait": "crit",
+          "value": 69,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "critRateOnCrit",
+          "familyId": 11,
+          "label": "Crit Rate +A%; on crit, damage +1.5%",
+          "tier": "mid",
+          "value": [
+            4.2
+          ],
+          "fixed": false,
+          "damage": 4.30170797401326,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "cdUpDmgUp",
+          "familyId": 15,
+          "label": "Skill cooldown +2% but damage +A%",
+          "tier": "low",
+          "value": [
+            4.5
+          ],
+          "fixed": false,
+          "damage": 3.811716328958588,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "critDmgOnCrit",
+          "familyId": 12,
+          "label": "Crit Damage +A%; on crit, damage +1.5%",
+          "tier": "low",
+          "value": [
+            6.8
+          ],
+          "fixed": false,
+          "damage": 3.7427415021645127,
+          "familyLetter": "S"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "rollsRemaining": null,
+      "damage": 15.46239636993528,
+      "damagePct": 16.721896187000706,
+      "linesDamage": 11.85616580513636,
+      "linesPct": 12.587629130009681,
+      "goldAt1_5M": 25082844.28050106,
+      "benchmark": "near-final",
+      "biblePct": 11.41,
+      "biblePctDelta": 1.1776291300096808,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Specialization +77"
+        },
+        {
+          "locked": true,
+          "text": "Crit +69"
+        },
+        {
+          "locked": false,
+          "text": "Crit Rate +4.2%. Crit Hit Damage +1.5%."
+        },
+        {
+          "locked": false,
+          "text": "Skill cooldown +2%. Outgoing Damage +4.5%."
+        },
+        {
+          "locked": false,
+          "text": "Crit Damage +6.8%. Crit Hit Damage +1.5%."
+        }
+      ],
+      "notes": [],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 16,
+          "id": 213400023,
+          "value": 77,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 69,
+          "fixed": true
+        },
+        {
+          "type": 3,
+          "index": 11012,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11053,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11023,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T10:24:01.865Z"
+    },
+    {
+      "name": "Astoryu",
+      "region": "NA",
+      "class": "Breaker",
+      "itemLevel": 1790,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "crit",
+          "value": 83,
+          "fixed": true
+        },
+        {
+          "trait": "spec",
+          "value": 114,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "critRateOnCrit",
+          "familyId": 11,
+          "label": "Crit Rate +A%; on crit, damage +1.5%",
+          "tier": "low",
+          "value": [
+            3.4
+          ],
+          "fixed": false,
+          "damage": 3.7614903097401466,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "damage",
+          "familyId": 23,
+          "label": "Damage to enemies +X%",
+          "tier": "mid",
+          "value": [
+            2.5
+          ],
+          "fixed": false,
+          "damage": 2.4692612590371414,
+          "familyLetter": "B"
+        },
+        {
+          "cat": "special",
+          "family": "critDmgOnCrit",
+          "familyId": 12,
+          "label": "Crit Damage +A%; on crit, damage +1.5%",
+          "tier": "mid",
+          "value": [
+            8.4
+          ],
+          "fixed": false,
+          "damage": 4.278671967170241,
+          "familyLetter": "S"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "rollsRemaining": null,
+      "damage": 15.378351009324843,
+      "damagePct": 16.623838060863918,
+      "linesDamage": 10.50942353594753,
+      "linesPct": 11.08152835012235,
+      "goldAt1_5M": 24935757.091295876,
+      "benchmark": "near-final",
+      "biblePct": 10.33,
+      "biblePctDelta": 0.7515283501223493,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Crit +83"
+        },
+        {
+          "locked": true,
+          "text": "Specialization +114"
+        },
+        {
+          "locked": false,
+          "text": "Crit Rate +3.4%. Crit Hit Damage +1.5%."
+        },
+        {
+          "locked": false,
+          "text": "Outgoing Damage +2.5%."
+        },
+        {
+          "locked": false,
+          "text": "Crit Damage +8.4%. Crit Hit Damage +1.5%."
+        }
+      ],
+      "notes": [
+        "page carried 2 bracelet payloads (2 distinct); took payload #0, the one matching the rendered tooltip"
+      ],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 83,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 16,
+          "id": 213400023,
+          "value": 114,
+          "fixed": true
+        },
+        {
+          "type": 3,
+          "index": 11013,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 4,
+          "index": 605100132,
+          "id": 213400023,
+          "value": 0,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11022,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T10:24:01.865Z"
+    },
+    {
+      "name": "Astó",
+      "region": "NA",
+      "class": "Striker",
+      "itemLevel": 1785,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "swiftness",
+          "value": 106,
+          "fixed": true
+        },
+        {
+          "trait": "crit",
+          "value": 72,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "critRateOnCrit",
+          "familyId": 11,
+          "label": "Crit Rate +A%; on crit, damage +1.5%",
+          "tier": "low",
+          "value": [
+            3.4
+          ],
+          "fixed": true,
+          "damage": 3.7614903097401466,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "critDmgOnCrit",
+          "familyId": 12,
+          "label": "Crit Damage +A%; on crit, damage +1.5%",
+          "tier": "mid",
+          "value": [
+            8.4
+          ],
+          "fixed": true,
+          "damage": 4.278671967170241,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "critDamage",
+          "familyId": 32,
+          "label": "Crit Damage +X%",
+          "tier": "mid",
+          "value": [
+            8.4
+          ],
+          "fixed": false,
+          "damage": 2.844649631691937,
+          "familyLetter": "B"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 2
+      },
+      "rollsRemaining": {
+        "base": 0,
+        "ticket": 1
+      },
+      "damage": 15.288502160808395,
+      "damagePct": 16.51909994531202,
+      "linesDamage": 10.884811908602323,
+      "linesPct": 11.499299132597196,
+      "goldAt1_5M": 24778649.91796803,
+      "benchmark": "near-final",
+      "biblePct": 10.65,
+      "biblePctDelta": 0.8492991325971957,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Swiftness +106"
+        },
+        {
+          "locked": true,
+          "text": "Crit +72"
+        },
+        {
+          "locked": true,
+          "text": "Crit Rate +3.4%. Crit Hit Damage +1.5%."
+        },
+        {
+          "locked": true,
+          "text": "Crit Damage +8.4%. Crit Hit Damage +1.5%."
+        },
+        {
+          "locked": false,
+          "text": "Crit Damage +8.4%"
+        }
+      ],
+      "notes": [
+        "4 of 5 lines are locked (fixed:true = bible's lock icon). Players can lock granted lines, so the drop's fixed/granted split cannot be read off this payload."
+      ],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 18,
+          "id": 213400023,
+          "value": 106,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 72,
+          "fixed": true
+        },
+        {
+          "type": 3,
+          "index": 11013,
+          "id": 213400023,
+          "value": 5,
+          "fixed": true
+        },
+        {
+          "type": 3,
+          "index": 11022,
+          "id": 213400023,
+          "value": 5,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 76,
+          "id": 213400023,
+          "value": 840,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T10:24:01.865Z"
+    },
     {
       "name": "White",
       "region": "NA",
@@ -72,6 +1161,7 @@
         "base": 4,
         "ticket": 3
       },
+      "rollsRemaining": null,
       "damage": 14.997844431191528,
       "damagePct": 16.180919886166055,
       "linesDamage": 10.103916957814214,
@@ -79,6 +1169,29 @@
       "goldAt1_5M": 24271379.829249084,
       "benchmark": "near-final",
       "biblePct": 10.07,
+      "biblePctDelta": 0.5619975001456723,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Swiftness +115"
+        },
+        {
+          "locked": true,
+          "text": "Crit +83"
+        },
+        {
+          "locked": false,
+          "text": "Crit Rate +5%. Crit Hit Damage +1.5%."
+        },
+        {
+          "locked": false,
+          "text": "Crit Damage +6.8%"
+        },
+        {
+          "locked": false,
+          "text": "Non-directional Skill Damage +3%. Awakening Skills do not apply."
+        }
+      ],
       "notes": [],
       "rawStats": [
         {
@@ -117,7 +1230,7 @@
           "fixed": false
         }
       ],
-      "scoredAt": "2026-08-11T09:58:49.351Z"
+      "scoredAt": "2026-08-11T10:24:01.865Z"
     },
     {
       "name": "July",
@@ -182,6 +1295,7 @@
         "base": 4,
         "ticket": 3
       },
+      "rollsRemaining": null,
       "damage": 14.962727955965487,
       "damagePct": 16.140128404901244,
       "linesDamage": 10.070651025746802,
@@ -189,6 +1303,29 @@
       "goldAt1_5M": 24210192.607351866,
       "benchmark": "near-final",
       "biblePct": 9.79,
+      "biblePctDelta": 0.8052008557251398,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Swiftness +113"
+        },
+        {
+          "locked": true,
+          "text": "Crit +85"
+        },
+        {
+          "locked": false,
+          "text": "Outgoing Damage +2%."
+        },
+        {
+          "locked": false,
+          "text": "Crit Damage +8.4%. Crit Hit Damage +1.5%."
+        },
+        {
+          "locked": false,
+          "text": "Skill cooldown +2%. Outgoing Damage +4.5%."
+        }
+      ],
       "notes": [],
       "rawStats": [
         {
@@ -227,7 +1364,275 @@
           "fixed": false
         }
       ],
-      "scoredAt": "2026-08-11T09:58:49.351Z"
+      "scoredAt": "2026-08-11T10:24:01.865Z"
+    },
+    {
+      "name": "Niiiskuneiti",
+      "region": "CE",
+      "class": "Reaper",
+      "itemLevel": 1790,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "crit",
+          "value": 76,
+          "fixed": true
+        },
+        {
+          "trait": "spec",
+          "value": 76,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "critRateOnCrit",
+          "familyId": 11,
+          "label": "Crit Rate +A%; on crit, damage +1.5%",
+          "tier": "mid",
+          "value": [
+            4.2
+          ],
+          "fixed": false,
+          "damage": 4.30170797401326,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "addDamage",
+          "familyId": 24,
+          "label": "Additional Damage +X%",
+          "tier": "mid",
+          "value": [
+            3.5
+          ],
+          "fixed": false,
+          "damage": 2.496741432969326,
+          "familyLetter": "B"
+        },
+        {
+          "cat": "special",
+          "family": "critDmgOnCrit",
+          "familyId": 12,
+          "label": "Crit Damage +A%; on crit, damage +1.5%",
+          "tier": "mid",
+          "value": [
+            8.4
+          ],
+          "fixed": false,
+          "damage": 4.278671967170241,
+          "familyLetter": "S"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "rollsRemaining": null,
+      "damage": 14.82734294217579,
+      "damagePct": 15.982998465240561,
+      "linesDamage": 11.077121374152828,
+      "linesPct": 11.713929149623926,
+      "goldAt1_5M": 23974497.69786084,
+      "benchmark": "near-final",
+      "biblePct": 11.07,
+      "biblePctDelta": 0.6439291496239257,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Crit +76"
+        },
+        {
+          "locked": true,
+          "text": "Specialization +76"
+        },
+        {
+          "locked": false,
+          "text": "Crit Rate +4.2%. Crit Hit Damage +1.5%."
+        },
+        {
+          "locked": false,
+          "text": "Additional Damage +3.5%"
+        },
+        {
+          "locked": false,
+          "text": "Crit Damage +8.4%. Crit Hit Damage +1.5%."
+        }
+      ],
+      "notes": [],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 76,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 16,
+          "id": 213400023,
+          "value": 76,
+          "fixed": true
+        },
+        {
+          "type": 3,
+          "index": 11012,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 2,
+          "index": 50,
+          "id": 213400023,
+          "value": 350,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11022,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T10:24:01.865Z"
+    },
+    {
+      "name": "Nekotathanos",
+      "region": "NA",
+      "class": "Soulfist",
+      "itemLevel": 1763,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "spec",
+          "value": 81,
+          "fixed": true
+        },
+        {
+          "trait": "swiftness",
+          "value": 68,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "critRateOnCrit",
+          "familyId": 11,
+          "label": "Crit Rate +A%; on crit, damage +1.5%",
+          "tier": "low",
+          "value": [
+            3.4
+          ],
+          "fixed": false,
+          "damage": 3.7614903097401466,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "damage",
+          "familyId": 23,
+          "label": "Damage to enemies +X%",
+          "tier": "high",
+          "value": [
+            3
+          ],
+          "fixed": false,
+          "damage": 2.955880224154443,
+          "familyLetter": "B"
+        },
+        {
+          "cat": "special",
+          "family": "cdUpDmgUp",
+          "familyId": 15,
+          "label": "Skill cooldown +2% but damage +A%",
+          "tier": "mid",
+          "value": [
+            5
+          ],
+          "fixed": false,
+          "damage": 4.289044204224382,
+          "familyLetter": "S"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "rollsRemaining": null,
+      "damage": 14.731414738118971,
+      "damagePct": 15.871791405796998,
+      "linesDamage": 11.006414738118972,
+      "linesPct": 11.634967907049854,
+      "goldAt1_5M": 23807687.108695496,
+      "benchmark": "near-final",
+      "biblePct": 10.87,
+      "biblePctDelta": 0.7649679070498543,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Specialization +81"
+        },
+        {
+          "locked": true,
+          "text": "Swiftness +68"
+        },
+        {
+          "locked": false,
+          "text": "Crit Rate +3.4%. Crit Hit Damage +1.5%."
+        },
+        {
+          "locked": false,
+          "text": "Outgoing Damage +3%."
+        },
+        {
+          "locked": false,
+          "text": "Skill cooldown +2%. Outgoing Damage +5%."
+        }
+      ],
+      "notes": [],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 16,
+          "id": 213400023,
+          "value": 81,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 18,
+          "id": 213400023,
+          "value": 68,
+          "fixed": true
+        },
+        {
+          "type": 3,
+          "index": 11013,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 4,
+          "index": 605100131,
+          "id": 213400023,
+          "value": 0,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11052,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T10:24:01.865Z"
     },
     {
       "name": "Paroxysmal",
@@ -292,6 +1697,7 @@
         "base": 4,
         "ticket": 3
       },
+      "rollsRemaining": null,
       "damage": 14.1850519584317,
       "damagePct": 15.24043737766474,
       "linesDamage": 9.177961567706785,
@@ -299,6 +1705,29 @@
       "goldAt1_5M": 22860656.06649711,
       "benchmark": "good",
       "biblePct": 9.59,
+      "biblePctDelta": 0.02232270846688067,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Specialization +85"
+        },
+        {
+          "locked": true,
+          "text": "Crit +119"
+        },
+        {
+          "locked": false,
+          "text": "Crit Damage +8.4%"
+        },
+        {
+          "locked": false,
+          "text": "Non-directional Skill Damage +3%. Awakening Skills do not apply."
+        },
+        {
+          "locked": false,
+          "text": "Crit Rate +5%"
+        }
+      ],
       "notes": [
         "type:2 index 74 decoded by local extension map (not in model TYPE2_INDEX)"
       ],
@@ -339,7 +1768,141 @@
           "fixed": false
         }
       ],
-      "scoredAt": "2026-08-11T09:58:49.351Z"
+      "scoredAt": "2026-08-11T10:24:01.865Z"
+    },
+    {
+      "name": "Linkuriboh",
+      "region": "NA",
+      "class": "Shadowhunter",
+      "itemLevel": 1770,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "swiftness",
+          "value": 90,
+          "fixed": true
+        },
+        {
+          "trait": "spec",
+          "value": 112,
+          "fixed": false
+        }
+      ],
+      "lines": [
+        {
+          "cat": "basic",
+          "family": "mainStat",
+          "familyId": null,
+          "label": "Str / Dex / Int",
+          "tier": null,
+          "value": 13760,
+          "fixed": true,
+          "damage": 0.9556088463776204,
+          "familyLetter": "D"
+        },
+        {
+          "cat": "special",
+          "family": "critDmgOnCrit",
+          "familyId": 12,
+          "label": "Crit Damage +A%; on crit, damage +1.5%",
+          "tier": "mid",
+          "value": [
+            8.4
+          ],
+          "fixed": false,
+          "damage": 4.278671967170241,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "critRateOnCrit",
+          "familyId": 11,
+          "label": "Crit Rate +A%; on crit, damage +1.5%",
+          "tier": "low",
+          "value": [
+            3.4
+          ],
+          "fixed": false,
+          "damage": 3.7614903097401466,
+          "familyLetter": "S"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "rollsRemaining": null,
+      "damage": 14.04577112328801,
+      "damagePct": 15.080041260517207,
+      "linesDamage": 8.995771123288009,
+      "linesPct": 9.412801340210208,
+      "goldAt1_5M": 22620061.89077581,
+      "benchmark": "good",
+      "biblePct": 7.64,
+      "biblePctDelta": 1.7728013402102087,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Dexterity +13760"
+        },
+        {
+          "locked": true,
+          "text": "Swiftness +90"
+        },
+        {
+          "locked": false,
+          "text": "Specialization +112"
+        },
+        {
+          "locked": false,
+          "text": "Crit Damage +8.4%. Crit Hit Damage +1.5%."
+        },
+        {
+          "locked": false,
+          "text": "Crit Rate +3.4%. Crit Hit Damage +1.5%."
+        }
+      ],
+      "notes": [
+        "a combat trait sits in a GRANTED slot; scored at its rolled value anyway"
+      ],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 11,
+          "id": 213400023,
+          "value": 13760,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 18,
+          "id": 213400023,
+          "value": 90,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 16,
+          "id": 213400023,
+          "value": 112,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11022,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11013,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T10:24:01.865Z"
     },
     {
       "name": "Kyulo",
@@ -405,6 +1968,7 @@
         "base": 4,
         "ticket": 3
       },
+      "rollsRemaining": null,
       "damage": 13.674856964038224,
       "damagePct": 14.653983735320498,
       "linesDamage": 9.282780033819538,
@@ -412,7 +1976,31 @@
       "goldAt1_5M": 21980975.602980748,
       "benchmark": "good",
       "biblePct": 11.41,
+      "biblePctDelta": -1.6827231001143836,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Specialization +93"
+        },
+        {
+          "locked": true,
+          "text": "Crit +85"
+        },
+        {
+          "locked": false,
+          "text": "Crit Rate +3.4%. Crit Hit Damage +1.5%."
+        },
+        {
+          "locked": false,
+          "text": "Additional Damage +3%. Bonus vs. Demon/Archdemon +2.5%."
+        },
+        {
+          "locked": false,
+          "text": "Crit Rate +5%"
+        }
+      ],
       "notes": [
+        "page carried 2 bracelet payloads (2 distinct); took payload #0, the one matching the rendered tooltip",
         "type:2 index 74 decoded by local extension map (not in model TYPE2_INDEX)"
       ],
       "rawStats": [
@@ -452,7 +2040,7 @@
           "fixed": false
         }
       ],
-      "scoredAt": "2026-08-11T09:58:49.351Z"
+      "scoredAt": "2026-08-11T10:24:01.865Z"
     },
     {
       "name": "Subsz",
@@ -518,6 +2106,7 @@
         "base": 4,
         "ticket": 3
       },
+      "rollsRemaining": null,
       "damage": 13.36512581240903,
       "damagePct": 14.299414020996991,
       "linesDamage": 8.661435560202959,
@@ -525,7 +2114,32 @@
       "goldAt1_5M": 21449121.031495485,
       "benchmark": "good",
       "biblePct": 9.05,
-      "notes": [],
+      "biblePctDelta": -0.0023937365496209395,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Specialization +118"
+        },
+        {
+          "locked": true,
+          "text": "Crit +72"
+        },
+        {
+          "locked": false,
+          "text": "Outgoing Damage +2%."
+        },
+        {
+          "locked": false,
+          "text": "Outgoing Damage +2%. Outgoing Damage +4% to Staggered foes."
+        },
+        {
+          "locked": false,
+          "text": "Crit Rate +4.2%. Crit Hit Damage +1.5%."
+        }
+      ],
+      "notes": [
+        "page carried 2 bracelet payloads (2 distinct); took payload #0, the one matching the rendered tooltip"
+      ],
       "rawStats": [
         {
           "type": 2,
@@ -563,7 +2177,142 @@
           "fixed": false
         }
       ],
-      "scoredAt": "2026-08-11T09:58:49.351Z"
+      "scoredAt": "2026-08-11T10:24:01.865Z"
+    },
+    {
+      "name": "Tokadamia",
+      "region": "NA",
+      "class": "Reaper",
+      "itemLevel": 1783,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "swiftness",
+          "value": 111,
+          "fixed": true
+        },
+        {
+          "trait": "spec",
+          "value": 119,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "wpStackHit",
+          "familyId": 20,
+          "label": "On-hit per sec for 10s: Weapon Power +A, atk/move speed +1% (max 6 stacks)",
+          "tier": "mid",
+          "value": [
+            1320
+          ],
+          "fixed": false,
+          "damage": 1.59357942198508,
+          "familyLetter": "C"
+        },
+        {
+          "cat": "special",
+          "family": "critDmgOnCrit",
+          "familyId": 12,
+          "label": "Crit Damage +A%; on crit, damage +1.5%",
+          "tier": "low",
+          "value": [
+            6.8
+          ],
+          "fixed": false,
+          "damage": 3.7427415021645127,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "wpHpHigh",
+          "familyId": 21,
+          "label": "Weapon Power +A; while HP≥50%, on-hit Weapon Power +B for 5s",
+          "tier": "mid",
+          "value": [
+            8100,
+            2200
+          ],
+          "fixed": false,
+          "damage": 2.0770226914433434,
+          "familyLetter": "C"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "rollsRemaining": null,
+      "damage": 13.163343615592936,
+      "damagePct": 14.069010687067829,
+      "linesDamage": 7.413343615592936,
+      "linesPct": 7.6950500043834635,
+      "goldAt1_5M": 21103516.030601744,
+      "benchmark": "good",
+      "biblePct": 6.34,
+      "biblePctDelta": 1.3550500043834637,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Swiftness +111"
+        },
+        {
+          "locked": true,
+          "text": "Specialization +119"
+        },
+        {
+          "locked": false,
+          "text": "On hit, Weapon Power +1,320, Atk./Move Speed +1% for 10s. (Max. 6 stacks)"
+        },
+        {
+          "locked": false,
+          "text": "Crit Damage +6.8%. Crit Hit Damage +1.5%."
+        },
+        {
+          "locked": false,
+          "text": "Weapon Power +8,100. When your HP is 50% or higher, upon hit, Weapon Power +2,200 for 5s."
+        }
+      ],
+      "notes": [],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 18,
+          "id": 213400023,
+          "value": 111,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 16,
+          "id": 213400023,
+          "value": 119,
+          "fixed": true
+        },
+        {
+          "type": 4,
+          "index": 605100102,
+          "id": 213400023,
+          "value": 0,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11023,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11112,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T10:24:01.865Z"
     },
     {
       "name": "Teal",
@@ -629,6 +2378,7 @@
         "base": 4,
         "ticket": 3
       },
+      "rollsRemaining": null,
       "damage": 13.021458959785392,
       "damagePct": 13.907279027208052,
       "linesDamage": 9.038981888146928,
@@ -636,6 +2386,29 @@
       "goldAt1_5M": 20860918.54081208,
       "benchmark": "good",
       "biblePct": 9.57,
+      "biblePctDelta": -0.10991033538957318,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Crit +95"
+        },
+        {
+          "locked": true,
+          "text": "Specialization +67"
+        },
+        {
+          "locked": false,
+          "text": "Outgoing Damage +2.5%. Outgoing Damage +4.5% to Staggered foes."
+        },
+        {
+          "locked": false,
+          "text": "Crit Rate +3.4%"
+        },
+        {
+          "locked": false,
+          "text": "Skill cooldown +2%. Outgoing Damage +4.5%."
+        }
+      ],
       "notes": [
         "type:2 index 74 decoded by local extension map (not in model TYPE2_INDEX)"
       ],
@@ -676,7 +2449,7 @@
           "fixed": false
         }
       ],
-      "scoredAt": "2026-08-11T09:58:49.351Z"
+      "scoredAt": "2026-08-11T10:24:01.865Z"
     },
     {
       "name": "Subszy",
@@ -742,6 +2515,7 @@
         "base": 4,
         "ticket": 3
       },
+      "rollsRemaining": null,
       "damage": 12.874127293682992,
       "damagePct": 13.739581101613885,
       "linesDamage": 8.201568340958167,
@@ -749,6 +2523,29 @@
       "goldAt1_5M": 20609371.652420826,
       "benchmark": "good",
       "biblePct": 10.72,
+      "biblePctDelta": -2.1727166388907424,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Specialization +110"
+        },
+        {
+          "locked": true,
+          "text": "Crit +79"
+        },
+        {
+          "locked": false,
+          "text": "Additional Damage +3.5%. Bonus vs. Demon/Archdemon +2.5%."
+        },
+        {
+          "locked": false,
+          "text": "On hit, Weapon Power +1,160, Atk./Move Speed +1% for 10s. (Max. 6 stacks)"
+        },
+        {
+          "locked": false,
+          "text": "Crit Rate +4.2%. Crit Hit Damage +1.5%."
+        }
+      ],
       "notes": [],
       "rawStats": [
         {
@@ -787,7 +2584,142 @@
           "fixed": false
         }
       ],
-      "scoredAt": "2026-08-11T09:58:49.351Z"
+      "scoredAt": "2026-08-11T10:24:01.865Z"
+    },
+    {
+      "name": "Phoënix",
+      "region": "NA",
+      "class": "Arcanist",
+      "itemLevel": 1776,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "swiftness",
+          "value": 82,
+          "fixed": true
+        },
+        {
+          "trait": "crit",
+          "value": 82,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "addDamage",
+          "familyId": 24,
+          "label": "Additional Damage +X%",
+          "tier": "mid",
+          "value": [
+            3.5
+          ],
+          "fixed": false,
+          "damage": 2.496741432969326,
+          "familyLetter": "B"
+        },
+        {
+          "cat": "special",
+          "family": "wpHpHigh",
+          "familyId": 21,
+          "label": "Weapon Power +A; while HP≥50%, on-hit Weapon Power +B for 5s",
+          "tier": "low",
+          "value": [
+            7200,
+            2000
+          ],
+          "fixed": false,
+          "damage": 1.8580717580985986,
+          "familyLetter": "C"
+        },
+        {
+          "cat": "special",
+          "family": "cdUpDmgUp",
+          "familyId": 15,
+          "label": "Skill cooldown +2% but damage +A%",
+          "tier": "mid",
+          "value": [
+            5
+          ],
+          "fixed": false,
+          "damage": 4.289044204224382,
+          "familyLetter": "S"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "rollsRemaining": null,
+      "damage": 12.688701443569062,
+      "damagePct": 13.528873929595097,
+      "linesDamage": 8.643857395292306,
+      "linesPct": 9.028439380032815,
+      "goldAt1_5M": 20293310.894392647,
+      "benchmark": "good",
+      "biblePct": 7.38,
+      "biblePctDelta": 1.6484393800328148,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Swiftness +82"
+        },
+        {
+          "locked": true,
+          "text": "Crit +82"
+        },
+        {
+          "locked": false,
+          "text": "Additional Damage +3.5%"
+        },
+        {
+          "locked": false,
+          "text": "Weapon Power +7,200. When your HP is 50% or higher, upon hit, Weapon Power +2,000 for 5s."
+        },
+        {
+          "locked": false,
+          "text": "Skill cooldown +2%. Outgoing Damage +5%."
+        }
+      ],
+      "notes": [],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 18,
+          "id": 213400023,
+          "value": 82,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 82,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 50,
+          "id": 213400023,
+          "value": 350,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11113,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11052,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T10:24:01.865Z"
     },
     {
       "name": "Gettingcards",
@@ -853,6 +2785,7 @@
         "base": 4,
         "ticket": 3
       },
+      "rollsRemaining": null,
       "damage": 12.628085124031761,
       "damagePct": 13.46007775756708,
       "linesDamage": 8.374609580996275,
@@ -860,6 +2793,29 @@
       "goldAt1_5M": 20190116.63635062,
       "benchmark": "good",
       "biblePct": 10.33,
+      "biblePctDelta": -1.5947224669214766,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Crit +99"
+        },
+        {
+          "locked": true,
+          "text": "Swiftness +74"
+        },
+        {
+          "locked": false,
+          "text": "Non-directional Skill Damage +2.5%. Awakening Skills do not apply."
+        },
+        {
+          "locked": false,
+          "text": "Crit Rate +3.4%. Crit Hit Damage +1.5%."
+        },
+        {
+          "locked": false,
+          "text": "Additional Damage +3%. Bonus vs. Demon/Archdemon +2.5%."
+        }
+      ],
       "notes": [],
       "rawStats": [
         {
@@ -898,7 +2854,7 @@
           "fixed": false
         }
       ],
-      "scoredAt": "2026-08-11T09:58:49.351Z"
+      "scoredAt": "2026-08-11T10:24:01.865Z"
     },
     {
       "name": "Shizukaziye",
@@ -964,6 +2920,7 @@
         "base": 4,
         "ticket": 3
       },
+      "rollsRemaining": null,
       "damage": 12.468003053411795,
       "damagePct": 13.278593816147666,
       "linesDamage": 8.749997953651071,
@@ -971,6 +2928,29 @@
       "goldAt1_5M": 19917890.724221498,
       "benchmark": "good",
       "biblePct": 10.65,
+      "biblePctDelta": -1.5057757891765196,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Specialization +67"
+        },
+        {
+          "locked": true,
+          "text": "Crit +84"
+        },
+        {
+          "locked": false,
+          "text": "Crit Rate +3.4%. Crit Hit Damage +1.5%."
+        },
+        {
+          "locked": false,
+          "text": "Crit Damage +8.4%"
+        },
+        {
+          "locked": false,
+          "text": "Additional Damage +3%. Bonus vs. Demon/Archdemon +2.5%."
+        }
+      ],
       "notes": [],
       "rawStats": [
         {
@@ -1009,7 +2989,415 @@
           "fixed": false
         }
       ],
-      "scoredAt": "2026-08-11T09:58:49.351Z"
+      "scoredAt": "2026-08-11T10:24:01.865Z"
+    },
+    {
+      "name": "Blitzkuro",
+      "region": "NA",
+      "class": "Scrapper",
+      "itemLevel": 1780,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "spec",
+          "value": 119,
+          "fixed": true
+        },
+        {
+          "trait": "crit",
+          "value": 94,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "cdUpDmgUp",
+          "familyId": 15,
+          "label": "Skill cooldown +2% but damage +A%",
+          "tier": "mid",
+          "value": [
+            5
+          ],
+          "fixed": false,
+          "damage": 4.289044204224382,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "atkMoveSpeed",
+          "familyId": 1,
+          "label": "Attack & Move Speed +X%",
+          "tier": "high",
+          "value": [
+            6
+          ],
+          "fixed": false,
+          "damage": 0,
+          "familyLetter": "F"
+        },
+        {
+          "cat": "special",
+          "family": "critRate",
+          "familyId": 31,
+          "label": "Crit Rate +X%",
+          "tier": "mid",
+          "value": [
+            4.2
+          ],
+          "fixed": false,
+          "damage": 2.844649631691937,
+          "familyLetter": "B"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "rollsRemaining": null,
+      "damage": 12.39215688324927,
+      "damagePct": 13.192708915445328,
+      "linesDamage": 7.1336938359163184,
+      "linesPct": 7.394301751234855,
+      "goldAt1_5M": 19789063.37316799,
+      "benchmark": "good",
+      "biblePct": 7.06,
+      "biblePctDelta": 0.3343017512348556,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Specialization +119"
+        },
+        {
+          "locked": true,
+          "text": "Crit +94"
+        },
+        {
+          "locked": false,
+          "text": "Atk./Move Speed +6%."
+        },
+        {
+          "locked": false,
+          "text": "Crit Rate +4.2%"
+        },
+        {
+          "locked": false,
+          "text": "Skill cooldown +2%. Outgoing Damage +5%."
+        }
+      ],
+      "notes": [
+        "type:3 index 11261 breaks the documented index formula (would be family 36); bible renders it family 1 high — decoded by local override",
+        "type:2 index 74 decoded by local extension map (not in model TYPE2_INDEX)"
+      ],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 16,
+          "id": 213400023,
+          "value": 119,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 94,
+          "fixed": true
+        },
+        {
+          "type": 3,
+          "index": 11261,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 2,
+          "index": 74,
+          "id": 213400023,
+          "value": 420,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11052,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T10:24:01.865Z"
+    },
+    {
+      "name": "Dubyew",
+      "region": "NA",
+      "class": "Gunlancer",
+      "itemLevel": 1774,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "swiftness",
+          "value": 98,
+          "fixed": true
+        },
+        {
+          "trait": "crit",
+          "value": 77,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "damage",
+          "familyId": 23,
+          "label": "Damage to enemies +X%",
+          "tier": "high",
+          "value": [
+            3
+          ],
+          "fixed": false,
+          "damage": 2.955880224154443,
+          "familyLetter": "B"
+        },
+        {
+          "cat": "special",
+          "family": "critDamage",
+          "familyId": 32,
+          "label": "Crit Damage +X%",
+          "tier": "low",
+          "value": [
+            6.8
+          ],
+          "fixed": false,
+          "damage": 2.3090137728660034,
+          "familyLetter": "B"
+        },
+        {
+          "cat": "special",
+          "family": "addDmgDemon",
+          "familyId": 14,
+          "label": "Additional Damage +A%; Demon/Archdemon damage +B%",
+          "tier": "high",
+          "value": [
+            3.5,
+            2.5
+          ],
+          "fixed": false,
+          "damage": 2.496741432969326,
+          "familyLetter": "C"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "rollsRemaining": null,
+      "damage": 12.085975274155281,
+      "damagePct": 12.846663691667759,
+      "linesDamage": 7.761635429989772,
+      "linesPct": 8.0707970162619,
+      "goldAt1_5M": 19269995.537501637,
+      "benchmark": "good",
+      "biblePct": 10.07,
+      "biblePctDelta": -1.9992029837381011,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Swiftness +98"
+        },
+        {
+          "locked": true,
+          "text": "Crit +77"
+        },
+        {
+          "locked": false,
+          "text": "Outgoing Damage +3%."
+        },
+        {
+          "locked": false,
+          "text": "Crit Damage +6.8%"
+        },
+        {
+          "locked": false,
+          "text": "Additional Damage +3.5%. Bonus vs. Demon/Archdemon +2.5%."
+        }
+      ],
+      "notes": [],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 18,
+          "id": 213400023,
+          "value": 98,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 77,
+          "fixed": true
+        },
+        {
+          "type": 4,
+          "index": 605100131,
+          "id": 213400023,
+          "value": 0,
+          "fixed": false
+        },
+        {
+          "type": 2,
+          "index": 76,
+          "id": 213400023,
+          "value": 680,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11041,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T10:24:01.865Z"
+    },
+    {
+      "name": "Craftedswifts",
+      "region": "NA",
+      "class": "Arcanist",
+      "itemLevel": 1778,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "swiftness",
+          "value": 95,
+          "fixed": true
+        },
+        {
+          "trait": "crit",
+          "value": 70,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "addDmgDemon",
+          "familyId": 14,
+          "label": "Additional Damage +A%; Demon/Archdemon damage +B%",
+          "tier": "mid",
+          "value": [
+            3,
+            2.5
+          ],
+          "fixed": false,
+          "damage": 2.1438580122189874,
+          "familyLetter": "C"
+        },
+        {
+          "cat": "special",
+          "family": "wpHpHigh",
+          "familyId": 21,
+          "label": "Weapon Power +A; while HP≥50%, on-hit Weapon Power +B for 5s",
+          "tier": "high",
+          "value": [
+            9000,
+            2400
+          ],
+          "fixed": false,
+          "damage": 2.2953021651113543,
+          "familyLetter": "C"
+        },
+        {
+          "cat": "special",
+          "family": "nonDirectional",
+          "familyId": 27,
+          "label": "Non-directional skill damage +X% (not Awakening)",
+          "tier": "high",
+          "value": [
+            3.5
+          ],
+          "fixed": false,
+          "damage": 3.4401426717332315,
+          "familyLetter": "B"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "rollsRemaining": null,
+      "damage": 11.95969247725257,
+      "damagePct": 12.704247710914718,
+      "linesDamage": 7.879302849063573,
+      "linesPct": 8.198035978604068,
+      "goldAt1_5M": 19056371.566372078,
+      "benchmark": "good",
+      "biblePct": 8.34,
+      "biblePctDelta": -0.1419640213959319,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Swiftness +95"
+        },
+        {
+          "locked": true,
+          "text": "Crit +70"
+        },
+        {
+          "locked": false,
+          "text": "Additional Damage +3%. Bonus vs. Demon/Archdemon +2.5%."
+        },
+        {
+          "locked": false,
+          "text": "Weapon Power +9,000. When your HP is 50% or higher, upon hit, Weapon Power +2,400 for 5s."
+        },
+        {
+          "locked": false,
+          "text": "Non-directional Skill Damage +3.5%. Awakening Skills do not apply."
+        }
+      ],
+      "notes": [],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 18,
+          "id": 213400023,
+          "value": 95,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 70,
+          "fixed": true
+        },
+        {
+          "type": 3,
+          "index": 11042,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11111,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 4,
+          "index": 605100171,
+          "id": 213400023,
+          "value": 0,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T10:24:01.865Z"
     },
     {
       "name": "Noa",
@@ -1076,6 +3464,7 @@
         "base": 4,
         "ticket": 3
       },
+      "rollsRemaining": null,
       "damage": 11.847348963503315,
       "damagePct": 12.577702894647548,
       "linesDamage": 7.911931271909534,
@@ -1083,6 +3472,29 @@
       "goldAt1_5M": 18866554.341971323,
       "benchmark": "good",
       "biblePct": 10.12,
+      "biblePctDelta": -1.88665494862226,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Specialization +68"
+        },
+        {
+          "locked": true,
+          "text": "Crit +92"
+        },
+        {
+          "locked": false,
+          "text": "Crit Damage +6.8%. Crit Hit Damage +1.5%."
+        },
+        {
+          "locked": false,
+          "text": "Additional Damage +2.5%. Bonus vs. Demon/Archdemon +2.5%."
+        },
+        {
+          "locked": false,
+          "text": "Outgoing Damage +2%. Outgoing Damage +4% to Staggered foes."
+        }
+      ],
       "notes": [],
       "rawStats": [
         {
@@ -1121,7 +3533,283 @@
           "fixed": false
         }
       ],
-      "scoredAt": "2026-08-11T09:58:49.351Z"
+      "scoredAt": "2026-08-11T10:24:01.865Z"
+    },
+    {
+      "name": "Venoms",
+      "region": "NA",
+      "class": "Arcanist",
+      "itemLevel": 1791,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "crit",
+          "value": 114,
+          "fixed": true
+        },
+        {
+          "trait": "swiftness",
+          "value": 73,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "critRateOnCrit",
+          "familyId": 11,
+          "label": "Crit Rate +A%; on crit, damage +1.5%",
+          "tier": "mid",
+          "value": [
+            4.2
+          ],
+          "fixed": true,
+          "damage": 4.30170797401326,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "resourceRecovery",
+          "familyId": 8,
+          "label": "Combat resource natural recovery +X%",
+          "tier": "low",
+          "value": [
+            8
+          ],
+          "fixed": true,
+          "damage": 0,
+          "familyLetter": "F"
+        },
+        {
+          "cat": "special",
+          "family": "critRate",
+          "familyId": 31,
+          "label": "Crit Rate +X%",
+          "tier": "mid",
+          "value": [
+            4.2
+          ],
+          "fixed": false,
+          "damage": 2.844649631691937,
+          "familyLetter": "B"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 2
+      },
+      "rollsRemaining": {
+        "base": 0,
+        "ticket": 1
+      },
+      "damage": 11.734008868310076,
+      "damagePct": 12.450179500240054,
+      "linesDamage": 7.146357605705196,
+      "linesPct": 7.407902779558295,
+      "goldAt1_5M": 18675269.250360083,
+      "benchmark": "good",
+      "biblePct": 7.06,
+      "biblePctDelta": 0.3479027795582956,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Crit +114"
+        },
+        {
+          "locked": true,
+          "text": "Swiftness +73"
+        },
+        {
+          "locked": true,
+          "text": "Crit Rate +4.2%. Crit Hit Damage +1.5%."
+        },
+        {
+          "locked": true,
+          "text": "Combat Resource Natural Recovery +8%"
+        },
+        {
+          "locked": false,
+          "text": "Crit Rate +4.2%"
+        }
+      ],
+      "notes": [
+        "page carried 3 bracelet payloads (2 distinct); took payload #2, the one matching the rendered tooltip",
+        "type:2 index 149 decoded by local extension map (not in model TYPE2_INDEX)",
+        "type:2 index 74 decoded by local extension map (not in model TYPE2_INDEX)",
+        "4 of 5 lines are locked (fixed:true = bible's lock icon). Players can lock granted lines, so the drop's fixed/granted split cannot be read off this payload."
+      ],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 114,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 18,
+          "id": 213400023,
+          "value": 73,
+          "fixed": true
+        },
+        {
+          "type": 3,
+          "index": 11012,
+          "id": 213400023,
+          "value": 5,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 149,
+          "id": 213400023,
+          "value": 800,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 74,
+          "id": 213400023,
+          "value": 420,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T10:24:01.865Z"
+    },
+    {
+      "name": "Theschmeatdragon",
+      "region": "NA",
+      "class": "Berserker",
+      "itemLevel": 1750,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "swiftness",
+          "value": 69,
+          "fixed": true
+        },
+        {
+          "trait": "spec",
+          "value": 109,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "critDamage",
+          "familyId": 32,
+          "label": "Crit Damage +X%",
+          "tier": "high",
+          "value": [
+            10
+          ],
+          "fixed": false,
+          "damage": 3.377431711860405,
+          "familyLetter": "B"
+        },
+        {
+          "cat": "basic",
+          "family": "mainStat",
+          "familyId": null,
+          "label": "Str / Dex / Int",
+          "tier": null,
+          "value": 13249,
+          "fixed": false,
+          "damage": 0.9204474743291264,
+          "familyLetter": "D"
+        },
+        {
+          "cat": "special",
+          "family": "addDamage",
+          "familyId": 24,
+          "label": "Additional Damage +X%",
+          "tier": "high",
+          "value": [
+            4
+          ],
+          "fixed": false,
+          "damage": 2.848383964243343,
+          "familyLetter": "B"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "rollsRemaining": null,
+      "damage": 11.596263150432875,
+      "damagePct": 12.295390825093655,
+      "linesDamage": 7.146263150432874,
+      "linesPct": 7.407801327179131,
+      "goldAt1_5M": 18443086.23764048,
+      "benchmark": "good",
+      "biblePct": 6.51,
+      "biblePctDelta": 0.8978013271791312,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Swiftness +69"
+        },
+        {
+          "locked": true,
+          "text": "Specialization +109"
+        },
+        {
+          "locked": false,
+          "text": "Crit Damage +10%"
+        },
+        {
+          "locked": false,
+          "text": "Strength +13249"
+        },
+        {
+          "locked": false,
+          "text": "Additional Damage +4%"
+        }
+      ],
+      "notes": [
+        "page carried 2 bracelet payloads (2 distinct); took payload #1, the one matching the rendered tooltip"
+      ],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 18,
+          "id": 213400023,
+          "value": 69,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 16,
+          "id": 213400023,
+          "value": 109,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 76,
+          "id": 213400023,
+          "value": 1000,
+          "fixed": false
+        },
+        {
+          "type": 2,
+          "index": 11,
+          "id": 213400023,
+          "value": 13249,
+          "fixed": false
+        },
+        {
+          "type": 2,
+          "index": 50,
+          "id": 213400023,
+          "value": 400,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T10:24:01.865Z"
     },
     {
       "name": "Kayamix",
@@ -1184,6 +3872,10 @@
         "base": 4,
         "ticket": 0
       },
+      "rollsRemaining": {
+        "base": 0,
+        "ticket": 3
+      },
       "damage": 11.562761348367701,
       "damagePct": 12.257776146680488,
       "linesDamage": 7.089417166991342,
@@ -1191,7 +3883,31 @@
       "goldAt1_5M": 18386664.220020734,
       "benchmark": "good",
       "biblePct": 6.09,
+      "biblePctDelta": 1.2567616571658569,
+      "bibleLines": [
+        {
+          "locked": true,
+          "text": "Dexterity +12352"
+        },
+        {
+          "locked": true,
+          "text": "Specialization +78"
+        },
+        {
+          "locked": false,
+          "text": "Outgoing Damage +2.5%."
+        },
+        {
+          "locked": false,
+          "text": "Crit +104"
+        },
+        {
+          "locked": false,
+          "text": "Crit Rate +3.4%. Crit Hit Damage +1.5%."
+        }
+      ],
       "notes": [
+        "page carried 2 bracelet payloads (2 distinct); took payload #0, the one matching the rendered tooltip",
         "type:2 index 4 decoded by local extension map (not in model TYPE2_INDEX)",
         "a combat trait sits in a GRANTED slot; scored at its rolled value anyway"
       ],
@@ -1232,123 +3948,7 @@
           "fixed": false
         }
       ],
-      "scoredAt": "2026-08-11T09:58:49.351Z"
-    },
-    {
-      "name": "Theschmeatdragon",
-      "region": "NA",
-      "class": "Berserker",
-      "itemLevel": 1750,
-      "grade": "ancient",
-      "traits": [
-        {
-          "trait": "swiftness",
-          "value": 75,
-          "fixed": true
-        },
-        {
-          "trait": "crit",
-          "value": 99,
-          "fixed": true
-        }
-      ],
-      "lines": [
-        {
-          "cat": "special",
-          "family": "dmgStagger",
-          "familyId": 13,
-          "label": "Damage +A%; damage to Staggered +B%",
-          "tier": "low",
-          "value": [
-            2,
-            4
-          ],
-          "fixed": true,
-          "damage": 2.3794648565717265,
-          "familyLetter": "B"
-        },
-        {
-          "cat": "special",
-          "family": "damage",
-          "familyId": 23,
-          "label": "Damage to enemies +X%",
-          "tier": "low",
-          "value": [
-            2
-          ],
-          "fixed": false,
-          "damage": 1.980262729617973,
-          "familyLetter": "B"
-        },
-        {
-          "cat": "special",
-          "family": "weaponPower",
-          "familyId": 33,
-          "label": "Weapon Power +X",
-          "tier": "low",
-          "value": [
-            7200
-          ],
-          "fixed": true,
-          "damage": 1.4508025550893766,
-          "familyLetter": "C"
-        }
-      ],
-      "rerollsLeft": {
-        "base": 4,
-        "ticket": 3
-      },
-      "damage": 10.08900568431456,
-      "damagePct": 10.615502090288697,
-      "linesDamage": 5.8105301412790755,
-      "linesPct": 5.9826591071962865,
-      "goldAt1_5M": 15923253.135433044,
-      "benchmark": "work to do",
-      "biblePct": 6.51,
-      "notes": [
-        "type:2 index 151 decoded by local extension map (not in model TYPE2_INDEX)",
-        "4 lines flagged fixed:true — the table allows 1-2",
-        "1 granted lines — outside the ancient table",
-        "GRADE AMBIGUOUS: no decisive value; defaulting to ancient"
-      ],
-      "rawStats": [
-        {
-          "type": 2,
-          "index": 18,
-          "id": 213400023,
-          "value": 75,
-          "fixed": true
-        },
-        {
-          "type": 2,
-          "index": 15,
-          "id": 213400023,
-          "value": 99,
-          "fixed": true
-        },
-        {
-          "type": 4,
-          "index": 605100033,
-          "id": 213400023,
-          "value": 0,
-          "fixed": true
-        },
-        {
-          "type": 2,
-          "index": 151,
-          "id": 213400023,
-          "value": 7200,
-          "fixed": true
-        },
-        {
-          "type": 4,
-          "index": 605100133,
-          "id": 213400023,
-          "value": 0,
-          "fixed": false
-        }
-      ],
-      "scoredAt": "2026-08-11T09:58:49.351Z"
+      "scoredAt": "2026-08-11T10:24:01.865Z"
     }
   ]
 }
