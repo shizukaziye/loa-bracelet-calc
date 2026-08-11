@@ -373,6 +373,13 @@ def line_damage(line, grade, profile):
     fam = resolve_special(line["family"])
     if not fam:
         return 0.0
+    # A tier the family's table for THIS grade does not carry. Reachable from a
+    # decode that landed on the wrong grade — Crit Damage +10% exists on Ancient
+    # and not on Relic, so the Relic table has no tier for it. Score it zero and
+    # let the caller's unmatchedValue flag do the complaining; a raised error
+    # here takes a whole import down over one line.
+    if line["tier"] not in fam["values"].get(grade, {}):
+        return 0.0
     return to_d(special_multiplier(fam, line["tier"], grade, profile))
 
 

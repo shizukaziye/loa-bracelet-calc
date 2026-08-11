@@ -205,7 +205,21 @@ function decodeWithGradeCheck(stats) {
   if (slotChoices(dec.grade).indexOf(granted) >= 0) return dec;
   const other = dec.grade === "relic" ? "ancient" : "relic";
   if (slotChoices(other).indexOf(granted) < 0) return dec;   // fits neither; leave the guess alone
-  return Bracelet.decodeBibleBracelet(stats, { grade: other });
+  const alt = Bracelet.decodeBibleBracelet(stats, { grade: other });
+  // The slot count is only ONE witness. If the other table cannot place a value
+  // this one placed — Crit Damage +10% exists on Ancient and not on Relic — then
+  // the slot count is the thing that is wrong, not the grade. Seen live on a
+  // chaos-dungeon loadout with four locked lines: the player locked granted
+  // lines, so "1 granted" was a player's choice, not a Relic drop.
+  if (unplaced(alt) > unplaced(dec)) return dec;
+  return alt;
+}
+
+/** Lines the grade's value table could not place: no tier, or a value off the table. */
+function unplaced(dec) {
+  let n = 0;
+  for (const l of dec.lines) if (l.cat === "special" && (!l.tier || l.unmatchedValue)) n++;
+  return n;
 }
 
 /**
@@ -530,11 +544,19 @@ async function requireOwner(env, request) {
 /**
  * Every `slot:"bracelet"` payload on the page, in document order.
  *
- * The blob repeats the equipment block once per loadout (raid first, then chaos),
- * so the FIRST hit is the raid bracelet — the one that matters. Parsed by
- * brace-scanning the `data:{…}` object and quoting its bare keys before
- * JSON.parse, the same technique astrogem-bible.js uses for arkGridCores; a flat
- * regex cannot be trusted with an object whose field order is not guaranteed.
+ * WAS WRONG UNTIL 2026-08-11: this used to say the blob repeats the equipment
+ * block "raid first, then chaos", and the caller took hit #0 as the raid
+ * bracelet. Document order is not fixed — across the 30 saved pages the chaos
+ * loadout comes first on 16 of them — so hit #0 was the chaos bracelet about
+ * half the time. That is the "wrong bracelet" bug. Use extractLoadouts() below,
+ * which reads the loadouts array and knows which bracelet belongs to which tab.
+ * This function survives as the last-ditch fallback for a page whose loadouts
+ * array cannot be parsed.
+ *
+ * Parsed by brace-scanning the `data:{…}` object and quoting its bare keys
+ * before JSON.parse, the same technique astrogem-bible.js uses for
+ * arkGridCores; a flat regex cannot be trusted with an object whose field order
+ * is not guaranteed.
  *
  * Known limit: the brace scan would be fooled by a `{` or `}` inside a string
  * value. Nothing in a bracelet payload carries one today (the only strings are
@@ -566,6 +588,172 @@ function extractBracelets(html) {
     if (parsed && Array.isArray(parsed.stats)) out.push(parsed);
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Loadouts
+// ---------------------------------------------------------------------------
+
+/**
+ * A character page carries ONE LOADOUT PER TAB on lostark.bible, and each has
+ * its own `items` array — so each can hold a DIFFERENT bracelet. The tabs seen
+ * on the 30 saved pages, with the button label bible prints for each:
+ *
+ *   most_recent_raid           "Raid Loadout"
+ *   most_recent_chaos_dungeon  "Current Loadout (Chaos Dungeon)"
+ *   raid_merged                "Estimated Raid Loadout"
+ *
+ * The list is treated as OPEN: an unknown classification is kept and shown under
+ * its own name rather than dropped.
+ *
+ * Nine of those 30 characters wear a different bracelet in different loadouts,
+ * and the gap reaches 3.4 percentage points of damage, so which one you read is
+ * not a detail. The page's own bracelet tooltip draws the loadout with the
+ * newest `lastUpdated` — on all 30 pages, without exception — which is the chaos
+ * one whenever the player ran chaos after their last raid.
+ */
+const LOADOUT_LABELS = {
+  most_recent_raid: "Raid",
+  most_recent_chaos_dungeon: "Chaos",
+  raid_merged: "Est. Raid"
+};
+
+function loadoutLabel(classification) {
+  if (LOADOUT_LABELS[classification]) return LOADOUT_LABELS[classification];
+  return String(classification || "Loadout")
+    .replace(/^most_recent_/, "").replace(/_/g, " ")
+    .replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+}
+
+/** Index of the matching close bracket for the open bracket at `start`. String-aware. */
+function matchSpan(s, start) {
+  let depth = 0, quote = null;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i];
+    if (quote) { if (c === "\\") { i++; continue; } if (c === quote) quote = null; continue; }
+    if (c === '"' || c === "'") { quote = c; continue; }
+    if (c === "{" || c === "[") depth++;
+    else if (c === "}" || c === "]") { depth--; if (depth === 0) return i; }
+  }
+  return -1;
+}
+
+/** Split "[{…},{…}]" into its depth-1 element sources. */
+function splitTop(arraySrc) {
+  const out = [];
+  let depth = 0, quote = null, start = -1;
+  for (let i = 0; i < arraySrc.length; i++) {
+    const c = arraySrc[i];
+    if (quote) { if (c === "\\") { i++; continue; } if (c === quote) quote = null; continue; }
+    if (c === '"' || c === "'") { quote = c; continue; }
+    if (c === "{" || c === "[") { if (depth === 1 && c === "{") start = i; depth++; }
+    else if (c === "}" || c === "]") { depth--; if (depth === 1 && c === "}" && start >= 0) { out.push(arraySrc.slice(start, i + 1)); start = -1; } }
+  }
+  return out;
+}
+
+/** The source text of one depth-1 field of an object source. Tolerant of key order. */
+function field(objSrc, key) {
+  const m = objSrc.match(new RegExp("[{,]" + key + ":"));
+  if (!m) return null;
+  const at = m.index + m[0].length, c = objSrc[at];
+  if (c === "{" || c === "[") { const e = matchSpan(objSrc, at); return e === -1 ? null : objSrc.slice(at, e + 1); }
+  let end = at, depth = 0, quote = null;
+  for (; end < objSrc.length; end++) {
+    const ch = objSrc[end];
+    if (quote) { if (ch === "\\") { end++; continue; } if (ch === quote) quote = null; continue; }
+    if (ch === '"') { quote = ch; continue; }
+    if (ch === "{" || ch === "[") depth++;
+    else if (ch === "}" || ch === "]") { if (depth === 0) break; depth--; }
+    else if (ch === "," && depth === 0) break;
+  }
+  return objSrc.slice(at, end);
+}
+
+function unquote(s) { return s == null ? null : String(s).replace(/^"|"$/g, ""); }
+function numOrNull(s) { const n = s == null ? NaN : Number(unquote(s)); return isFinite(n) ? n : null; }
+
+/** The bracelet payload inside one loadout source, or null when the slot is empty. */
+function braceletInLoadout(loadoutSrc) {
+  const items = field(loadoutSrc, "items");
+  if (!items) return null;
+  const els = splitTop(items);
+  for (let i = 0; i < els.length; i++) {
+    if (els[i].indexOf('slot:"bracelet"') === -1) continue;
+    const data = field(els[i], "data");
+    if (!data || data[0] !== "{") return null;            // `data: void 0` — nothing equipped
+    const jsonish = data.replace(/([{,[])\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*:/g, '$1"$2":');
+    let parsed = null;
+    try { parsed = JSON.parse(jsonish); } catch (e) { return null; }
+    return parsed && Array.isArray(parsed.stats) ? parsed : null;
+  }
+  return null;
+}
+
+/**
+ * Every loadout on the page that has a bracelet, newest-rendered flagged.
+ * Returns [] when the loadouts array is absent or unparseable, which is the
+ * caller's cue to fall back to extractBracelets().
+ */
+function extractLoadouts(html) {
+  const at = html.indexOf("loadouts:[");
+  if (at === -1) return [];
+  const arrAt = html.indexOf("[", at);
+  const end = matchSpan(html, arrAt);
+  if (end === -1) return [];
+  const out = [];
+  const srcs = splitTop(html.slice(arrAt, end + 1));
+  for (let i = 0; i < srcs.length; i++) {
+    const br = braceletInLoadout(srcs[i]);
+    if (!br) continue;
+    const classification = unquote(field(srcs[i], "classification")) || "loadout";
+    out.push({
+      classification: classification,
+      label: loadoutLabel(classification),
+      itemLevel: numOrNull(field(srcs[i], "itemLevel")),
+      lastUpdated: numOrNull(field(srcs[i], "lastUpdated")),
+      stats: br.stats,
+      numRerolls: typeof br.numRerolls === "number" ? br.numRerolls : null,
+      numTicketRerolls: typeof br.numTicketRerolls === "number" ? br.numTicketRerolls : null
+    });
+  }
+  // The tooltip the page draws belongs to the newest loadout — say which, so a
+  // reader comparing our numbers against the page knows where to look.
+  let newest = -1;
+  for (let i = 0; i < out.length; i++) if (newest < 0 || (out[i].lastUpdated || 0) > (out[newest].lastUpdated || 0)) newest = i;
+  for (let i = 0; i < out.length; i++) out[i].isRendered = (i === newest);
+  return out;
+}
+
+/**
+ * The per-loadout score, cut down to what a pill needs. The full line-by-line
+ * breakdown only ever ships for the CHOSEN bracelet (as `defaultScore`); every
+ * other loadout carries its stats, which the client decodes itself when picked.
+ * Keeps the KV record — one per character — from growing by a whole score
+ * object per tab.
+ */
+function briefScore(s) {
+  return { grade: s.grade, pct: s.pct, linesPct: s.linesPct, granted: s.granted, unmapped: s.unmapped.length };
+}
+
+/**
+ * Which loadout does the board rank? Shizu's rule: the HIGHEST one. Ties (two
+ * loadouts holding the same bracelet, which is the common case) fall to the one
+ * bible draws, then to raid > est. raid > chaos, then to the newest.
+ */
+const LOADOUT_ORDER = { most_recent_raid: 0, raid_merged: 1, most_recent_chaos_dungeon: 2 };
+function pickBestLoadout(loadouts) {
+  const rank = function (c) { return LOADOUT_ORDER[c] == null ? 9 : LOADOUT_ORDER[c]; };
+  let best = 0;
+  for (let i = 1; i < loadouts.length; i++) {
+    const a = loadouts[best], b = loadouts[i];
+    const cmp = (b.score.linesPct - a.score.linesPct) || (b.score.pct - a.score.pct) ||
+      ((b.isRendered ? 1 : 0) - (a.isRendered ? 1 : 0)) ||
+      (rank(a.classification) - rank(b.classification)) ||
+      ((b.lastUpdated || 0) - (a.lastUpdated || 0));
+    if (cmp > 0) best = i;
+  }
+  return best;
 }
 
 // Advanced classes, as lostark.bible renders them in the profile badge. Copied
@@ -626,23 +814,51 @@ async function fetchCharacterPage(env, region, name, userToken) {
   }
 
   const html = await resp.text();
-  const brs = extractBracelets(html);
   const meta = parseMeta(html);
-  if (!brs.length) {
-    return { ok: false, status: 404, error: "no_bracelet",
-      message: "That character's page loaded, but no bracelet is equipped on it.",
-      meta: meta };
+
+  // Loadout-aware first. Every loadout is scored, because the board must rank a
+  // character's BEST bracelet and the panel must be able to offer the others.
+  let loadouts = extractLoadouts(html);
+  for (const l of loadouts) l.score = briefScore(score(l.stats));
+
+  if (!loadouts.length) {
+    // No parseable loadouts array — fall back to raw document order and say so,
+    // so a shape change upstream shows up as a flag rather than as silence.
+    const brs = extractBracelets(html);
+    if (!brs.length) {
+      return { ok: false, status: 404, error: "no_bracelet",
+        message: "That character's page loaded, but no bracelet is equipped on it.",
+        meta: meta };
+    }
+    loadouts = brs.map(function (b, i) {
+      return {
+        classification: "unknown_" + i, label: "Loadout " + (i + 1),
+        itemLevel: null, lastUpdated: null, isRendered: i === 0,
+        stats: b.stats,
+        numRerolls: typeof b.numRerolls === "number" ? b.numRerolls : null,
+        numTicketRerolls: typeof b.numTicketRerolls === "number" ? b.numTicketRerolls : null,
+        score: briefScore(score(b.stats))
+      };
+    });
+    loadouts.loadoutsUnparsed = true;
   }
-  const b = brs[0];                                        // raid loadout: first occurrence wins
+
+  const bestIdx = pickBestLoadout(loadouts);
+  const b = loadouts[bestIdx];
   return { ok: true, data: {
     region: region,
     name: normalizeName(name),
     class: meta.klass,
     itemLevel: meta.itemLevel,
     stats: b.stats,
-    numRerolls: typeof b.numRerolls === "number" ? b.numRerolls : null,
-    numTicketRerolls: typeof b.numTicketRerolls === "number" ? b.numTicketRerolls : null,
-    loadouts: brs.length,
+    numRerolls: b.numRerolls,
+    numTicketRerolls: b.numTicketRerolls,
+    /* Every loadout that carries a bracelet, and which one the board took.
+       `loadouts` used to be a COUNT; it is now the list. Any reader that just
+       checked its length keeps working. */
+    loadouts: loadouts,
+    chosenLoadout: bestIdx,
+    chosenClassification: b.classification,
     source: "lostark.bible",
     url: url
   } };
@@ -684,6 +900,11 @@ async function loadCharacter(env, region, name, opts) {
       // in place rather than serving a number the current model would not produce.
       if (fresh && rec.modelSig !== MODEL_SIG && Array.isArray(rec.stats)) {
         rec.score = score(rec.stats);
+        // Every loadout carries its own score, and a pill showing a number the
+        // current model would not produce is worse than no pill.
+        if (Array.isArray(rec.loadouts)) {
+          for (const l of rec.loadouts) if (Array.isArray(l.stats)) l.score = briefScore(score(l.stats));
+        }
         rec.modelSig = MODEL_SIG;
         rec.scoredAt = Date.now();
         try { await env.CHARS.put(key, JSON.stringify(rec)); await markDirty(env, key); } catch (e) {}
@@ -743,9 +964,15 @@ async function loadCharacter(env, region, name, opts) {
  * `score` rides along so the panel can show "on default settings, this is
  * +X%" next to its own per-character number — the two differ, and saying both
  * is how a user learns that the board ranks on defaults.
+ *
+ * `loadouts` ships every bracelet the character has, one per lostark.bible tab,
+ * each with its own stats and its own default-profile score. `bracelet` is the
+ * chosen one (the highest), so a caller that ignores loadouts entirely still
+ * gets the right bracelet — which is more than it got before.
  */
 function characterResponse(r) {
   const rec = r.record;
+  const loadouts = Array.isArray(rec.loadouts) ? rec.loadouts : [];
   return {
     name: rec.name, region: rec.region, class: rec.class || null, itemLevel: rec.itemLevel || null,
     bracelet: {
@@ -754,6 +981,15 @@ function characterResponse(r) {
       numRerolls: rec.numRerolls,
       numTicketRerolls: rec.numTicketRerolls
     },
+    loadouts: loadouts.map(function (l) {
+      return {
+        classification: l.classification, label: l.label,
+        itemLevel: l.itemLevel, lastUpdated: l.lastUpdated, isRendered: !!l.isRendered,
+        bracelet: { type: "bracelet", stats: l.stats, numRerolls: l.numRerolls, numTicketRerolls: l.numTicketRerolls },
+        defaultScore: l.score || null
+      };
+    }),
+    chosenLoadout: typeof rec.chosenLoadout === "number" ? rec.chosenLoadout : null,
     grade: rec.score && rec.score.grade,
     defaultScore: rec.score,          // CANONICAL DEFAULT profile — the leaderboard number
     published: !!rec.published,
@@ -964,6 +1200,10 @@ async function handleForget(env, request) {
  * with a local extension map the shipped model does not have, and those entries
  * WILL come out lower here. That is the honest number until the model learns
  * those indices.
+ *
+ * The seed's `rawStats` is the CHOSEN loadout's bracelet; its `loadouts` array
+ * carries the rest, and those ride along so a seeded character offers the same
+ * loadout pills a freshly-imported one does.
  */
 async function handleAdminSeed(env, request) {
   if (!env || !env.CHARS) return json({ error: "no_kv", message: "The CHARS namespace is not bound." }, 503);
@@ -980,9 +1220,29 @@ async function handleAdminSeed(env, request) {
     let sc;
     try { sc = score(e.rawStats); } catch (err) { out.push({ name: e.name, status: "score_failed" }); continue; }
     const key = charKey(region, e.name);
+    let seedLoadouts = [];
+    try {
+      seedLoadouts = (Array.isArray(e.loadouts) ? e.loadouts : [])
+      .filter(function (l) { return l && Array.isArray(l.rawStats); })
+      .map(function (l) {
+        return {
+          classification: l.classification || "loadout",
+          label: l.label || loadoutLabel(l.classification),
+          itemLevel: l.itemLevel != null ? l.itemLevel : null,
+          lastUpdated: l.lastUpdated != null ? l.lastUpdated : null,
+          isRendered: !!l.isRendered,
+          stats: l.rawStats,
+          numRerolls: (l.rerollsUsed && l.rerollsUsed.base) != null ? l.rerollsUsed.base : null,
+          numTicketRerolls: (l.rerollsUsed && l.rerollsUsed.ticket) != null ? l.rerollsUsed.ticket : null,
+          score: briefScore(score(l.rawStats))
+        };
+      });
+    } catch (err) { seedLoadouts = []; }   // a loadout that will not score costs the pills, not the entry
     const record = {
       region: region, name: normalizeName(e.name), class: e.class || null, itemLevel: e.itemLevel || null,
       stats: e.rawStats,
+      loadouts: seedLoadouts,
+      chosenLoadout: typeof e.chosenLoadout === "number" ? e.chosenLoadout : null,
       numRerolls: (e.rerollsLeft && e.rerollsLeft.base) != null ? e.rerollsLeft.base : null,
       numTicketRerolls: (e.rerollsLeft && e.rerollsLeft.ticket) != null ? e.rerollsLeft.ticket : null,
       score: sc, modelSig: MODEL_SIG, scoredAt: now,
@@ -1201,5 +1461,7 @@ async function handleFetch(request, env, ctx) {
 export const __test = {
   score: score, extractBracelets: extractBracelets, collectRosterChars: collectRosterChars,
   ownsCharacter: ownsCharacter, normRegion: normRegion, decodeWithGradeCheck: decodeWithGradeCheck,
-  DEFAULT_PROFILE: DEFAULT_PROFILE
+  DEFAULT_PROFILE: DEFAULT_PROFILE,
+  extractLoadouts: extractLoadouts, pickBestLoadout: pickBestLoadout,
+  briefScore: briefScore, loadoutLabel: loadoutLabel
 };

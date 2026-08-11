@@ -21,10 +21,15 @@ Companion docs — read before changing anything here:
 2. **The leaderboard scores on the canonical default profile; the calculator scores on
    yours.** Two explicit code paths, labelled in the UI. Otherwise the board ranks gear,
    not bracelets.
-3. **Fetching is consent-gated.** A character is fetched only if the requester is signed
-   in and that character is in their own `/api/oauth/rosters`. No name enumeration, no
-   crawling. Seed entries (Shizu's curated list) are the one admin-loaded exception and
-   are flagged as such in the record.
+3. **Every request to lostark.bible carries the authorization token. No exceptions.**
+   That is the standing condition of Shizu's access (confirmed with molenzwiebel
+   2026-08-11). An unauthenticated request is the violation — and is what earns a 429.
+   Arbitrary/bulk character fetching is permitted **today** at Shizu's discretion.
+   Raid statistics remain banned outright.
+   The consent-gated path (fetch only what a signed-in user owns) is built and stays the
+   DEFAULT for public users, because molenzwiebel intends to make it the only path later
+   — but it is not a present restriction on Shizu's own pulls. Keep both paths, keep the
+   token mandatory on both.
 4. **Favorites is the spine.** One sign-in → roster fetch → `Favorites.add` per
    character → every tab populates through `onChange`. No tab knows about OAuth.
 5. **Politeness is a hard constraint, not a setting.** ≥3s between character-page

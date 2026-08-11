@@ -4,3 +4,8 @@ node_modules/
 .claude/
 __pycache__/
 *.pyc
+
+# local secrets — never commit
+.secrets/
+.bible-token
+.corpus/

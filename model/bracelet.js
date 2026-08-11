@@ -535,6 +535,12 @@
     }
     var fam = resolveSpecial(line.family);
     if (!fam) return 0;
+    // A tier the family's table for THIS grade does not carry. Reachable from a
+    // decode that landed on the wrong grade — Crit Damage +10% exists on Ancient
+    // and not on Relic, so the Relic table has no tier for it. Score it zero and
+    // let the caller's `unmatchedValue` flag do the complaining; a thrown error
+    // here takes a whole import down over one line.
+    if (!fam.values[grade] || !fam.values[grade][line.tier]) return 0;
     return toD(specialMultiplier(fam, line.tier, grade, profile));
   }
 
