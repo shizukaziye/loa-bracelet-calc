@@ -1283,21 +1283,9 @@
       (built.patch.character.loadoutLabel ? " (" + built.patch.character.loadoutLabel + " loadout)" : "") +
       " — " + (built.patch.grade === "relic" ? "Relic" : "Ancient") + ", " +
       n + " granted slot" + (n === 1 ? "" : "s") + ".";
-    if (rec.loadouts.length > 1) {
-      var d = distinctBracelets();
-      note += " " + rec.loadouts.length + " loadouts on lostark.bible" +
-        (d > 1
-          ? ", holding " + d + " different bracelets — the pills above swap between them" +
-            (state.loadoutIdx === state.bestLoadout ? ", and this is the highest" : "")
-          : ", all holding this same bracelet") + ".";
-    }
-    if (l.pct != null) {
-      var isBest = rec.loadouts.length < 2 || state.loadoutIdx === state.bestLoadout;
-      note += " On default settings it is worth +" + fx(l.pct, 2) + "% damage — " +
-        (isBest ? "that is the figure the leaderboard ranks on"
-                : "the board ranks the highest loadout, not this one") +
-        "; the panel below scores it on YOUR character.";
-    }
+    // The loadout/score commentary that used to live here is gone (Shizu,
+    // 2026-08-11): the pills already show each loadout and its score, and the
+    // banner shows what the bracelet is worth. Saying it again in prose was noise.
     if (l.unmapped) {
       built.warn.push(l.unmapped + " line" + (l.unmapped > 1 ? "s use stat indices" : " uses a stat index") +
         " the model does not map yet, so " + (l.unmapped > 1 ? "they score" : "it scores") + " zero");

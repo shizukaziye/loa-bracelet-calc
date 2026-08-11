@@ -562,8 +562,13 @@
 
   var last = null;                       // the current ranking, for the popover
 
+  /**
+   * The explainer sits at the BOTTOM in a collapsed <details>, the same shape as
+   * astrogem's method blocks — the table should be the first thing you see, not a
+   * wall of prose (Shizu, 2026-08-11).
+   */
   function copyHTML() {
-    return '<div class="tl-copy">' +
+    return '<details class="method tl-method"><summary>How these ranks are worked out</summary>' +
       "<p><b>Subranks are a percentage of the best line for <i>your</i> character.</b> " +
       "The ladder runs in flat five-point steps — S+ from 95%, S from 90%, S- from 85%, on down through " +
       "A, B, C and D to F+ at 20% and F at 10%. Anything under 10%, and anything worth no damage at all, is F-. " +
@@ -574,22 +579,18 @@
       "are read off one ladder. The faint tick on each bar is where the line sits for the " +
       '<span data-gloss="The canonical default character the leaderboard scores on — Bracelet.normalizeProfile({}), every setting untouched.">default character</span>' +
       ": bar past the tick means the line is worth more to you than to the average build.</p>" +
-      "</div>";
+      "</details>";
   }
 
   function controlsHTML() {
     var S = P.get();
     var fight = S.fight;
-    var backOn = fight.back > 0, frontOn = fight.front > 0;
     return '<div class="tl-ctl">' +
       '<div class="tl-seg" role="group" aria-label="View">' +
       '<button type="button" class="mbtn' + (view === "family" ? " active" : "") + '" data-view="family">By family <span class="tl-n">33</span></button>' +
       '<button type="button" class="mbtn' + (view === "roll" ? " active" : "") + '" data-view="roll">By roll <span class="tl-n">99</span></button>' +
       "</div>" +
       '<div class="tl-presets"><span class="tl-plabel">Presets</span>' +
-      '<button type="button" class="mbtn' + (backOn && !frontOn ? " active" : "") + '" data-preset="back">Back attack</button>' +
-      '<button type="button" class="mbtn' + (frontOn && !backOn ? " active" : "") + '" data-preset="front">Frontal</button>' +
-      '<button type="button" class="mbtn' + (!backOn && !frontOn ? " active" : "") + '" data-preset="nonpos">Non-positional</button>' +
       '<button type="button" class="mbtn' + (fight.demon ? " active" : "") + '" data-preset="demon">Demon boss ' + (fight.demon ? "on" : "off") + "</button>" +
       "</div></div>";
   }
@@ -826,12 +827,13 @@
     if (!pane || pane.getAttribute("data-init")) return;
     pane.setAttribute("data-init", "1");
     injectStyle();
-    pane.innerHTML = copyHTML() +
+    pane.innerHTML =
       '<div id="' + DECK_HOST + '"></div>' +
       '<div id="bctl-controls"></div>' +
       '<div class="tl-strip" id="bctl-strip"></div>' +
       '<div id="bctl-bands"></div>' +
-      '<div id="bctl-foot"></div>';
+      '<div id="bctl-foot"></div>' +
+      copyHTML();                                  // explainer last, collapsed
     bind(pane);
     wirePop();
     claimDeck();
