@@ -28,7 +28,7 @@
 importScripts(
   "data/bracelet-data.js?v=2",
   "data/gear-data.js?v=2",
-  "model/bracelet.js?v=3"
+  "model/bracelet.js?v=4"
 );
 
 var lastCtx = null;

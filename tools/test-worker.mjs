@@ -31,7 +31,8 @@ import { __test } from "../worker/bracelet.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
-const { score, extractBracelets, collectRosterChars, ownsCharacter, normRegion } = __test;
+const { score, extractBracelets, collectRosterChars, ownsCharacter, normRegion,
+        extractLoadouts, pickBestLoadout, briefScore, loadoutLabel } = __test;
 
 let pass = 0, fail = 0;
 function ok(name, cond, detail) {

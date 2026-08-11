@@ -35,6 +35,15 @@
  * caller's own roster. So the click is gated twice, on purpose. Design:
  * docs/design/bible-import-fallback.md; deploy: docs/deploy-worker.md.
  *
+ * ONE CHARACTER, SEVERAL BRACELETS. lostark.bible keeps a separate loadout per
+ * tab — "Raid Loadout", "Current Loadout (Chaos Dungeon)", sometimes "Estimated
+ * Raid Loadout" — and each carries its OWN equipment, so each can hold a
+ * different bracelet. Nine of the thirty characters in data/leaderboard-seed.json
+ * do, by up to 3.4 percentage points of damage. The Worker sends them all; the
+ * pill row under the character list offers them all; the highest loads first
+ * and is the one the board ranks. The calculator is for asking "what if", so
+ * every bracelet the character actually owns stays one click away.
+ *
  * TWO SCORES, AND THEY DIFFER. The Worker answers with `defaultScore` — the
  * bracelet's damage on the CANONICAL DEFAULT profile, which is the only number
  * the leaderboard ever ranks on. The calculator below scores the same bracelet
@@ -73,7 +82,14 @@
     chars: null,       // [{name, cls, ilvl, region, node}]
     raw: null,         // the last rosters payload, for dumpShape()
     picked: null,      // name of the character last imported
-    note: null         // a one-line result under the list
+    note: null,        // a one-line result under the list
+    // A character wears one bracelet PER LOADOUT on lostark.bible — a raid one,
+    // a chaos-dungeon one, sometimes an estimated-raid one — and nine of the
+    // thirty characters read so far wear a DIFFERENT bracelet in each. So the
+    // panel offers them all instead of deciding for the user.
+    loadouts: null,    // [{classification, label, bracelet, defaultScore, isRendered}]
+    loadoutIdx: 0,     // which one is in the calculator right now
+    bestLoadout: 0     // the highest, which is what the board ranks
   };
 
   // ------------------------------------------------------------------
@@ -382,6 +398,12 @@
       "#bc-import .bi-char:hover{border-color:var(--accent)}" +
       "#bc-import .bi-char.on{border-color:var(--accent);color:var(--accent)}" +
       "#bc-import .bi-char small{display:block;color:var(--dim);font-size:10px}" +
+      "#bc-import .bi-lds{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px}" +
+      "#bc-import .bi-lds .bi-ldcap{color:var(--dim);font-size:11px;margin-right:2px}" +
+      "#bc-import .mbtn.bi-ld{padding:3px 9px;font-size:11px;font-weight:700}" +
+      "#bc-import .mbtn.bi-ld.on{color:var(--accent);border-color:var(--accent)}" +
+      "#bc-import .mbtn.bi-ld b{font-weight:700;color:inherit}" +
+      "#bc-import .mbtn.bi-ld i{font-style:normal;color:var(--good);margin-left:3px}" +
       "</style>";
   }
 
@@ -451,9 +473,53 @@
         'Link a roster on lostark.bible — and un-hide the characters you want here, since hidden ones never leave the site.</div>';
     }
 
+    h += loadoutsHtml();
     h += msgHtml();
     box.innerHTML = h;
     bind();
+  }
+
+  /**
+   * The loadout pills.
+   *
+   * A lostark.bible character page carries one loadout per tab — "Raid Loadout",
+   * "Current Loadout (Chaos Dungeon)", sometimes "Estimated Raid Loadout" — and
+   * each has its own equipment, so each can hold a DIFFERENT bracelet. Nine of
+   * the thirty characters in the seed do. This row shows every bracelet the
+   * character actually has, scored on the canonical default profile so the
+   * numbers are comparable to each other and to the board.
+   *
+   * The highest carries the caret and is what loads first, because that is the
+   * one the board ranks. Clicking any other fills the calculator with it — the
+   * calculator is for asking "what if", and refusing to show the chaos bracelet
+   * would be deciding for the user which of their own brackets is real.
+   *
+   * Nothing here appears unless there is a choice to make: one loadout, no row.
+   */
+  function loadoutsHtml() {
+    var lds = state.loadouts;
+    if (!lds || lds.length < 2) return "";
+    var h = '<div class="bi-lds"><span class="bi-ldcap">Loadout:</span>', i, l, pct;
+    for (i = 0; i < lds.length; i++) {
+      l = lds[i];
+      pct = l.defaultScore && typeof l.defaultScore.pct === "number" ? l.defaultScore.pct.toFixed(1) + "%" : "—";
+      h += '<button type="button" class="mbtn bi-ld' + (i === state.loadoutIdx ? " on" : "") + '"' +
+        (state.busy ? " disabled" : "") + ' data-ld="' + i + '"' +
+        ' title="' + esc(loadoutTitle(l, i)) + '">' +
+        esc(l.label || l.classification) + " <b>" + pct + "</b>" +
+        (i === state.bestLoadout ? '<i title="highest — this is the one the leaderboard ranks">&#9650;</i>' : "") +
+        "</button>";
+    }
+    h += "</div>";
+    return h;
+  }
+
+  function loadoutTitle(l, i) {
+    var bits = [];
+    if (l.itemLevel) bits.push("item level " + l.itemLevel);
+    if (l.isRendered) bits.push("the one lostark.bible's own page draws");
+    if (i === state.bestLoadout) bits.push("highest — the figure the board ranks");
+    return (l.classification || "loadout") + (bits.length ? " — " + bits.join("; ") : "");
   }
 
   /** Every failure gets its own sentence — never one shrug for all of them. */
@@ -516,6 +582,12 @@
       list[i].onclick = (function (idx) {
         return function () { pick(state.chars[idx]); };
       })(Number(list[i].getAttribute("data-idx")));
+    }
+    var pills = box.querySelectorAll(".bi-ld");
+    for (var j = 0; j < pills.length; j++) {
+      pills[j].onclick = (function (idx) {
+        return function () { pickLoadout(idx); };
+      })(Number(pills[j].getAttribute("data-ld")));
     }
   }
 
@@ -644,6 +716,10 @@
   function pick(c) {
     if (!c) return;
     state.error = null; state.note = null; state.picked = c.name;
+    // A new character means the old character's pills are stale. Drop them
+    // before anything can fail, so a failed fetch never leaves someone else's
+    // loadouts sitting under the list.
+    state.loadouts = null; state.loadoutIdx = 0; state.bestLoadout = 0;
 
     var inline = findBracelet(c.node);
     if (inline) { applyBracelet(c, inline, null); return; }
@@ -665,6 +741,7 @@
         render();
         return;
       }
+      takeLoadouts(c, data);
       applyBracelet(c, data.bracelet, data);
     }).catch(function (e) {
       state.busy = false;
@@ -672,6 +749,77 @@
       render();
       if (e && e.kind === "expired") OA.login();
     });
+  }
+
+  /**
+   * Keep the loadouts the Worker sent, if it sent any.
+   *
+   * Shape-tolerant on purpose, the same way findCharacters is: a Worker deployed
+   * before this change answers without `loadouts` and the panel simply shows no
+   * pills, which is exactly what it did before. Only loadouts that actually
+   * carry a bracelet are kept — an empty slot is not a choice.
+   */
+  function takeLoadouts(c, data) {
+    // `loadouts` used to be a COUNT on this endpoint, so check for an array and
+    // not merely for truthiness.
+    var raw = data && data.loadouts;
+    if (!raw || Object.prototype.toString.call(raw) !== "[object Array]" || raw.length < 2) return;
+    var keep = [], i, l, br;
+    for (i = 0; i < raw.length; i++) {
+      l = raw[i];
+      br = l && (l.bracelet || l);
+      if (!br || !br.stats || !br.stats.length) continue;
+      keep.push({
+        classification: l.classification || "loadout",
+        label: l.label || l.classification || "Loadout " + (keep.length + 1),
+        itemLevel: l.itemLevel || null,
+        isRendered: !!l.isRendered,
+        defaultScore: l.defaultScore || null,
+        bracelet: br
+      });
+    }
+    if (keep.length < 2) return;           // nothing to choose between
+    state.loadouts = keep;
+    // The Worker already ranked them; trust its index when it points at a
+    // loadout we kept, and re-derive it from the scores when it does not.
+    var best = typeof data.chosenLoadout === "number" && data.chosenLoadout < keep.length ? data.chosenLoadout : 0;
+    if (!(typeof data.chosenLoadout === "number" && data.chosenLoadout < keep.length)) {
+      for (i = 1; i < keep.length; i++) {
+        var a = keep[best].defaultScore, b = keep[i].defaultScore;
+        if (b && (!a || b.pct > a.pct)) best = i;
+      }
+    }
+    state.bestLoadout = best;
+    state.loadoutIdx = best;               // default selection = highest
+  }
+
+  /** How many DIFFERENT brackets sit behind the pills. Usually fewer than pills. */
+  function distinctBracelets() {
+    if (!state.loadouts) return 0;
+    var seen = [], i, sig;
+    for (i = 0; i < state.loadouts.length; i++) {
+      sig = statsSig(state.loadouts[i].bracelet.stats);
+      if (seen.indexOf(sig) < 0) seen.push(sig);
+    }
+    return seen.length;
+  }
+  function statsSig(stats) {
+    var out = [], i, s;
+    for (i = 0; i < stats.length; i++) {
+      s = stats[i];
+      out.push(s.type + ":" + s.index + ":" + s.value + ":" + (s.fixed ? 1 : 0));
+    }
+    return out.join("|");
+  }
+
+  /** Click a loadout pill: fill the calculator with that loadout's bracelet. */
+  function pickLoadout(i) {
+    if (!state.loadouts || !state.loadouts[i] || state.busy) return;
+    state.loadoutIdx = i;
+    state.error = null;
+    var l = state.loadouts[i];
+    applyBracelet({ name: state.picked || "that character" }, l.bracelet,
+      { defaultScore: l.defaultScore, loadoutLabel: l.label });
   }
 
   /** Decode one bracelet payload and hand it to the calculator. */
@@ -696,20 +844,44 @@
     app.applyImport(built.patch);
 
     var n = built.patch.rows.length;
-    var note = "Loaded " + c.name + " — " + (built.patch.grade === "relic" ? "Relic" : "Ancient") + ", " +
+    var which = (meta && meta.loadoutLabel) ||
+      (state.loadouts && state.loadouts[state.loadoutIdx] && state.loadouts[state.loadoutIdx].label) || null;
+    var note = "Loaded " + c.name + (which && state.loadouts && state.loadouts.length > 1 ? " (" + which + " loadout)" : "") +
+      " — " + (built.patch.grade === "relic" ? "Relic" : "Ancient") + ", " +
       n + " granted slot" + (n === 1 ? "" : "s") + ".";
+    // Say it once, plainly: they have more than one loadout and the buttons above
+    // switch between them. Without this the pills read as a filter. Two loadouts
+    // usually hold the SAME bracelet, so count the distinct ones and say which
+    // case this is rather than implying a choice that isn't there.
+    if (state.loadouts && state.loadouts.length > 1) {
+      var d = distinctBracelets();
+      note += " " + state.loadouts.length + " loadouts on lostark.bible" +
+        (d > 1
+          ? ", holding " + d + " different bracelets — the buttons above swap between them" +
+            (state.loadoutIdx === state.bestLoadout ? ", and this is the highest" : "")
+          : ", all holding this same bracelet") + ".";
+    }
     // The two scores, side by side. The Worker's figure is the bracelet on the
     // CANONICAL DEFAULT profile — the only one the leaderboard ever uses. The
     // panel's own figure, just below, is this bracelet on YOUR settings. Saying
     // both is how a user learns why their rank is not their calculator number.
     if (meta && meta.defaultScore && typeof meta.defaultScore.pct === "number") {
-      note += " On default settings it is worth +" + meta.defaultScore.pct.toFixed(2) +
-        "% damage — that is the figure the leaderboard ranks on; the panel below scores it on YOUR character.";
-      if (meta.defaultScore.unmapped && meta.defaultScore.unmapped.length) {
-        built.warn.push(meta.defaultScore.unmapped.length + " line" +
-          (meta.defaultScore.unmapped.length > 1 ? "s use stat indices" : " uses a stat index") +
-          " the model does not map yet, so " +
-          (meta.defaultScore.unmapped.length > 1 ? "they score" : "it scores") + " zero");
+      // The board ranks a character's BEST bracelet. Saying "the figure the
+      // leaderboard ranks on" while a lower loadout is loaded would be a lie, so
+      // only the best one gets that clause.
+      var isBest = !state.loadouts || state.loadouts.length < 2 || state.loadoutIdx === state.bestLoadout;
+      note += " On default settings it is worth +" + meta.defaultScore.pct.toFixed(2) + "% damage — " +
+        (isBest
+          ? "that is the figure the leaderboard ranks on"
+          : "the board ranks your highest loadout, not this one") +
+        "; the panel below scores it on YOUR character.";
+      // The Worker sends the full unmapped list for the loaded bracelet and just
+      // a count for the other loadouts, so read either shape.
+      var um = meta.defaultScore.unmapped;
+      var nUm = typeof um === "number" ? um : (um && um.length) || 0;
+      if (nUm) {
+        built.warn.push(nUm + " line" + (nUm > 1 ? "s use stat indices" : " uses a stat index") +
+          " the model does not map yet, so " + (nUm > 1 ? "they score" : "it scores") + " zero");
       }
     }
     if (meta && meta.stale) {
@@ -795,6 +967,11 @@
     buildPatch: buildPatch,
     reload: function () { loadRosters(true); },
     raw: function () { return state.raw; },
+    // The loadouts behind the pills, and a way to switch without clicking:
+    //   BraceletImport.loadouts()
+    //   BraceletImport.pickLoadout(1)
+    loadouts: function () { return state.loadouts; },
+    pickLoadout: pickLoadout,
     // Console handles for checking a fresh deploy without clicking:
     //   BraceletImport.workerUrl()
     //   BraceletImport.fetchCharacter("Paroxysmal", "NA").then(console.log)
