@@ -58,7 +58,7 @@
 
   // The baked board. ?v= for the same reason every other file carries one: the
   // loseii zone edge-caches for four hours, so a re-baked seed needs a new URL.
-  var SEED_URL = "data/leaderboard-seed.json?v=1";
+  var SEED_URL = "data/leaderboard-seed.json?v=2";
 
   var PAGE_SIZE = 100;      // rows per page; the pager hides itself below one page
   var SEARCH_DEBOUNCE = 200;

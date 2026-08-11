@@ -91,7 +91,7 @@
   var WORKER_URL = "";
 
   /** The baked board, used as a free instant cache. ?v= for the edge, as everywhere. */
-  var SEED_URL = "data/leaderboard-seed.json?v=1";
+  var SEED_URL = "data/leaderboard-seed.json?v=2";
 
   // One silent re-auth per page load. A dead token sends the user straight back
   // through /oauth/authorize, which auto-approves while the grant lives — but if
