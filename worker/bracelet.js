@@ -2,9 +2,10 @@
  * worker/bracelet.js — "bracelet-bible", the Cloudflare Worker behind the
  * bracelet calculator's lostark.bible import.
  *
- * FIRST PASS (2026-08-11). The import round trip, the consent gate, the KV
- * record store and the canonical-default scorer are real and finished. The
- * leaderboard snapshot is deliberately NOT built yet — see "WHAT IS STUBBED".
+ * Complete as of 2026-08-11: the import round trip, the consent gate, the KV
+ * record store, the canonical-default scorer, the queue and its paced drain with
+ * a circuit breaker, the long poll, the gzipped leaderboard snapshot, feedback,
+ * and the admin surface.
  *
  * ============================== WHY IT EXISTS ==============================
  *
@@ -36,38 +37,43 @@
  *
  * ================================ ROUTES ===================================
  *
- *   OPTIONS *                                   CORS preflight
+ *   OPTIONS *                                   CORS preflight, before the hard cap
  *   GET  /                                      health + model signature
- *   GET  /character?name=&region=[&refresh=1][&publish=0]
- *                                               Bearer required. Verify → fetch
- *                                               → parse → score → store → return
- *                                               the decoded bracelet. This is the
- *                                               one route the import UI calls.
+ *   GET  /character?name=&region=[&queue=1][&pos=1][&refresh=1][&publish=0]
+ *                                               The one route the import UI calls.
+ *                                               Cached → answer now. Miss → Bearer +
+ *                                               ownership, then ENQUEUE and answer
+ *                                               {queued, position, total, drainPerMin}.
  *   GET  /bracelet?…                            alias of /character (the name used
  *                                               in docs/design/bible-import-fallback.md)
- *   POST /import   {characters:[…], publish?}   Bearer required. Same gate, in bulk:
- *                                               the first few are fetched inline,
- *                                               the rest are queued for the cron.
+ *   GET  /wait?region=&name=&since=             Bearer + ownership. Long poll, ≤25s;
+ *                                               answers the moment the drain stores a
+ *                                               record newer than `since`.
+ *   GET  /?list=1   ·   GET /list               the board: the stored gzip bytes, as-is
+ *   GET  /status                                is the drain running? (public, cached 30s)
+ *   POST /feedback {type,message,contact,hp}    public, honeypotted, throttled, 90-day TTL
+ *   POST /import   {characters:[…], publish?}   Bearer required. Same gate, in bulk —
+ *                                               every accepted character is queued.
  *   POST /forget   {characters:[…]}|{all:true}  Bearer required. Removes the caller's
  *                                               OWN characters from the board.
- *   GET  /?list=1&fmt=2                         leaderboard snapshot — STUBBED, see below
+ *   GET  /admin/metrics                         X-Admin-Token. Queue, drain, log, health.
+ *   GET  /admin/feedback                        X-Admin-Token. The newest ≤200 notes.
+ *   POST /admin/feedback {read|del}             X-Admin-Token.
+ *   POST /admin/control  {mode, rate}           X-Admin-Token. run/off/probe, 1–20 a minute.
+ *   POST /admin/dequeue  {match|all}            X-Admin-Token. Evict by key substring.
+ *   POST /admin/rescore  {}                     X-Admin-Token. Re-score from the raw stats.
  *   POST /admin/seed                            X-Admin-Token. Body = data/leaderboard-seed.json
- *   POST /admin/delete?region=&name=            X-Admin-Token. Takedown.
- *   GET  /admin/metrics                         X-Admin-Token. Counts + queue state.
+ *   POST /admin/delete   {region, name}         X-Admin-Token. Takedown.
+ *   POST /admin/drain · POST /admin/snapshot    X-Admin-Token. Run one now.
  *   GET  /admin/page?name=&region=              X-Admin-Token. Raw parse probe: what the
  *                                               character page actually yielded. This is how
  *                                               the profile auto-fill map gets filled in
  *                                               without guessing at field names.
- *   cron * * * * *                              drain the queue (paced)
+ *   cron * * * * *                              drain the queue (paced), then rebuild the
+ *                                               snapshot if anything changed
  *
- * ============================ WHAT IS STUBBED ==============================
- *
- * `?list=1` answers 501 with a note. The snapshot format (gzip bytes served with
- * encodeBody:"manual", compact tuples, dirty-gated incremental rebuild on a
- * BUILTAT throttle) is designed but NOT written here: Shizu paused it pending an
- * architecture doc read against the astrogem calculator. Everything that feeds
- * it is already in place — every stored record carries its canonical score, and
- * every write marks `lb:dirty:<key>` — so the rebuild is additive, not a rewrite.
+ * EVERY ADMIN MUTATION IS POST. A GET with side effects is one <img src> away from
+ * a stranger's page freezing the queue — /admin/drain used to be exactly that.
  *
  * ================================ SCORING ==================================
  *
@@ -1444,110 +1450,1035 @@ function characterResponse(r) {
 }
 
 // ---------------------------------------------------------------------------
-// Queue (POST /import overflow) + the cron drain
+// Queue + the cron drain
 // ---------------------------------------------------------------------------
 
 /**
  * Queue a page fetch for the cron.
  *
- * NO TOKEN IS STORED. The astrogem Worker keeps the requester's token in the
- * queue value so the drain can fetch as them; that is a user credential sitting
- * in KV, and it is not needed here — ownership was already verified at enqueue
- * time, and the drain fetches with BIBLE_TOKEN. The consent gate is a gate on
- * WHAT gets fetched, and it has already closed behind this item.
+ * WHERE THE TOKEN GOES. The requester's own lostark.bible token is stored in the
+ * queue item's VALUE, never in its METADATA — metadata is returned by `list()`,
+ * which the drain, the metrics route and the position lookup all call, so a token
+ * there would be read into three places that have no business holding one. The
+ * value is read only by the one drain that fetches this item, and the item is
+ * deleted the moment it is cached, so the credential is held exactly as long as
+ * the request it belongs to.
+ *
+ * Fetching as the requester keeps every upstream request attributable to a
+ * consenting human. Preserve it across a requeue or the retry 401s.
  */
-function enqueue(env, region, name) {
+function enqueue(env, region, name, token) {
   if (!env || !env.CHARS) return Promise.resolve();
   const ck = charKey(region, name);
-  return env.CHARS.put(QUEUE_PREFIX + ck, "1", {
+  return env.CHARS.put(QUEUE_PREFIX + ck, JSON.stringify({ t: token || "" }), {
     metadata: { region: region, name: name, ts: Date.now() },
     expirationTtl: QUEUE_TTL_S
+  }).then(function () {
+    // Invalidate the order snapshot. It does two jobs at once: it defeats the cron's
+    // empty-queue short-circuit (so a brand-new item is drained this minute, not in
+    // ten), and it stops a position read trusting an order that predates this enqueue.
+    return env.CHARS.delete(Q_ORDER_KEY).catch(function () {});
   }).catch(function () {});
 }
 
+/** The queue in drain order (oldest ts first) as [{k, r, n, t, a}]. One list(). */
+async function listQueueOrder(env) {
+  let keys = [];
+  try {
+    let cursor;
+    do {
+      const res = await env.CHARS.list({ prefix: QUEUE_PREFIX, cursor: cursor, limit: 1000 });
+      for (const k of res.keys) if (k.name !== Q_ORDER_KEY) keys.push(k);
+      cursor = res.list_complete ? null : res.cursor;
+    } while (cursor);
+  } catch (e) { return []; }
+  return keys.slice()
+    .sort(function (a, b) { return ((a.metadata && a.metadata.ts) || 0) - ((b.metadata && b.metadata.ts) || 0); })
+    .map(function (k) {
+      const m = k.metadata || {};
+      return { k: k.name, r: m.region || "", n: m.name || "", t: m.ts || 0, a: m.attempts || 0 };
+    });
+}
+/** The same, but preferring the cron-maintained snapshot — one get() instead of a list(). */
+async function readQueueOrder(env) {
+  try {
+    const s = await kvGetJson(env, Q_ORDER_KEY);
+    if (s && Array.isArray(s.items) && Date.now() - (s.ts || 0) < Q_ORDER_TTL_MS) return s.items;
+  } catch (e) {}
+  return listQueueOrder(env);
+}
+
 /**
- * Cron drain: up to DRAIN_PER_RUN queued characters per minute, DRAIN_DELAY_MS
- * apart. region+name ride in the key metadata, so listing costs no per-key read.
- * A transient upstream failure leaves the item queued; a 404 drops it.
+ * Where a queued character sits, how many are waiting, and how fast the queue
+ * moves — the three numbers the client's banner counts down from.
+ *
+ * A just-enqueued key may not be visible to `list()` yet (KV list is eventually
+ * consistent), so an unfound key is reported at the TAIL rather than as an error;
+ * the next poll corrects it.
+ */
+async function queueStatus(env, region, name) {
+  const fullKey = QUEUE_PREFIX + charKey(region, name);
+  const items = await readQueueOrder(env);
+  let idx = -1;
+  for (let i = 0; i < items.length; i++) if (items[i].k === fullKey) { idx = i; break; }
+  const position = (idx >= 0 ? idx : items.length) + 1;
+  const total = Math.max(items.length, position);
+  const cfg = await getDrainConfig(env);
+  return {
+    position: position, total: total,
+    drainPerMin: cfg.drainPerMin,
+    etaMinutes: Math.ceil(position / cfg.drainPerMin)
+  };
+}
+
+/**
+ * The "queued" answer: `{queued, position, total, drainPerMin, name, region}`,
+ * plus whatever a cached copy of the character already says.
+ *
+ * `pos=1` is what costs the list() — the client asks for it on the first lookup
+ * and on its 30s re-syncs, and runs a free local countdown in between. An answer
+ * with no position is cheap on purpose.
+ */
+async function queuedResponse(env, region, name, extra, wantPos, record) {
+  const st = wantPos ? await queueStatus(env, region, name) : null;
+  const base = record ? characterResponse({ record: record, cached: true, stale: (Date.now() - (record.pulledAt || 0)) >= CHAR_TTL_MS }) : {};
+  return json(Object.assign(base, { queued: true, region: region, name: normalizeName(name) },
+    st || {}, extra || {}), 200);
+}
+
+// ---- drain configuration: mode, rate, and the breaker's backoff state -------
+
+async function getDrainConfig(env) {
+  let c = null;
+  try { c = await kvGetJson(env, DRAIN_CONFIG_KEY); } catch (e) {}
+  c = c || {};
+  const mode = DRAIN_MODES.indexOf(c.mode) !== -1 ? c.mode : "run";   // unset KV simply drains
+  let rate = parseInt(c.drainPerMin, 10);
+  if (!Number.isFinite(rate) || rate < 1) rate = DRAIN_PER_MIN_DEFAULT;
+  if (rate > DRAIN_PER_MIN_MAX) rate = DRAIN_PER_MIN_MAX;
+  return { mode: mode, drainPerMin: rate, lastProbe: c.lastProbe || 0, interval: c.interval || PAUSE_PROBE_FIRST_MS };
+}
+function setDrainConfig(env, cfg) {
+  return env.CHARS.put(DRAIN_CONFIG_KEY, JSON.stringify(cfg)).catch(function () {});
+}
+/** ≥3s between page fetches, whatever the rate says. The floor wins. */
+function drainSpacingMs(perMin) {
+  return Math.max(DRAIN_MIN_SPACING_MS, Math.round(60000 / Math.max(1, perMin)));
+}
+
+/** Rolling ~1h of drain runs, for the admin log panel. */
+async function appendDrainLog(env, run) {
+  try {
+    const log = (await kvGetJson(env, DRAIN_LOG_KEY)) || [];
+    log.push(run);
+    const cut = Date.now() - DRAIN_LOG_MAX_MS;
+    const kept = log.filter(function (e) { return e && e.t >= cut; }).slice(-240);
+    await env.CHARS.put(DRAIN_LOG_KEY, JSON.stringify(kept));
+  } catch (e) {}
+}
+
+/**
+ * Put failures back at the FRONT (ts = 1, attempts reset) so a queue that was
+ * paused resumes by retrying exactly what failed, first. The upstream being down
+ * is not the character's fault, so its attempt count is forgiven.
+ *
+ * ts=1 is a SENTINEL, not a timestamp — the admin page prints its wait as "—"
+ * rather than claiming a 57-year queue. And the stored token is read back and
+ * rewritten: dropping it here would make the retry fetch unauthenticated, 401,
+ * and be discarded as "token expired" when the requester's token was fine.
+ */
+async function requeueFront(env, items) {
+  const seen = {};
+  for (const it of (items || [])) {
+    if (!it || !it.region || !it.name) continue;
+    const k = QUEUE_PREFIX + charKey(it.region, it.name);
+    if (seen[k]) continue;
+    seen[k] = 1;
+    let tok = "";
+    try { const v = await env.CHARS.get(k, "json"); tok = (v && v.t) || ""; } catch (e) {}
+    try {
+      await env.CHARS.put(k, JSON.stringify({ t: tok }), {
+        metadata: { region: it.region, name: it.name, ts: 1 }, expirationTtl: QUEUE_TTL_S
+      });
+    } catch (e) {}
+  }
+}
+
+/** Monthly usage counter, for the budget guard. */
+function monthKey() { return new Date().toISOString().slice(0, 7); }
+async function bumpUsage(env, n) {
+  try {
+    const m = monthKey();
+    const u = await kvGetJson(env, USAGE_KEY);
+    const c = (u && u.month === m ? (u.count | 0) : 0) + n;
+    await env.CHARS.put(USAGE_KEY, JSON.stringify({ month: m, count: c }), { expirationTtl: 40 * 24 * 3600 });
+  } catch (e) {}
+}
+async function usageCount(env) {
+  const u = await kvGetJson(env, USAGE_KEY);
+  return (u && u.month === monthKey()) ? (u.count | 0) : 0;
+}
+
+/**
+ * Space this fetch ≥3s from the last one, wherever that one came from.
+ *
+ * The drain paces itself with a sleep inside its own loop, but a kick runs in a
+ * DIFFERENT invocation and knows nothing about it. A shared "when did anything
+ * last fetch a character page" timestamp is what makes the 3s floor hold across
+ * both. KV is eventually consistent, so this is a guard rather than a proof —
+ * which is why the kick also refuses to run while the drain lock is held.
+ */
+async function spaceUpstream(env) {
+  try {
+    const last = parseInt((await env.CHARS.get(LASTFETCH_KEY)) || "0", 10);
+    const wait = last + DRAIN_MIN_SPACING_MS - Date.now();
+    if (wait > 0 && wait <= DRAIN_MIN_SPACING_MS) await sleep(wait);
+  } catch (e) {}
+  try { await env.CHARS.put(LASTFETCH_KEY, String(Date.now())); } catch (e) {}
+}
+
+/**
+ * The recovery probe. Re-fetch the OLDEST queued character (there is no canary
+ * account here) and read the answer as a verdict on lostark.bible, not on the
+ * character: a 200 or a 404 both mean the site is answering us again.
+ */
+async function probeOldest(env) {
+  const items = await readQueueOrder(env);
+  const it = items[0];
+  if (!it || !it.r || !it.n) return { up: false, empty: true, entry: { region: "", name: "", msg: "queue empty — nothing to probe" } };
+  let tok = "";
+  try { const v = await env.CHARS.get(it.k, "json"); tok = (v && v.t) || ""; } catch (e) {}
+  await spaceUpstream(env);
+  let r = null;
+  try { r = await loadCharacter(env, it.r, it.n, { refresh: true, publish: true, token: tok }); } catch (e) { r = null; }
+  if (r && r.ok && !r.stale) {
+    try { await env.CHARS.delete(it.k); } catch (e) {}
+    return { up: true, cached: true, name: it.r + ":" + it.n };
+  }
+  if (r && !r.ok && r.status === 404) {
+    try { await env.CHARS.delete(it.k); } catch (e) {}
+    try { await env.CHARS.put(NOTFOUND_PREFIX + charKey(it.r, it.n), String(r.body && r.body.message || "not found").slice(0, 300), { expirationTtl: NOTFOUND_TTL_S }); } catch (e) {}
+    return { up: true, cached: false, name: it.r + ":" + it.n };
+  }
+  const fe = (r && r.fetchError) || {};
+  return { up: false, entry: { region: it.r, name: it.n,
+    status: (r && r.status) || fe.status || 0,
+    upstream: fe.upstreamStatus != null ? fe.upstreamStatus : ((r && r.upstreamStatus) || null),
+    msg: fe.error || (r && r.body && r.body.error) || "network/timeout" } };
+}
+
+/**
+ * The cron drain.
+ *
+ * Reads at most `drainPerMin` queued characters a minute, one at a time, at least
+ * DRAIN_MIN_SPACING_MS apart, and classifies every failure into one of three
+ * kinds because they want three different things:
+ *
+ *   OUR 4xx (no page, no bracelet)  drop the item + an `nf:` marker for an hour,
+ *                                   so a dead name cannot re-enqueue forever.
+ *   upstream 401/403                one dead user token. Drop THIS ITEM ONLY and
+ *                                   keep draining — do NOT trip the breaker; the
+ *                                   site is fine, this requester's sign-in is not.
+ *   other upstream 4xx (429/418…)   a block that hits everyone. Requeue at the
+ *                                   front and trip to `probe` immediately: it will
+ *                                   not fix itself on retry, so retrying is rude.
+ *
+ * Transient 5xx/network failures leave the item queued with its attempt count
+ * bumped, and five in a row trip the same breaker.
  */
 async function drainQueue(env) {
   if (!env || !env.CHARS) return { drained: 0 };
-  let res;
-  try { res = await env.CHARS.list({ prefix: QUEUE_PREFIX, limit: 200 }); }
-  catch (e) { return { drained: 0 }; }
-  if (!res.keys.length) return { drained: 0 };
-
-  const items = res.keys
-    .map(function (k) { return { key: k.name, md: k.metadata || {} }; })
-    .filter(function (x) { return x.md.region && x.md.name; })
-    .sort(function (a, b) { return (a.md.ts || 0) - (b.md.ts || 0); })   // oldest first
-    .slice(0, DRAIN_PER_RUN);
-
   const t0 = Date.now();
-  let drained = 0, failed = 0;
-  for (let i = 0; i < items.length; i++) {
-    if (Date.now() - t0 > DRAIN_BUDGET_MS) break;
-    if (i > 0) await sleep(DRAIN_DELAY_MS);
-    const it = items[i];
-    let r = null;
-    try { r = await loadCharacter(env, it.md.region, it.md.name, { refresh: true, publish: true }); }
-    catch (e) { r = null; }
-    if (r && r.ok && !r.stale) { drained++; try { await env.CHARS.delete(it.key); } catch (e) {} }
-    else if (r && !r.ok && r.status === 404) { try { await env.CHARS.delete(it.key); } catch (e) {} }
-    else { failed++; break; }        // upstream is unhappy: stop the run, leave the rest queued
+  const run = { t: t0, cached: [], dropped: [], failed: [], stop: null };
+
+  const cfg = await getDrainConfig(env);
+  if (cfg.mode === "off") return { drained: 0, mode: "off" };          // frozen: zero upstream requests
+  if (cfg.mode === "probe") {
+    if (Date.now() - (cfg.lastProbe || 0) < (cfg.interval || PAUSE_PROBE_FIRST_MS)) return { drained: 0, mode: "probe", waiting: true };
+    const probe = await probeOldest(env);
+    run.ms = Date.now() - t0;
+    if (probe.up) {
+      await setDrainConfig(env, { mode: "run", drainPerMin: cfg.drainPerMin });   // recovered
+      run.stop = "resumed";
+      if (probe.cached && probe.name) {
+        run.cached.push(probe.name);
+        try { await env.CHARS.put(LASTWRITE_KEY, String(Date.now())); } catch (e) {}
+        await bumpUsage(env, 1);
+      }
+    } else {
+      // Still down: back off ×2, capped. A day-long outage costs ~10 requests, not 1440.
+      await setDrainConfig(env, { mode: "probe", drainPerMin: cfg.drainPerMin, lastProbe: Date.now(),
+        interval: Math.min((cfg.interval || PAUSE_PROBE_FIRST_MS) * 2, PAUSE_PROBE_MAX_MS) });
+      run.stop = "probe";
+      if (probe.entry) run.failed.push(probe.entry);
+    }
+    await appendDrainLog(env, run);
+    return { drained: run.cached.length, mode: "probe", probed: true, up: !!probe.up };
   }
-  return { drained: drained, failed: failed };
+
+  const used = await usageCount(env);
+  if (used >= MONTHLY_CHAR_BUDGET) {
+    run.stop = "budget"; run.ms = 0;
+    await appendDrainLog(env, run);
+    return { drained: 0, stop: "budget" };
+  }
+
+  // IDLE SHORT-CIRCUIT. A recently-confirmed-empty order snapshot means there is
+  // nothing to drain: return after ONE read instead of paying a lock write plus a
+  // list every idle minute. An enqueue deletes the snapshot, so a new character
+  // defeats this immediately and is never delayed by it.
+  try {
+    const s0 = await kvGetJson(env, Q_ORDER_KEY);
+    if (s0 && Array.isArray(s0.items) && !s0.items.length && Date.now() - (s0.ts || 0) < Q_ORDER_IDLE_TTL_MS) {
+      return { drained: 0, idle: true };
+    }
+  } catch (e) {}
+
+  // Serialize drains so the cron and an enqueue kick can never double-fetch.
+  try { if (await env.CHARS.get(DRAIN_LOCK_KEY)) return { drained: 0, locked: true }; } catch (e) {}
+  // TTL 60, NOT 55 OR ANYTHING SMALLER. KV's minimum expirationTtl is 60; below it
+  // the put THROWS, straight into the silent catch below, so the lock never engages
+  // and drains overlap invisibly. That was a real astrogem incident. And a failed
+  // put must be SEEN — log it, then keep draining: availability over exclusion.
+  try { await env.CHARS.put(DRAIN_LOCK_KEY, "1", { expirationTtl: 60 }); }
+  catch (e) { console.log("[drain] lock write failed (drains may overlap): " + ((e && e.message) || e)); }
+
+  const perRun = cfg.drainPerMin;
+  const delayMs = drainSpacingMs(perRun);
+  const items = await listQueueOrder(env);
+  const removed = {};
+  let processed = 0, cached = 0, failed = 0, consecFail = 0;
+
+  for (const it of items) {
+    if (processed >= perRun || Date.now() - t0 > DRAIN_BUDGET_MS) {
+      run.stop = processed >= perRun ? "full" : "time";
+      break;
+    }
+    if (!it.r || !it.n) { try { await env.CHARS.delete(it.k); } catch (e) {} removed[it.k] = 1; continue; }
+
+    let tok = "";
+    try { const v = await env.CHARS.get(it.k, "json"); tok = (v && v.t) || ""; } catch (e) {}
+
+    if (processed > 0) await sleep(delayMs);      // the 3s floor, between fetches
+    try { await env.CHARS.put(LASTFETCH_KEY, String(Date.now())); } catch (e) {}
+
+    let r = null;
+    try { r = await loadCharacter(env, it.r, it.n, { refresh: true, publish: true, token: tok }); }
+    catch (e) { r = null; }
+    processed++;
+
+    const fe = (r && r.fetchError) || null;
+    const upstream = fe ? fe.upstreamStatus : (r && r.upstreamStatus) || null;
+    const ourStatus = fe ? fe.status : (r && !r.ok ? r.status : 0);
+
+    if (r && r.ok && !r.stale) {
+      consecFail = 0; cached++;
+      run.cached.push(it.r + ":" + it.n);
+      try { await env.CHARS.delete(it.k); } catch (e) {}
+      removed[it.k] = 1;
+    } else if (ourStatus >= 400 && ourStatus < 500) {
+      // OUR 4xx: no such page, or a page with no bracelet on it. Drop it and
+      // remember WHY for an hour, so the client can be told instead of spinning.
+      consecFail = 0;
+      try { await env.CHARS.delete(it.k); } catch (e) {}
+      removed[it.k] = 1;
+      try {
+        await env.CHARS.put(NOTFOUND_PREFIX + charKey(it.r, it.n),
+          String((r && r.body && r.body.message) || (fe && fe.error) || ("HTTP " + ourStatus)).slice(0, 300),
+          { expirationTtl: NOTFOUND_TTL_S });
+      } catch (e) {}
+      run.dropped.push({ region: it.r, name: it.n, status: ourStatus, msg: (r && r.body && r.body.error) || "dropped" });
+    } else if (upstream === 401 || upstream === 403) {
+      // This requester's token expired or was revoked. Their problem, not the
+      // site's — drop the item and carry on. Tripping the breaker here would let
+      // one stale sign-in freeze the queue for everybody.
+      consecFail = 0;
+      try { await env.CHARS.delete(it.k); } catch (e) {}
+      removed[it.k] = 1;
+      run.dropped.push({ region: it.r, name: it.n, status: ourStatus, upstream: upstream,
+        msg: "auth — the requester's sign-in token expired or was revoked" });
+    } else if (upstream >= 400 && upstream < 500) {
+      // A site-wide refusal (429 rate limit, 418/451 anti-bot). Stop now.
+      run.failed.push({ region: it.r, name: it.n, status: ourStatus, upstream: upstream, msg: "blocked", att: 1 });
+      await requeueFront(env, run.failed);
+      await setDrainConfig(env, { mode: "probe", drainPerMin: cfg.drainPerMin, lastProbe: Date.now(), interval: PAUSE_PROBE_FIRST_MS });
+      run.stop = "blocked";
+      break;
+    } else {
+      // Transient. Leave it queued so one slow character cannot head-of-line block
+      // the rest, but count the attempts — a permanently broken name gets dropped
+      // rather than retried at the head forever.
+      failed++;
+      const att = (it.a | 0) + 1;
+      run.failed.push({ region: it.r, name: it.n, status: ourStatus, upstream: upstream,
+        msg: (fe && fe.error) || (r && r.body && r.body.error) || "network/timeout", att: att });
+      try {
+        if (att >= MAX_FETCH_ATTEMPTS) { await env.CHARS.delete(it.k); removed[it.k] = 1; }
+        else {
+          // Keep the FIFO place (ts) and the stored token. Rewriting the value to ""
+          // here is how astrogem lost tokens and then dropped the retry as a 401.
+          await env.CHARS.put(it.k, JSON.stringify({ t: tok }), {
+            metadata: { region: it.r, name: it.n, ts: it.t, attempts: att }, expirationTtl: QUEUE_TTL_S
+          });
+        }
+      } catch (e) {}
+      if (++consecFail >= PAUSE_FAIL_LIMIT) {
+        await requeueFront(env, run.failed);
+        await setDrainConfig(env, { mode: "probe", drainPerMin: cfg.drainPerMin, lastProbe: Date.now(), interval: PAUSE_PROBE_FIRST_MS });
+        run.stop = "paused";
+        break;
+      }
+    }
+  }
+
+  // Refresh the order snapshot: what is still queued, in drain order. Position and
+  // metrics reads use it instead of listing.
+  try {
+    await env.CHARS.put(Q_ORDER_KEY, JSON.stringify({
+      ts: Date.now(), items: items.filter(function (it) { return !removed[it.k]; })
+    }));
+  } catch (e) {}
+
+  run.ms = Date.now() - t0;
+  // A run that did nothing is NOT logged. Liveness shows in the queue depth; an
+  // empty log next to an empty queue is the healthy case, and logging every idle
+  // minute would cost a KV write a minute to say nothing.
+  if (run.cached.length || run.failed.length || run.dropped.length) await appendDrainLog(env, run);
+  if (cached > 0) {
+    try { await env.CHARS.put(LASTWRITE_KEY, String(Date.now())); } catch (e) {}
+    await bumpUsage(env, cached);
+  }
+  try { await env.CHARS.delete(DRAIN_LOCK_KEY); } catch (e) {}
+  return { drained: cached, failed: failed, processed: processed, stop: run.stop };
+}
+
+/**
+ * The KICK: fetch ONE just-queued character directly, with no `list()` at all.
+ *
+ * KV list is eventually consistent, so the key an enqueue just wrote is invisible
+ * to a list() issued a moment later — without this, a brand-new character is
+ * skipped by the very drain that should pick it up and waits a full minute for
+ * the next cron. Named keys are read-your-writes, so going straight at the key
+ * dodges the problem entirely.
+ *
+ * It observes the same 3s floor, and refuses to run while a drain holds the lock,
+ * so "one page every three seconds" survives the extra lane.
+ */
+async function kickFetch(env, region, name, token) {
+  if (!env || !env.CHARS) return;
+  try { const cfg = await getDrainConfig(env); if (cfg.mode !== "run") return; } catch (e) { return; }
+  try { if (await env.CHARS.get(DRAIN_LOCK_KEY)) return; } catch (e) {}   // a drain owns the pacing right now
+  const key = charKey(region, name);
+  const t0 = Date.now();
+  await spaceUpstream(env);
+  let r = null;
+  try { r = await loadCharacter(env, region, name, { refresh: true, publish: true, token: token }); } catch (e) { r = null; }
+  if (r && r.ok && !r.stale) {
+    try {
+      await env.CHARS.delete(QUEUE_PREFIX + key);
+      await bumpUsage(env, 1);
+      // Log it, or a sub-second kick is invisible to the admin: it drains before the
+      // queue list ever shows the item, and the log would claim nothing happened.
+      await appendDrainLog(env, { t: Date.now(), cached: [region + ":" + name], dropped: [], failed: [], stop: null, kick: true, ms: Date.now() - t0 });
+    } catch (e) {}
+  } else if (r && !r.ok && r.status >= 400 && r.status < 500) {
+    try {
+      await env.CHARS.delete(QUEUE_PREFIX + key);
+      await env.CHARS.put(NOTFOUND_PREFIX + key, String((r.body && r.body.message) || ("HTTP " + r.status)).slice(0, 300), { expirationTtl: NOTFOUND_TTL_S });
+      await appendDrainLog(env, { t: Date.now(), cached: [],
+        dropped: [{ region: region, name: name, status: r.status, msg: (r.body && r.body.error) || "dropped" }],
+        failed: [], stop: null, kick: true, ms: Date.now() - t0 });
+    } catch (e) {}
+  }
+  // A block or a transient failure is left queued for the cron, which owns the breaker.
+}
+
+// ---------------------------------------------------------------------------
+// The leaderboard snapshot — ARCHITECTURE §1.2 and §2.5
+// ---------------------------------------------------------------------------
+
+// Workers-native gzip. No library, no dependency, and the same CompressionStream
+// the runtime would use if it were compressing the response itself.
+async function gzipString(s) {
+  const cs = new CompressionStream("gzip");
+  return new Response(new Response(s).body.pipeThrough(cs)).arrayBuffer();
+}
+async function gunzipToJson(buf) {
+  const ds = new DecompressionStream("gzip");
+  return new Response(new Response(buf).body.pipeThrough(ds)).json();
+}
+
+/**
+ * Is this KV key a character record? Everything else in the namespace — the
+ * queue (whose VALUE holds a user's token), the markers, the drain state, the
+ * feedback notes, the roster cache — must never be read into a public payload.
+ * A prefix-less list() is exactly the operation that would do it by accident.
+ */
+function isCharKey(n) {
+  return n.indexOf(CHAR_PREFIX) === 0;
+}
+
+/** The board row we keep per character, before it is packed for the wire. */
+function snapshotEntry(rec) {
+  if (!rec || !Array.isArray(rec.stats) || !rec.stats.length) return null;
+  if (rec.published === false) return null;             // reading your own bracelet ≠ joining a public board
+  return {
+    region: rec.region, name: rec.name,
+    itemLevel: rec.itemLevel == null ? null : rec.itemLevel,
+    "class": rec["class"] || null,
+    pulledAt: rec.pulledAt || 0,
+    grade: (rec.score && rec.score.grade) || null,
+    stats: rec.stats
+  };
+}
+function entryId(e) { return (e.region + ":" + e.name).toLowerCase(); }
+
+/**
+ * ARCHITECTURE §1.2, on the wire:
+ *
+ *   { v:1, builtAt, classes:[…],
+ *     characters:[ [region, name, itemLevel, classIdx, pulledAt, grade, statsPacked] ] }
+ *
+ * `statsPacked` is the raw stat tuples flattened to numbers (type, index, value,
+ * fixed) × N — a bracelet is at most five lines, so a row is ~25 numbers.
+ *
+ * The class table rides INSIDE the payload. A table shipped separately is a table
+ * that drifts: the client would decode last week's indices against this week's
+ * list and mislabel every row, silently.
+ */
+function encodeSnapshot(builtAt, entries) {
+  const classes = [], classIdx = {};
+  function ci(n) {
+    if (!n) return -1;
+    if (classIdx[n] == null) { classIdx[n] = classes.length; classes.push(n); }
+    return classIdx[n];
+  }
+  const characters = entries.map(function (e) {
+    const packed = [];
+    for (const s of (e.stats || [])) {
+      packed.push(s.type == null ? 0 : s.type, s.index == null ? 0 : s.index,
+        s.value == null ? 0 : s.value, s.fixed ? 1 : 0);
+    }
+    return [e.region, e.name, e.itemLevel, ci(e["class"]), e.pulledAt || 0, e.grade || null, packed];
+  });
+  return { v: 1, builtAt: builtAt, classes: classes, characters: characters };
+}
+
+/** The mutation source (plain entries, gzipped). The served payload is packed. */
+async function readSnapshotSource(env) {
+  try {
+    const gz = await env.CHARS.get(SNAPSHOT_SRC_KEY, "arrayBuffer");
+    if (gz && gz.byteLength) {
+      const v = await gunzipToJson(gz);
+      if (Array.isArray(v)) return v;
+    }
+  } catch (e) {}
+  return null;
+}
+
+/**
+ * One chunk of a from-scratch build. Returns null while unfinished, with the
+ * progress parked in KV, and the finished list on the tick that completes it.
+ *
+ * CHUNKED because a Worker invocation gets ~1,000 subrequests and each record is
+ * a KV get. Astrogem's unchunked version died mid-flight on every tick once its
+ * store passed ~5.5k characters and left its board permanently empty — not
+ * stale, EMPTY, because the build never once reached the write at the end.
+ * Only the first build pays this; every later one is incremental.
+ */
+async function buildEntriesChunk(env) {
+  let acc = [], cursor;
+  const st = await kvGetJson(env, REBUILD_CURSOR_KEY);
+  if (st) {
+    cursor = st.c || undefined;
+    try {
+      const gz = await env.CHARS.get(REBUILD_ACC_KEY, "arrayBuffer");
+      acc = (gz && gz.byteLength) ? await gunzipToJson(gz) : [];
+      if (!Array.isArray(acc)) { acc = []; cursor = undefined; }
+    } catch (e) { acc = []; cursor = undefined; }        // corrupt accumulator -> restart clean
+  }
+  const res = await env.CHARS.list({ prefix: CHAR_PREFIX, cursor: cursor, limit: REBUILD_KEYS_PER_RUN });
+  const names = [];
+  for (const k of res.keys) if (isCharKey(k.name)) names.push(k.name);
+  const records = await Promise.all(names.map(function (k) { return kvGetJson(env, k); }));
+  for (const rec of records) {
+    const e = snapshotEntry(rec);
+    if (e) acc.push(e);
+  }
+  if (!res.list_complete) {
+    await env.CHARS.put(REBUILD_ACC_KEY, await gzipString(JSON.stringify(acc)));
+    await env.CHARS.put(REBUILD_CURSOR_KEY, JSON.stringify({ c: res.cursor }));
+    return null;
+  }
+  const byId = {};
+  for (const e of acc) {
+    const id = entryId(e);
+    if (!byId[id] || (e.pulledAt || 0) >= (byId[id].pulledAt || 0)) byId[id] = e;
+  }
+  try { await env.CHARS.delete(REBUILD_CURSOR_KEY); } catch (e) {}
+  try { await env.CHARS.delete(REBUILD_ACC_KEY); } catch (e) {}
+  return Object.keys(byId).map(function (id) { return byId[id]; });
+}
+
+/**
+ * Rebuild the snapshot if anything changed. Runs on the cron.
+ *
+ * READ THE THROTTLE KEY FIRST. Inside the window the answer is "return" whether
+ * or not anything is dirty, so listing the dirty markers before checking the
+ * clock buys nothing and costs a list() every single minute — about 43,000 a
+ * month to learn something one cheap get() already knew.
+ */
+async function rebuildSnapshotIfChanged(env, minIntervalMs) {
+  if (!env || !env.CHARS) return { skipped: "no_kv" };
+  const interval = (typeof minIntervalMs === "number") ? minIntervalMs : SNAPSHOT_MIN_INTERVAL_MS;
+  const builtAt = parseInt((await env.CHARS.get(BUILTAT_KEY)) || "0", 10);
+  if (builtAt > 0 && (Date.now() - builtAt) < interval) return { skipped: "throttled" };
+
+  let dirty;
+  try { dirty = await env.CHARS.list({ prefix: DIRTY_PREFIX, limit: 1000 }); } catch (e) { return { skipped: "list_failed" }; }
+  if (builtAt > 0 && !dirty.keys.length) return { skipped: "clean" };
+
+  const startedAt = Date.now();
+  let entries = await readSnapshotSource(env);
+  let fromScratch = false;
+
+  if (entries && entries.length) {
+    // INCREMENTAL: read only the records the markers point at.
+    const idx = {};
+    for (let i = 0; i < entries.length; i++) idx[entryId(entries[i])] = i;
+    const charKeys = dirty.keys.map(function (k) { return k.name.slice(DIRTY_PREFIX.length); });
+    const recs = await Promise.all(charKeys.map(function (ck) { return kvGetJson(env, ck); }));
+    const drop = {};
+    for (let i = 0; i < recs.length; i++) {
+      const e = snapshotEntry(recs[i]);
+      if (e) {
+        const id = entryId(e);
+        if (idx[id] != null) entries[idx[id]] = e;
+        else { idx[id] = entries.length; entries.push(e); }
+      } else {
+        // The marker points at a record that is gone or unpublished — a takedown, a
+        // "forget me", a bracelet that came off. A rebuild that only ever upserts
+        // would leave the row on the board forever, which is the one outcome a
+        // takedown route must not have. Remove it by key.
+        const ck = charKeys[i] || "";
+        const id = ck.slice(CHAR_PREFIX.length).toLowerCase();
+        if (id) drop[id] = 1;
+      }
+    }
+    if (Object.keys(drop).length) {
+      entries = entries.filter(function (e) { return !drop[entryId(e)]; });
+    }
+  } else {
+    fromScratch = true;
+    entries = await buildEntriesChunk(env);
+    if (!entries) return { chunked: true };            // progress parked; resume next tick
+  }
+
+  const payload = encodeSnapshot(startedAt, entries);
+  const gz = await gzipString(JSON.stringify(payload));
+  await env.CHARS.put(SNAPSHOT_GZ_KEY, gz);
+  await env.CHARS.put(SNAPSHOT_SRC_KEY, await gzipString(JSON.stringify(entries)));
+  await env.CHARS.put(BUILTAT_KEY, String(startedAt));
+
+  // Clear ONLY the markers we listed. Anything written mid-build keeps its marker
+  // and is picked up next time. A finished from-scratch build keeps them ALL: it
+  // spanned several ticks, so a record re-pulled during it may be newer than the
+  // page this build read.
+  if (!fromScratch) {
+    await Promise.all(dirty.keys.map(function (k) { return env.CHARS.delete(k.name).catch(function () {}); }));
+  }
+  return { built: entries.length, bytes: gz.byteLength, builtAt: startedAt, fromScratch: fromScratch };
+}
+
+/**
+ * GET /?list=1 (and GET /list) — the board.
+ *
+ * ONE KV read and no JSON work: the stored bytes are already gzip and already the
+ * exact payload, so they go out as-is. `encodeBody: "manual"` is what makes that
+ * safe — WITHOUT IT the runtime sees `Content-Encoding: gzip` on a body it thinks
+ * is plain and gzips it a second time, and the browser unpacks one layer and
+ * chokes on the other.
+ *
+ * A caller that did not ask for gzip (plain curl, an odd script) gets it
+ * decompressed here, because the edge does not do that for us.
+ */
+async function handleList(env, acceptEncoding) {
+  if (!env || !env.CHARS) return json({ v: 1, builtAt: 0, classes: [], characters: [] }, 200);
+  try {
+    const gz = await env.CHARS.get(SNAPSHOT_GZ_KEY, "arrayBuffer");
+    if (gz && gz.byteLength) {
+      if (!/gzip/i.test(acceptEncoding || "")) {
+        return new Response(new Response(gz).body.pipeThrough(new DecompressionStream("gzip")), {
+          status: 200, headers: { "Content-Type": "application/json" }
+        });
+      }
+      return new Response(gz, {
+        status: 200,
+        encodeBody: "manual",
+        headers: { "Content-Type": "application/json", "Content-Encoding": "gzip" }
+      });
+    }
+  } catch (e) {}
+  // No snapshot yet. An empty list, not an error: the client reads "no rows" as
+  // "the board is not built" and falls back to its baked copy, which is true.
+  return json({ v: 1, builtAt: 0, classes: [], characters: [],
+    note: "No snapshot has been built yet. The cron rebuilds every 10 minutes when a record has changed." }, 200);
+}
+
+// ---------------------------------------------------------------------------
+// Feedback — ARCHITECTURE §3.6
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /feedback — public, no sign-in.
+ *
+ * The honeypot answers 200 and stores nothing. It must be indistinguishable from
+ * a real accept: a form-filler that learns it was caught just tries again with
+ * the field left empty.
+ *
+ * Caps TRUNCATE rather than reject. The client truncates to the same numbers, so
+ * agreement is the normal case; when the two disagree, the cost should be a few
+ * characters, not the whole note.
+ */
+async function handleFeedback(env, request, ip) {
+  // Feedback used to be the one write path with no limit under the hard cap. Its
+  // own key in the shared per-IP namespace fixes that without touching lookups.
+  if (env.LOOKUP_THROTTLE) {
+    const t = await env.LOOKUP_THROTTLE.limit({ key: "fb:" + ip });
+    if (!t.success) return json({ error: "slow_down", message: "One note every few seconds — please wait a moment.", rateLimited: true, retryAfterMs: 5000 }, 429);
+  }
+  let body;
+  try { body = await request.json(); } catch (e) { return json({ error: "bad_request", message: "Body must be JSON." }, 400); }
+  if (body && String(body.hp || "").trim()) return json({ ok: true }, 200);      // caught: accept and drop
+  const message = String((body && body.message) || "").trim().slice(0, FB_MSG_MAX);
+  if (!message) return json({ error: "bad_request", message: "A message is required." }, 400);
+  if (!env || !env.CHARS) return json({ error: "no_kv", message: "Feedback storage is not configured." }, 503);
+
+  const ts = Date.now();
+  const rec = {
+    ts: ts,
+    type: String((body && body.type) || "other").trim().slice(0, FB_TYPE_MAX),
+    message: message,
+    contact: String((body && body.contact) || "").trim().slice(0, FB_CONTACT_MAX),
+    ua: (request.headers.get("User-Agent") || "").slice(0, FB_UA_MAX),
+    read: false
+  };
+  // The millisecond timestamp leads the key, so LEXICOGRAPHIC ORDER IS CHRONOLOGICAL
+  // and the tail of a list() is the newest — which is what bounds the admin read at
+  // ≤200 gets instead of reading every note ever written.
+  const key = FB_PREFIX + ts + "-" + Math.random().toString(36).slice(2, 8);
+  try { await env.CHARS.put(key, JSON.stringify(rec), { expirationTtl: FB_TTL_S }); }
+  catch (e) { return json({ error: "store_failed", message: "Could not save that note." }, 500); }
+  return json({ ok: true }, 200);
+}
+
+/** GET /admin/feedback — the newest ≤200, plus how many exist and how many are unread. */
+async function handleAdminFeedback(env) {
+  if (!env || !env.CHARS) return json({ error: "no_kv" }, 503);
+  const keys = [];
+  let cursor;
+  do {
+    const res = await env.CHARS.list({ prefix: FB_PREFIX, cursor: cursor, limit: 1000 });
+    for (const k of res.keys) keys.push(k.name);
+    cursor = res.list_complete ? null : res.cursor;
+  } while (cursor);
+  const newest = keys.slice(-FB_LIST_MAX);              // the list is oldest-first; the tail is newest
+  const recs = await Promise.all(newest.map(function (k) {
+    return kvGetJson(env, k).then(function (r) { return r ? Object.assign({ id: k.slice(FB_PREFIX.length) }, r) : null; });
+  }));
+  const items = recs.filter(Boolean).sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
+  return json({ ok: true, items: items, count: items.length, total: keys.length,
+    unread: items.filter(function (x) { return !x.read; }).length }, 200);
+}
+
+/** POST /admin/feedback {read|del} — mark read or delete. POST, so no <img> can do it. */
+async function handleAdminFeedbackMutate(env, request, u) {
+  if (!env || !env.CHARS) return json({ error: "no_kv" }, 503);
+  let body = {};
+  try { body = await request.json(); } catch (e) {}
+  const del = (body && body.del) || u.searchParams.get("del");
+  const read = (body && body.read) || u.searchParams.get("read");
+  if (del) {
+    const k = FB_PREFIX + String(del).replace(/^fb:/, "");
+    try { await env.CHARS.delete(k); } catch (e) {}
+    return json({ ok: true, deleted: k }, 200);
+  }
+  if (read) {
+    const k = FB_PREFIX + String(read).replace(/^fb:/, "");
+    try {
+      const r = await kvGetJson(env, k);
+      // Re-putting refreshes the 90-day TTL. Acceptable: a note the admin has just
+      // touched may reasonably live another 90 days.
+      if (r) { r.read = true; await env.CHARS.put(k, JSON.stringify(r), { expirationTtl: FB_TTL_S }); }
+    } catch (e) {}
+    return json({ ok: true, read: k }, 200);
+  }
+  return json({ error: "bad_request", message: "Send { read: \"<id>\" } or { del: \"<id>\" }." }, 400);
 }
 
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
 
-/** GET /character (and its /bracelet alias) — the import round trip. */
-async function handleCharacter(env, request, u, ip) {
-  const name = (u.searchParams.get("name") || "").trim();
-  const region = normRegion(u.searchParams.get("region") || "NA");
-  if (!name) return json({ error: "bad_request", message: "name is required." }, 400);
-  if (!region) return json({ error: "bad_region", message: "region must be NA or CE (lostark.bible calls EU Central 'CE')." }, 400);
+/**
+ * Length-check the two things that become a KV key, at the top of the router.
+ *
+ * Astrogem does not, and several of its CHARS.get() calls are not try-wrapped, so
+ * an oversized key throws past the CORS wrapper into a 500 with no CORS headers —
+ * a browser then reports it as a network error and the real cause is invisible.
+ */
+function validateNameRegion(rawRegion, rawName) {
+  const name = String(rawName || "").trim();
+  if (!name) return { err: json({ error: "bad_request", message: "name is required." }, 400) };
+  if (name.length > 40) return { err: json({ error: "bad_request", message: "That name is too long to be a character name." }, 400) };
+  const raw = String(rawRegion || "NA").trim();
+  if (raw.length > 8) return { err: json({ error: "bad_region", message: "region must be NA or CE." }, 400) };
+  const region = normRegion(raw);
+  if (!region) return { err: json({ error: "bad_region", message: "region must be NA or CE (lostark.bible calls EU Central 'CE')." }, 400) };
+  return { name: name, region: region };
+}
 
+/**
+ * GET /character (and its /bracelet alias) — the one route the import UI calls.
+ *
+ *   ?queue=1        answer with a queue position instead of holding the request
+ *                   open for an upstream fetch
+ *   ?pos=1          include position/total (costs a list(); the client asks for it
+ *                   on the first lookup and its 30s re-syncs, not on every tick)
+ *   ?refresh=1      the Re-pull button: bypass the cache
+ *
+ * The flags the client branches on, in the order it reads them:
+ *   unavailable  the drain is off or probing — no character page will be fetched
+ *   needSignIn   a fetch is needed and the caller is not signed in (401)
+ *   queued       it is in the queue; position/total/drainPerMin say where
+ *   degraded     the global gate tripped; new work is paused for everyone
+ */
+async function handleCharacter(env, request, u, ip, ctx, degraded) {
+  const v = validateNameRegion(u.searchParams.get("region"), u.searchParams.get("name"));
+  if (v.err) return v.err;
+  const name = v.name, region = v.region, key = charKey(region, name);
+
+  const wantQueue = u.searchParams.get("queue") === "1";
+  const wantPos = u.searchParams.get("pos") === "1";
+  const refresh = u.searchParams.get("refresh") === "1";
+  const publish = u.searchParams.get("publish") !== "0";
+
+  // ---- 1) CACHED, at any age -------------------------------------------------
+  // Served instantly and labelled: `cached` always, `stale` past 7 days. A stale
+  // record is never auto-refetched — bracelets change rarely, and background churn
+  // is exactly the upstream load we promised not to generate. Re-pull is the path.
+  let cached = null;
+  if (env.CHARS) {
+    cached = await kvGetJson(env, key);
+    if (cached && !Array.isArray(cached.stats)) cached = null;
+  }
+  if (cached && !refresh && typeof cached.pulledAt === "number") {
+    // A record the owner asked NOT to publish is not public data, so reading it
+    // costs an ownership check. A published one is already on the board.
+    if (cached.published === false) {
+      const owner = await requireOwner(env, request);
+      if (owner.resp) return owner.resp;
+      if (!ownsCharacter(owner.chars, region, name).ok) {
+        return json({ error: "not_yours", message: "That character is not on your roster." }, 403);
+      }
+    }
+    const out = characterResponse({ record: cached, cached: true,
+      stale: (Date.now() - cached.pulledAt) >= CHAR_TTL_MS });
+    if (wantQueue && env.CHARS) {
+      // Cached AND queued happens on a Re-pull: the client keeps the old bracelet
+      // on screen with a refresh banner over it. Both facts in one answer.
+      const q = await env.CHARS.get(QUEUE_PREFIX + key);
+      if (q !== null) {
+        out.queued = true;
+        if (wantPos) Object.assign(out, await queueStatus(env, region, name));
+      }
+    }
+    return json(out, 200);
+  }
+
+  // ---- 2) A page fetch is needed --------------------------------------------
+  // Everything from here consumes lostark.bible, so everything from here is gated.
+
+  if (!wantQueue) {
+    // Legacy inline path, kept for curl and the test harness: verify, fetch, answer.
+    // The UI never takes it — it sets queue=1 so a slow upstream cannot hold a
+    // browser request open.
+    const owner = await requireOwner(env, request);
+    if (owner.resp) return owner.resp;
+    const owns = ownsCharacter(owner.chars, region, name);
+    if (!owns.ok) {
+      return json({ error: "not_yours",
+        message: owns.sawName
+          ? "That name is on your roster but under a different region."
+          : "That character is not on the roster lostark.bible shows for your account. Only your own characters can be read here." }, 403);
+    }
+    if (degraded) return json({ error: "busy", message: "The site is very busy right now — please try again shortly.", rateLimited: true, degraded: true }, 429);
+    if (env.LOOKUP_THROTTLE) {
+      const k = (await sha256hex(owner.token)).slice(0, 24);
+      const t = await env.LOOKUP_THROTTLE.limit({ key: "look:" + k });
+      if (!t.success) return json({ error: "slow_down", message: "One character every few seconds, please.", rateLimited: true, retryAfterMs: 5000 }, 429);
+    }
+    await spaceUpstream(env);
+    const r = await loadCharacter(env, region, name, {
+      token: owner.token, refresh: refresh, publish: publish,
+      regionVerified: owns.regionVerified,
+      fallbackClass: owns.meta && classFromRoster(owns.meta.cls),
+      fallbackItemLevel: owns.meta && owns.meta.ilvl
+    });
+    if (!r.ok) return json(r.body, r.status);
+    return json(characterResponse(r), 200);
+  }
+
+  // Drain mode first: if no page is going to be fetched at all, saying so beats
+  // asking someone to sign in for a service that is switched off.
+  const cfg = await getDrainConfig(env);
+  if (cfg.mode !== "run") {
+    return json({ unavailable: true, error: "unavailable",
+      message: UNAVAILABLE_MSG + " — nothing is being fetched from lostark.bible right now. Cached characters and the board still work." }, 503);
+  }
+  // A name we already know has no page. Don't re-queue it, and say why.
+  if (!refresh && env.CHARS) {
+    const miss = await env.CHARS.get(NOTFOUND_PREFIX + key);
+    if (miss) {
+      return json({ notFound: true, error: "no_such_character",
+        message: (typeof miss === "string" && miss.length > 3) ? miss : "lostark.bible has no page for that character." }, 404);
+    }
+  }
+  if (degraded) {
+    return json({ error: "busy", message: "The site is very busy right now — please try again shortly.", rateLimited: true, degraded: true }, 429);
+  }
+
+  // THE CONSENT GATE. A character page is fetched only for a signed-in caller who
+  // owns that character. Signed-out visitors read the cache and the board (both
+  // already answered above) and go no further.
+  const token = bearer(request);
+  if (!token) {
+    return json({ needSignIn: true, error: "not_signed_in",
+      message: "Sign in with lostark.bible to look up a character — this only reads characters on your own roster." }, 401);
+  }
   const owner = await requireOwner(env, request);
   if (owner.resp) return owner.resp;
-
   const owns = ownsCharacter(owner.chars, region, name);
   if (!owns.ok) {
-    // Say WHY without leaking anything: "not on your roster" is the whole story,
-    // and it is the same answer whether or not the character exists elsewhere.
     return json({ error: "not_yours",
       message: owns.sawName
         ? "That name is on your roster but under a different region."
         : "That character is not on the roster lostark.bible shows for your account. Only your own characters can be read here." }, 403);
   }
 
-  // Per-user lookup throttle, keyed by the token hash so one person on two
-  // networks is still one person. Generous for a human clicking a character,
-  // useless for a script.
+  // Already queued — by this caller a moment ago, or by someone else. Report where
+  // it is; never add it twice.
+  if (env.CHARS) {
+    const q = await env.CHARS.get(QUEUE_PREFIX + key);
+    if (q !== null) return queuedResponse(env, region, name, { alreadyQueued: true }, wantPos, cached);
+  }
+
   if (env.LOOKUP_THROTTLE) {
     const k = (await sha256hex(owner.token)).slice(0, 24);
     const t = await env.LOOKUP_THROTTLE.limit({ key: "look:" + k });
     if (!t.success) return json({ error: "slow_down", message: "One character every few seconds, please.", rateLimited: true, retryAfterMs: 5000 }, 429);
   }
+  if (await usageCount(env) >= MONTHLY_CHAR_BUDGET) {
+    return json({ error: "monthly_budget", monthlyBudget: true,
+      message: "This month's character-fetch budget is spent — new lookups resume next month. Cached characters and the board still work." }, 503);
+  }
+  // Site-wide enqueue cap: the queue must never grow faster than the drain empties
+  // it, however many people arrive at once.
+  if (env.IMPORT_GATE) {
+    const g = await env.IMPORT_GATE.limit({ key: "enqueue" });
+    if (!g.success) return json({ error: "busy", message: "The lookup queue is busy right now — try again in a moment.", rateLimited: true, retryAfterMs: 30000 }, 429);
+  }
 
-  const r = await loadCharacter(env, region, name, {
-    token: owner.token,
-    refresh: u.searchParams.get("refresh") === "1",
-    publish: u.searchParams.get("publish") !== "0",
-    regionVerified: owns.regionVerified,
-    // The roster already told us the class and item level. Passed as a fallback
-    // for the page parsers, which read markup that can change under us.
-    fallbackClass: owns.meta && classFromRoster(owns.meta.cls),
-    fallbackItemLevel: owns.meta && owns.meta.ilvl
-  });
-  if (!r.ok) return json(r.body, r.status);
-  return json(characterResponse(r), 200);
+  await enqueue(env, region, name, owner.token);
+  if (ctx && ctx.waitUntil) ctx.waitUntil(kickFetch(env, region, name, owner.token));
+  return queuedResponse(env, region, name, { justQueued: true }, wantPos, cached);
 }
 
-/** POST /import — the same gate, in bulk. */
-async function handleImport(env, request, ip) {
+/**
+ * GET /wait?region=&name=&since= — the long poll.
+ *
+ * Holds for up to 25s and answers the moment the drain stores a record newer than
+ * `since`, so the client's banner clears in seconds instead of on its 30s tick.
+ * `{done:false}` on timeout means "reconnect", not "failed".
+ *
+ * PRE-CHECK BEFORE HOLDING. Astrogem's version held the connection and polled KV
+ * for ANY name a stranger typed — about 34 KV reads per request, unauthenticated:
+ * a read amplifier anyone could point at the namespace. So: the bearer and the
+ * ownership check come first, then one cheap round of "is this lookup actually
+ * pending", and only a genuinely pending lookup is worth 25 seconds of polling.
+ *
+ * Every early answer pauses ~2s before returning, because the client reconnects
+ * the instant it sees {done:false} — without the pause a not-pending name becomes
+ * a tight loop against this Worker.
+ */
+async function handleWait(env, request, u) {
+  const v = validateNameRegion(u.searchParams.get("region"), u.searchParams.get("name"));
+  if (v.err) return v.err;
+  const name = v.name, region = v.region, key = charKey(region, name);
+  const since = parseInt(u.searchParams.get("since"), 10) || 0;
+  if (!env || !env.CHARS) return json({ done: false }, 200);
+
+  const token = bearer(request);
+  if (!token) {
+    await sleep(2000);
+    return json({ done: false, needSignIn: true, error: "not_signed_in",
+      message: "Sign in with lostark.bible to watch a lookup." }, 401);
+  }
+  const owner = await requireOwner(env, request);
+  if (owner.resp) return owner.resp;
+  if (!ownsCharacter(owner.chars, region, name).ok) {
+    await sleep(2000);
+    return json({ done: false, error: "not_yours", message: "That character is not on your roster." }, 403);
+  }
+
+  const isDone = function (rec) {
+    return rec && Array.isArray(rec.stats) && rec.stats.length && (rec.pulledAt || 0) > since;
+  };
+  const doneJson = function (rec) {
+    return json(Object.assign({ done: true }, characterResponse({ record: rec, cached: true })), 200);
+  };
+  const missJson = function (miss) {
+    return json({ done: false, notFound: true, error: "no_such_character",
+      message: (typeof miss === "string" && miss.length > 3) ? miss : "lostark.bible has no page for that character." }, 200);
+  };
+
+  const [rec0, miss0, q0] = await Promise.all([
+    kvGetJson(env, key),
+    env.CHARS.get(NOTFOUND_PREFIX + key),
+    env.CHARS.get(QUEUE_PREFIX + key)
+  ]);
+  if (isDone(rec0)) return doneJson(rec0);
+  if (miss0) return missJson(miss0);
+  if (q0 === null) {
+    // Not queued and nothing newer stored. One short grace re-check: a kick deletes
+    // its queue key a beat before the fresh record is readable here, so answering
+    // "nothing pending" immediately would end the watch one moment too early.
+    await sleep(2000);
+    const [rec1, q1] = await Promise.all([kvGetJson(env, key), env.CHARS.get(QUEUE_PREFIX + key)]);
+    if (isDone(rec1)) return doneJson(rec1);
+    if (q1 === null) return json({ done: false }, 200);
+  }
+
+  const deadline = Date.now() + 25000;
+  while (Date.now() < deadline) {
+    await sleep(1500);                     // the pre-check above already covered t=0
+    const rec = await kvGetJson(env, key);
+    if (isDone(rec)) return doneJson(rec);
+    const miss = await env.CHARS.get(NOTFOUND_PREFIX + key);
+    if (miss) return missJson(miss);       // dropped while we waited — say why, don't spin
+  }
+  return json({ done: false }, 200);
+}
+
+/**
+ * POST /import — the same gate, in bulk.
+ *
+ * Nothing is fetched inline any more: every accepted character is QUEUED and the
+ * drain fetches them one at a time, three seconds apart. Fetching the first few
+ * inline made an import three page loads long and, worse, put a second fetch lane
+ * next to the drain's — two lanes cannot honour one spacing floor between them.
+ */
+async function handleImport(env, request, ip, ctx) {
   const owner = await requireOwner(env, request);
   if (owner.resp) return owner.resp;
 
@@ -1565,41 +2496,40 @@ async function handleImport(env, request, ip) {
     if (!g.success) return json({ error: "busy", message: "Imports are backed up right now — try again in a minute.", rateLimited: true }, 429);
   }
 
+  const cfg = await getDrainConfig(env);
+  if (cfg.mode !== "run") return json({ unavailable: true, error: "unavailable", message: UNAVAILABLE_MSG + "." }, 503);
+
   const results = [];
-  let inline = 0;
+  let queued = 0;
   for (const raw of wanted) {
     const name = String(isObj(raw) ? raw.name : raw || "").trim();
     const region = normRegion((isObj(raw) && raw.region) || body.region || "NA");
-    if (!name) { results.push({ name: String(raw), status: "bad_name" }); continue; }
+    if (!name || name.length > 40) { results.push({ name: String(raw).slice(0, 40), status: "bad_name" }); continue; }
     if (!region) { results.push({ name: name, status: "bad_region" }); continue; }
     const owns = ownsCharacter(owner.chars, region, name);
     if (!owns.ok) { results.push({ name: name, region: region, status: "not_yours" }); continue; }
 
-    // A fresh record needs no fetch at all, whatever the budget.
-    const existing = await kvGetJson(env, charKey(region, name));
+    // A record inside the 7-day window needs no fetch at all, whatever the budget.
+    const ck = charKey(region, name);
+    const existing = await kvGetJson(env, ck);
     if (existing && (Date.now() - (existing.pulledAt || 0)) < CHAR_TTL_MS) {
       if (publish && !existing.published) {
         existing.published = true;
-        try { await env.CHARS.put(charKey(region, name), JSON.stringify(existing)); await markDirty(env, charKey(region, name)); } catch (e) {}
+        try { await env.CHARS.put(ck, JSON.stringify(existing)); await markDirty(env, ck); } catch (e) {}
       }
       results.push({ name: existing.name, region: region, status: "cached", pct: existing.score && existing.score.pct });
       continue;
     }
-
-    if (inline < IMPORT_INLINE) {
-      if (inline > 0) await sleep(IMPORT_DELAY_MS);          // polite: sequential, spaced
-      inline++;
-      const r = await loadCharacter(env, region, name, {
-        token: owner.token, publish: publish, regionVerified: owns.regionVerified
-      });
-      if (r.ok) results.push({ name: r.record.name, region: region, status: r.stale ? "stale" : "loaded", pct: r.record.score && r.record.score.pct });
-      else results.push({ name: name, region: region, status: r.body.error });
-    } else {
-      await enqueue(env, region, name);
-      results.push({ name: name, region: region, status: "queued" });
-    }
+    await enqueue(env, region, name, owner.token);
+    queued++;
+    results.push({ name: name, region: region, status: "queued" });
   }
-  return json({ ok: true, results: results, queuedDrainEveryMinutes: 1 }, 200);
+  // One kick, for the first queued character only — the rest are the drain's, at
+  // its pace. Kicking each of them would be twenty fetches with no spacing at all.
+  const first = results.find(function (r) { return r.status === "queued"; });
+  if (first && ctx && ctx.waitUntil) ctx.waitUntil(kickFetch(env, first.region, first.name, owner.token));
+  return json({ ok: true, results: results, queued: queued,
+    drainPerMin: cfg.drainPerMin, queuedDrainEveryMinutes: 1 }, 200);
 }
 
 /** POST /forget — a signed-in user takes their own characters off the board. */
@@ -1706,36 +2636,213 @@ async function handleAdminSeed(env, request) {
   return json({ ok: true, stored: out.filter(function (x) { return x.status === "stored"; }).length, results: out }, 200);
 }
 
-/** GET /admin/metrics — what is in the store and what is waiting. */
-async function handleAdminMetrics(env) {
-  if (!env || !env.CHARS) return json({ error: "no_kv" }, 503);
-  let chars = 0, queued = 0, dirty = 0, cursor;
+/** Count keys under a prefix. Cheaper and clearer than one prefix-less sweep. */
+async function countPrefix(env, prefix) {
+  let n = 0, cursor;
   do {
-    const res = await env.CHARS.list({ cursor: cursor, limit: 1000 });
-    for (const k of res.keys) {
-      if (k.name.indexOf(CHAR_PREFIX) === 0) chars++;
-      else if (k.name.indexOf(QUEUE_PREFIX) === 0) queued++;
-      else if (k.name.indexOf(DIRTY_PREFIX) === 0) dirty++;
-    }
+    const res = await env.CHARS.list({ prefix: prefix, cursor: cursor, limit: 1000 });
+    n += res.keys.length;
     cursor = res.list_complete ? null : res.cursor;
   } while (cursor);
-  const lw = parseInt((await env.CHARS.get(LASTWRITE_KEY)) || "0", 10);
-  const ba = parseInt((await env.CHARS.get(BUILTAT_KEY)) || "0", 10);
+  return n;
+}
+
+/**
+ * GET /admin/metrics — one call, four panels (ARCHITECTURE §3.7).
+ *
+ * Nested `queue` / `drain` / `drainLog` / `health` blocks, with the older flat
+ * fields kept beside them so nothing that read the first shape breaks.
+ *
+ * `health.probeArmed` IS A BOOLEAN. The token is never returned, not truncated,
+ * not hinted at — there is nothing on the admin page that could render one, and
+ * a credential in a response body is a credential in someone's browser cache.
+ *
+ * The queue is listed LIVE rather than read from the order snapshot: there is one
+ * admin, and seeing a just-enqueued character immediately is worth a list().
+ */
+async function handleAdminMetrics(env) {
+  if (!env || !env.CHARS) return json({ error: "no_kv" }, 503);
+  const [items, chars, dirty, lw, ba, dlog, cfg, usage, pv] = await Promise.all([
+    listQueueOrder(env).catch(function () { return []; }),
+    countPrefix(env, CHAR_PREFIX).catch(function () { return null; }),
+    countPrefix(env, DIRTY_PREFIX).catch(function () { return null; }),
+    env.CHARS.get(LASTWRITE_KEY).catch(function () { return null; }),
+    env.CHARS.get(BUILTAT_KEY).catch(function () { return null; }),
+    kvGetJson(env, DRAIN_LOG_KEY).catch(function () { return null; }),
+    getDrainConfig(env).catch(function () { return { mode: "run", drainPerMin: DRAIN_PER_MIN_DEFAULT }; }),
+    kvGetJson(env, USAGE_KEY).catch(function () { return null; }),
+    env.CHARS.get(PARSEVERSION_KEY).catch(function () { return null; })
+  ]);
+  const lastWrite = parseInt(lw, 10) || 0;
+  const builtAt = parseInt(ba, 10) || 0;
+  const drainLog = Array.isArray(dlog) ? dlog : [];
+  const now = Date.now();
+  const lastRun = drainLog.length ? drainLog[drainLog.length - 1].t : 0;
+  const list = items.slice(0, 500).map(function (it) {
+    // ts <= 1e12 is a FRONT SENTINEL (a requeue, ts=1), not a timestamp. Ageing it
+    // from the epoch would print a 57-year wait; the client prints "—" for null.
+    return { region: it.r, name: it.n, ts: it.t,
+      waitedS: it.t > 1e12 ? Math.round((now - it.t) / 1000) : null,
+      attempts: it.a || 0 };
+  });
   return json({
-    ok: true, characters: chars, queued: queued, dirty: dirty,
-    lastWrite: lw, snapshotBuiltAt: ba, modelSig: MODEL_SIG,
+    ok: true, nowMs: now,
+    // ---- §3.7 nested blocks ----
+    queue: { total: items.length, list: list, shown: list.length },
+    drain: {
+      mode: cfg.mode, perMin: cfg.drainPerMin, spacingMs: drainSpacingMs(cfg.drainPerMin),
+      lastRun: lastRun,
+      budgetUsed: (usage && usage.month === monthKey()) ? (usage.count | 0) : 0,
+      budgetCap: MONTHLY_CHAR_BUDGET,
+      budgetMonth: monthKey(),
+      nextProbeAt: cfg.mode === "probe" ? (cfg.lastProbe || 0) + (cfg.interval || PAUSE_PROBE_FIRST_MS) : null
+    },
+    drainLog: drainLog,
+    health: {
+      lastPull: lastWrite, lastSnapshot: builtAt,
+      probeArmed: !!(env && env.BIBLE_TOKEN),        // boolean only, forever
+      snapshotIntervalMs: SNAPSHOT_MIN_INTERVAL_MS
+    },
+    // ---- the flat fields the first version answered, kept as fallbacks ----
+    characters: chars, queued: items.length, dirty: dirty,
+    lastWrite: lastWrite, snapshotBuiltAt: builtAt,
+    modelSig: MODEL_SIG, parseVersion: parseInt(pv, 10) || 0,
     hasBibleToken: !!(env && env.BIBLE_TOKEN),
-    snapshot: "not built yet — ?list=1 is stubbed pending the architecture doc"
+    paused: cfg.mode !== "run"
   }, 200);
 }
 
-/** POST /admin/delete?region=&name= — takedown, for anyone who asks. */
-async function handleAdminDelete(env, u) {
-  const name = (u.searchParams.get("name") || "").trim();
-  const region = normRegion(u.searchParams.get("region") || "NA");
+/**
+ * POST /admin/control {mode, rate} — the drain switch.
+ *
+ * `rate` is clamped 1–20 here as well as in the page, because a control that
+ * trusts its client is not a control. Twenty is the ceiling the 3s floor implies;
+ * asking for more silently gets twenty.
+ */
+async function handleAdminControl(env, request, ctx) {
+  if (!env || !env.CHARS) return json({ error: "no_kv" }, 503);
+  let body = {};
+  try { body = await request.json(); } catch (e) {}
+  const cur = await getDrainConfig(env);
+  const next = { mode: cur.mode, drainPerMin: cur.drainPerMin };
+  let modeChanged = false;
+
+  const mode = body && body.mode;
+  if (mode != null) {
+    if (DRAIN_MODES.indexOf(mode) === -1) return json({ error: "bad_mode", message: "mode must be run, off or probe." }, 400);
+    if (mode !== cur.mode) modeChanged = true;
+    next.mode = mode;
+    // Entering probe deliberately probes AT ONCE and only then starts backing off:
+    // the common reason to press it is "I think it is back".
+    if (mode === "probe") { next.lastProbe = 0; next.interval = PAUSE_PROBE_FIRST_MS; }
+  }
+  if (body && body.rate != null) {
+    const rate = parseInt(body.rate, 10);
+    if (!Number.isFinite(rate) || rate < 1 || rate > DRAIN_PER_MIN_MAX) {
+      return json({ error: "bad_rate", message: "rate must be a whole number from 1 to " + DRAIN_PER_MIN_MAX + "." }, 400);
+    }
+    next.drainPerMin = rate;
+  }
+  await setDrainConfig(env, next);
+  // Coming out of "off" should feel immediate, not "some time in the next minute".
+  if (modeChanged && next.mode !== "off" && ctx && ctx.waitUntil) {
+    try { ctx.waitUntil(drainQueue(env)); } catch (e) {}
+  }
+  return json({ ok: true, config: { mode: next.mode, drainPerMin: next.drainPerMin, spacingMs: drainSpacingMs(next.drainPerMin) } }, 200);
+}
+
+/**
+ * POST /admin/dequeue {match|all} — evict queue items.
+ *
+ * Matching is on the KEY SUBSTRING, deliberately: some queued names are mojibake
+ * and their key cannot be rebuilt from a clean string, so "delete the item whose
+ * key contains this" is the only handle that always works.
+ */
+async function handleAdminDequeue(env, request) {
+  if (!env || !env.CHARS) return json({ error: "no_kv" }, 503);
+  let body = {};
+  try { body = await request.json(); } catch (e) {}
+  const all = !!(body && body.all);
+  const match = String((body && body.match) || "").toLowerCase();
+  if (!all && !match) return json({ error: "bad_request", message: "Send { match: \"<key substring>\" } or { all: true }." }, 400);
+
+  const keys = [];
+  let cursor;
+  do {
+    const res = await env.CHARS.list({ prefix: QUEUE_PREFIX, cursor: cursor, limit: 1000 });
+    for (const k of res.keys) {
+      if (k.name === Q_ORDER_KEY) continue;
+      if (all || k.name.toLowerCase().indexOf(match) !== -1) keys.push(k.name);
+    }
+    cursor = res.list_complete ? null : res.cursor;
+  } while (cursor);
+  for (const k of keys) { try { await env.CHARS.delete(k); } catch (e) {} }
+  // Always drop the order snapshot afterwards, or position reads keep answering
+  // from an order that still lists what was just evicted.
+  try { await env.CHARS.delete(Q_ORDER_KEY); } catch (e) {}
+  return json({ ok: true, removed: keys.length, keys: keys.slice(0, 200) }, 200);
+}
+
+/**
+ * POST /admin/rescore — re-score stored records against the current model and
+ * bump `parseVersion` so a client can tell its cached copies are behind.
+ *
+ * Cheap because the Worker stores RAW stats: nothing is refetched, nothing is
+ * asked of lostark.bible. Chunked at RESCORE_PER_CALL records because each one
+ * costs a read plus two writes and a Worker invocation gets ~1,000 subrequests;
+ * the answer says how many are left, so a big store is a few clicks.
+ */
+async function handleAdminRescore(env, request) {
+  if (!env || !env.CHARS) return json({ error: "no_kv" }, 503);
+  let body = {};
+  try { body = await request.json(); } catch (e) {}
+  const version = (parseInt(await env.CHARS.get(PARSEVERSION_KEY), 10) || 0) + (body && body.cursor ? 0 : 1);
+  if (!(body && body.cursor)) { try { await env.CHARS.put(PARSEVERSION_KEY, String(version)); } catch (e) {} }
+
+  const res = await env.CHARS.list({ prefix: CHAR_PREFIX, cursor: (body && body.cursor) || undefined, limit: RESCORE_PER_CALL });
+  const names = res.keys.map(function (k) { return k.name; });
+  const recs = await Promise.all(names.map(function (k) { return kvGetJson(env, k); }));
+  let done = 0, failed = 0;
+  for (let i = 0; i < recs.length; i++) {
+    const rec = recs[i];
+    if (!rec || !Array.isArray(rec.stats)) { failed++; continue; }
+    try {
+      rec.score = score(rec.stats);
+      if (Array.isArray(rec.loadouts)) {
+        for (const l of rec.loadouts) if (Array.isArray(l.stats)) l.score = briefScore(score(l.stats));
+      }
+      rec.modelSig = MODEL_SIG;
+      rec.scoredAt = Date.now();
+      rec.parseVersion = version;
+      await env.CHARS.put(names[i], JSON.stringify(rec));
+      await markDirty(env, names[i]);
+      done++;
+    } catch (e) { failed++; }
+  }
+  return json({ ok: true, parseVersion: version, rescored: done, failed: failed,
+    modelSig: MODEL_SIG,
+    cursor: res.list_complete ? null : res.cursor,
+    more: !res.list_complete }, 200);
+}
+
+/**
+ * POST /admin/delete {region, name} — takedown, for anyone who asks.
+ *
+ * Reads the BODY (§3.7 says POST with a body) and falls back to the query string,
+ * which is what it used to read and what the client still repeats. Neither carries
+ * a secret: the admin token is a header and stays one.
+ */
+async function handleAdminDelete(env, request, u) {
+  let body = {};
+  try { body = await request.json(); } catch (e) { /* query-string callers send no body */ }
+  const name = String((body && body.name) || u.searchParams.get("name") || "").trim();
+  const region = normRegion((body && body.region) || u.searchParams.get("region") || "NA");
   if (!name || !region) return json({ error: "bad_request", message: "name and region are required." }, 400);
   const key = charKey(region, name);
+  // markDirty AFTER the delete: the marker now points at a missing record, which is
+  // exactly how the snapshot rebuild learns to take the row off the board.
   try { await env.CHARS.delete(key); await markDirty(env, key); } catch (e) {}
+  try { await env.CHARS.delete(QUEUE_PREFIX + key); await env.CHARS.delete(Q_ORDER_KEY); } catch (e) {}
   return json({ ok: true, deleted: key }, 200);
 }
 
@@ -1810,10 +2917,11 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    // Every minute: drain a few queued characters, paced. The leaderboard
-    // snapshot rebuild belongs here too — dirty-gated and throttled on
-    // BUILTAT_KEY, ~30 min cadence — and lands with the snapshot work.
-    await drainQueue(env);
+    // Every minute: drain a few queued characters, paced, then rebuild the board
+    // snapshot if anything changed. The rebuild reads its throttle key first, so
+    // in the nine minutes out of ten when it has nothing to do it costs one get().
+    try { await drainQueue(env); } catch (e) { console.log("[cron] drain failed: " + ((e && e.message) || e)); }
+    try { await rebuildSnapshotIfChanged(env); } catch (e) { console.log("[cron] snapshot failed: " + ((e && e.message) || e)); }
   }
 };
 
@@ -1841,46 +2949,66 @@ async function handleFetch(request, env, ctx) {
   }
   const busyMsg = "The site is very busy right now — please try again shortly.";
 
-  // ---- admin (X-Admin-Token, fail closed) ----
+  // ---- admin (X-Admin-Token, fail closed, header only) ----
+  // Every mutation here is POST. A GET with side effects is a drive-by: one <img
+  // src> in any page a signed-in admin opens would fire it, and /admin/drain used
+  // to be exactly that — a GET that drained the queue.
   if (p.indexOf("/admin/") === 0) {
     if (!adminOk(request, env)) return json({ error: "forbidden", message: "Admin token required (X-Admin-Token header)." }, 403);
-    if (p === "/admin/seed")    return request.method === "POST" ? handleAdminSeed(env, request) : json({ error: "post_only" }, 405);
-    if (p === "/admin/delete")  return request.method === "POST" ? handleAdminDelete(env, u) : json({ error: "post_only" }, 405);
-    if (p === "/admin/metrics") return handleAdminMetrics(env);
-    if (p === "/admin/page")    return handleAdminPage(env, request, u);
-    if (p === "/admin/drain")   return json(Object.assign({ ok: true }, await drainQueue(env)), 200);
+    const post = request.method === "POST";
+    const postOnly = json({ error: "post_only", message: "This route is POST only — a GET with side effects is a drive-by risk." }, 405);
+    if (p === "/admin/seed")     return post ? handleAdminSeed(env, request) : postOnly;
+    if (p === "/admin/delete")   return post ? handleAdminDelete(env, request, u) : postOnly;
+    if (p === "/admin/control")  return post ? handleAdminControl(env, request, ctx) : postOnly;
+    if (p === "/admin/dequeue")  return post ? handleAdminDequeue(env, request) : postOnly;
+    if (p === "/admin/rescore")  return post ? handleAdminRescore(env, request) : postOnly;
+    if (p === "/admin/drain")    return post ? json(Object.assign({ ok: true }, await drainQueue(env)), 200) : postOnly;
+    if (p === "/admin/snapshot") return post ? json(Object.assign({ ok: true }, await rebuildSnapshotIfChanged(env, 0)), 200) : postOnly;
+    if (p === "/admin/feedback") return post ? handleAdminFeedbackMutate(env, request, u) : handleAdminFeedback(env);
+    if (p === "/admin/metrics")  return handleAdminMetrics(env);
+    if (p === "/admin/page")     return handleAdminPage(env, request, u);
     return json({ error: "not_found" }, 404);
   }
 
   // ---- writes ----
   if (request.method === "POST") {
+    // Feedback is not upstream work — it stays open while the site is degraded.
+    if (p === "/feedback") return handleFeedback(env, request, ip);
     if (degraded) return json({ error: "busy", message: busyMsg, rateLimited: true, degraded: true }, 429);
-    if (p === "/import") return handleImport(env, request, ip);
+    if (p === "/import") return handleImport(env, request, ip, ctx);
     if (p === "/forget") return handleForget(env, request);
-    return json({ error: "not_found", message: "POST /import or POST /forget." }, 404);
+    return json({ error: "not_found", message: "POST /feedback, /import or /forget." }, 404);
   }
 
   if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
 
-  // ---- leaderboard snapshot: NOT BUILT YET ----
-  // Answering 501 with the reason beats answering an empty list: an empty list
-  // reads as "nobody is on the board", which is a different and wrong story.
-  if (u.searchParams.get("list") === "1") {
+  // ---- the leaderboard snapshot ----
+  // The stored gzip bytes, as they are. Open to everyone, throttled against a
+  // held-down refresh key, and never rebuilt on demand — the cron owns the build.
+  if (u.searchParams.get("list") === "1" || p === "/list") {
     if (env.LB_THROTTLE) {
       const l = await env.LB_THROTTLE.limit({ key: ip });
       if (!l.success) return json({ error: "slow_down", message: "The board refreshes every few minutes — please wait a moment.", rateLimited: true }, 429);
     }
-    return json({
-      error: "not_built",
-      message: "The leaderboard snapshot is not built yet. Records are being stored and marked dirty; the snapshot format is pending the architecture doc.",
-      characters: []
-    }, 501);
+    return handleList(env, request.headers.get("Accept-Encoding"));
   }
 
+  // ---- the long poll ----
+  if (p === "/wait") return handleWait(env, request, u);
+
   // ---- the import round trip ----
+  // `degraded` is PASSED IN rather than answered here: a cached record must still
+  // be served while the site is busy. Only the fetch/enqueue branch is paused.
   if (p === "/character" || p === "/bracelet") {
-    if (degraded) return json({ error: "busy", message: busyMsg, rateLimited: true, degraded: true }, 429);
-    return handleCharacter(env, request, u, ip);
+    return handleCharacter(env, request, u, ip, ctx, degraded);
+  }
+
+  // ---- public drain status, for the "lookups are paused" notice ----
+  if (p === "/status") {
+    const cfg = await getDrainConfig(env);
+    return json({ ok: true, paused: cfg.mode !== "run", mode: cfg.mode,
+      message: cfg.mode !== "run" ? UNAVAILABLE_MSG + "." : "Character lookups are running." },
+      200, { "Cache-Control": "public, max-age=30" });
   }
 
   // ---- health ----
@@ -1891,7 +3019,8 @@ async function handleFetch(request, env, ctx) {
       profile: "canonical-default (normalizeProfile({}))",
       kv: !!(env && env.CHARS),
       bibleToken: !!(env && env.BIBLE_TOKEN),
-      routes: ["/character?name=&region=", "POST /import", "POST /forget", "?list=1 (stubbed)"]
+      routes: ["/character?name=&region=&queue=1&pos=1", "/wait?region=&name=&since=",
+               "/?list=1", "/status", "POST /feedback", "POST /import", "POST /forget"]
     }, 200);
   }
 
@@ -1907,5 +3036,17 @@ export const __test = {
   extractLoadouts: extractLoadouts, pickBestLoadout: pickBestLoadout,
   briefScore: briefScore, loadoutLabel: loadoutLabel,
   parseCharacterProfile: parseCharacterProfile, snapTo: snapTo, modal: modal,
-  MASTER_NODE_ID: MASTER_NODE_ID, GEM_AP_LEVEL: GEM_AP_LEVEL
+  MASTER_NODE_ID: MASTER_NODE_ID, GEM_AP_LEVEL: GEM_AP_LEVEL,
+  // Snapshot + drain pieces that are worth checking without a live KV. The drain
+  // is the code with the least live coverage — the enqueue gate needs a real
+  // lostark.bible sign-in — so its three-way failure branch, its breaker and its
+  // pacing are exercised against a stub KV and a stub fetch instead.
+  drainQueue: drainQueue, enqueue: enqueue, queueStatus: queueStatus,
+  getDrainConfig: getDrainConfig, setDrainConfig: setDrainConfig,
+  rebuildSnapshotIfChanged: rebuildSnapshotIfChanged,
+  encodeSnapshot: encodeSnapshot, snapshotEntry: snapshotEntry,
+  drainSpacingMs: drainSpacingMs, validateNameRegion: validateNameRegion,
+  isCharKey: isCharKey,
+  DRAIN_PER_MIN_MAX: DRAIN_PER_MIN_MAX, DRAIN_MIN_SPACING_MS: DRAIN_MIN_SPACING_MS,
+  SNAPSHOT_MIN_INTERVAL_MS: SNAPSHOT_MIN_INTERVAL_MS, CHAR_TTL_MS: CHAR_TTL_MS
 };

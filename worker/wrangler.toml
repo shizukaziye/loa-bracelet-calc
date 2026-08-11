@@ -38,9 +38,11 @@ compatibility_date = "2026-06-01"
 # CHARS — one character record per key ("c:<REGION>:<name lowercased>"), holding
 # the raw lostark.bible bracelet payload plus its score at the CANONICAL DEFAULT
 # profile. Also carries the per-user roster cache (rk:<sha256 of the token>, 5
-# min — the token itself is never stored), the fetch queue (q:), the not-found
-# markers (nf:), and the leaderboard's dirty markers (lb:dirty:). The Worker
-# degrades gracefully without this binding: lookups still work, nothing is cached.
+# min — the token itself is never stored), the fetch queue (q:, whose VALUE holds
+# the requester's token and whose METADATA never does), the not-found markers
+# (nf:), the feedback notes (fb:), the drain's own state (drain:, usage:) and the
+# leaderboard's dirty markers and gzipped snapshot (lb:). The Worker degrades
+# gracefully without this binding: lookups still work, nothing is cached.
 [[kv_namespaces]]
 binding = "CHARS"
 id = "1a00ee09d4194b6b9b0372b8e768e33f"
@@ -57,10 +59,13 @@ id = "1a00ee09d4194b6b9b0372b8e768e33f"
 binding = "OAUTH"
 id = "0e389b6995e04e6ba5ea08abc76a6716"
 
-# Cron: drain the queued page fetches, a few per minute, spaced ~3s apart. Only
-# POST /import overflow ever queues anything — a live /character lookup fetches
-# inline. The leaderboard snapshot rebuild will ride this same tick (dirty-gated,
-# throttled to ~30 min in code) when it is built.
+# Cron: drain the queued page fetches — at most 10 a minute by default, 20 at the
+# admin ceiling, and never closer together than 3 seconds — then rebuild the
+# leaderboard snapshot if a record changed (dirty-gated, throttled to 10 minutes
+# in code, and the throttle key is read before anything is listed).
+#
+# Every uncached /character?queue=1 lookup goes through that queue; nothing is
+# fetched inline on the UI path any more, so one pace governs all upstream work.
 [triggers]
 crons = ["* * * * *"]
 
@@ -79,6 +84,9 @@ period = 60
 # Per-USER character lookup throttle — keyed by a hash of the caller's OAuth
 # token, not the IP, so one person on two networks is still one person. ~1 fresh
 # character per 5s. Cached lookups never reach it.
+#
+# POST /feedback shares this namespace under its own "fb:<ip>" key: feedback was
+# the one write path with nothing between it and the hard cap.
 [[ratelimits]]
 name = "LOOKUP_THROTTLE"
 namespace_id = "2002"
@@ -105,8 +113,9 @@ namespace_id = "2004"
 limit = 1000
 period = 60
 
-# Site-wide cap on POST /import: ~10 a minute across all users, matching the
-# drain rate so the queue can never grow faster than the cron empties it.
+# Site-wide cap on ENQUEUES (POST /import and every uncached /character lookup):
+# ~10 a minute across all users, matching the default drain rate so the queue can
+# never grow faster than the cron empties it, however many people arrive at once.
 [[ratelimits]]
 name = "IMPORT_GATE"
 namespace_id = "2005"
