@@ -419,10 +419,22 @@ def trait_damage(traits, profile):
     """
     profile = profile if (profile and profile.get("role")) else normalize_profile(profile)
     traits = traits or {}
+    # See bracelet.js: "swift" and "swiftness" must be interchangeable or a
+    # Swiftness bracelet silently scores zero.
     w = profile.get("traitWeights") or {}
+
+    def _alias(o, key):
+        if o.get(key) is not None:
+            return o[key]
+        if key == "swift" and o.get("swiftness") is not None:
+            return o["swiftness"]
+        if key == "swiftness" and o.get("swift") is not None:
+            return o["swift"]
+        return 0
+
     s = 0.0
     for k in TRAIT_KEYS:
-        v = traits.get(k) or 0
+        v = _alias(traits, k) or 0
         if not v:
             continue
         if k == "crit":
@@ -431,7 +443,7 @@ def trait_damage(traits, profile):
             dcr = v * TRAIT_CRIT_PP_PER_POINT / 100.0
             s += to_d(crit_factor(profile, dcr, 0) / crit_factor(profile, 0, 0))
         else:
-            s += v * (w.get(k) or 0)
+            s += v * (_alias(w, k) or 0)
     return s
 
 

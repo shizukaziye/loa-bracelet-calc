@@ -600,17 +600,27 @@
   function traitDamage(traits, profile) {
     profile = profile && profile.role ? profile : normalizeProfile(profile);
     traits = traits || {};
+    // The decoder names the trait with the official family key ("swiftness"); the
+    // profile deck writes the short one ("swift"). They must mean the same thing or
+    // a Swiftness bracelet silently scores zero for that line — which is exactly
+    // what happened until 2026-08-11. Accept either spelling on both sides.
     var w = profile.traitWeights || {}, s = 0, i, k, v;
+    function alias(o, key) {
+      if (o[key] !== undefined && o[key] !== null) return o[key];
+      if (key === "swift" && o.swiftness !== undefined) return o.swiftness;
+      if (key === "swiftness" && o.swift !== undefined) return o.swift;
+      return 0;
+    }
     for (i = 0; i < TRAIT_KEYS.length; i++) {
       k = TRAIT_KEYS[i];
-      v = traits[k] || 0;
+      v = alias(traits, k) || 0;
       if (!v) continue;
       if (k === "crit") {
         if (profile.role === "support") continue;      // crit is a DPS number
         var dcr = v * TRAIT_CRIT_PP_PER_POINT / 100;
         s += toD(critFactor(profile, dcr, 0) / critFactor(profile, 0, 0));
       } else {
-        s += v * (w[k] || 0);
+        s += v * (alias(w, k) || 0);
       }
     }
     return s;

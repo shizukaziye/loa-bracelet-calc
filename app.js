@@ -81,7 +81,40 @@
   function blankRow() { return P.blankRow(); }
   function traitValues() { return P.traitValues(); }
   function traitBand() { return P.traitBand(); }
-  function buildProfile() { return P.profile(); }
+
+  // ---- character settings vs default settings ----
+  //
+  // Two ways to score the same bracelet, and the tool has always had both without
+  // a way to switch: the deck (this character, as imported and then edited) and
+  // the CANONICAL DEFAULT profile, Bracelet.normalizeProfile({}) — the one the
+  // leaderboard ranks everyone on. The banner's one button flips between them and
+  // every number below re-solves. The choice is persisted; it is a way of reading
+  // the tool, not a per-visit accident.
+  //
+  // Defaults mode only applies while a character is loaded, because that is when
+  // the toggle is on screen: a mode nobody can see must not silently change scores.
+  var DEFAULT_PROFILE = B.normalizeProfile({});
+  var PMODE_KEY = "bc_profile_mode";
+  var profileMode = "character";
+  try {
+    var pm = localStorage.getItem(PMODE_KEY);
+    if (pm === "default" || pm === "character") profileMode = pm;
+  } catch (e) { /* private mode */ }
+
+  function hasCharacter() { return !!(S.char && S.char.name); }
+  function onDefaults() { return profileMode === "default" && hasCharacter(); }
+  function buildProfile() { return onDefaults() ? DEFAULT_PROFILE : P.profile(); }
+
+  function setProfileMode(mode) {
+    mode = mode === "default" ? "default" : "character";
+    if (mode === profileMode) return;
+    profileMode = mode;
+    try { localStorage.setItem(PMODE_KEY, mode); } catch (e) { /* private mode */ }
+    renderCharHeader();
+    updateBasicsNote();
+    redrawSlots();          // the pickers are priced on the active profile
+    solveNow();
+  }
   function famGrades(grade) { return P.famGrades(grade); }
   function letterOf(val, grade) { return P.letterOf(val, grade); }
   var TRAIT_KEYS = P.TRAIT_KEYS, TRAIT_LABELS = P.TRAIT_LABELS;
@@ -707,6 +740,32 @@
       "#tab-calculator .bc-star.on{color:var(--high)}" +
       "#tab-calculator .bc-cache{display:inline-block;margin-left:10px;font-size:10px;font-weight:700;letter-spacing:.02em;color:var(--dim);background:var(--panel2);border:1px solid var(--border);border-radius:99px;padding:2px 9px;vertical-align:middle}" +
       "#tab-calculator .bc-cache.fresh{color:var(--good)}" +
+      // The banner reloads its own character on click — everything the panel does
+      // for a saved chip, for the character already on screen.
+      "#tab-calculator .bc-profwrap{cursor:pointer}" +
+      "#tab-calculator .bc-profwrap:hover .bc-name a{color:var(--accent)}" +
+      // ---- the three headline stats, astrogem's .gr-sum ----
+      "#tab-calculator .bc-sum{display:flex;gap:20px;flex-wrap:wrap;align-items:center;margin-top:10px}" +
+      "#tab-calculator .bc-sum .stat{display:flex;flex-direction:column}" +
+      "#tab-calculator .bc-sum .stat .k{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim)}" +
+      "#tab-calculator .bc-sum .stat .v{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums}" +
+      "#tab-calculator .bc-sum .stat .v.acc{color:var(--accent)}" +
+      "#tab-calculator .bc-sum .stat .v.gold{color:var(--high)}" +
+      "#tab-calculator .bc-rankbadge{display:inline-block;padding:2px 10px;border-radius:99px;font-weight:800;" +
+        "font-size:18px;line-height:1.4;color:#fff}" +
+      "#tab-calculator .bc-fieldrank{margin-top:6px;font-size:12px;opacity:.75;min-height:15px}" +
+      // ---- the character / default settings toggle ----
+      "#tab-calculator .bc-pmode{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px}" +
+      "#tab-calculator .bc-pmode .lab{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--dim);font-weight:700}" +
+      "#tab-calculator .bc-pmode .bc-pmodebtn{background:var(--panel2);border:1px solid var(--border);border-radius:99px;" +
+        "padding:6px 16px;font-size:12.5px;font-weight:700;font-family:inherit;cursor:pointer;color:var(--text);" +
+        "transition:border-color .12s,color .12s,background .12s}" +
+      "#tab-calculator .bc-pmode .bc-pmodebtn:hover{border-color:var(--accent);color:var(--accent)}" +
+      "#tab-calculator .bc-pmode .bc-pmodebtn.def{background:var(--accent);color:#06121f;border-color:var(--accent)}" +
+      "#tab-calculator .bc-pmode .bc-pmodenote{font-size:11px;color:var(--dim);line-height:1.5;max-width:56ch}" +
+      // Scoring on the defaults means the deck is not being read. Say so by dimming
+      // it, rather than leaving a live-looking panel that changes nothing.
+      "#tab-calculator #bc-deckhost.bc-deck-muted{opacity:.5}" +
       // ---- the bracelet panel ----
       "#tab-calculator .bc-hdrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}" +
       // An illegal-but-scored state (three combat traits, or fewer than two):
@@ -765,12 +824,26 @@
   }
 
   /**
-   * The deck goes into #bc-deckhost (profile.js builds and owns it), and the
-   * imported character's header into #bc-charhdr, between the deck and the
-   * bracelet it belongs to. Both are empty until something fills them.
+   * The hosts, top to bottom, in the order the astrogem grader stacks them:
+   *
+   *   #bc-import          the character panel — mode pills, the pull row, the
+   *                       saved-character grid (bible-import.js fills it)
+   *   #bc-refresh-banner  the queue: a thin bar over a cached bracelet, or the
+   *                       queued panel. Its own host so the calculator under it
+   *                       is never blanked
+   *   #bc-loadouts        the Raid / Chaos / Est. Raid pills, where astrogem has
+   *                       its preset pills
+   *   #bc-charhdr         the character banner: ★, class icon, name, cache pill,
+   *                       chips, the three headline stats, the field rank and the
+   *                       character/default settings toggle
+   *   #bc-deckhost        the control deck (profile.js builds and owns it)
+   *
+   * The banner sits ABOVE the deck on purpose: it is who the deck is describing.
+   * Every host is empty until something fills it.
    */
   function hostsMarkup() {
-    return '<div id="bc-deckhost"></div><div id="bc-charhdr"></div>';
+    return '<div id="bc-import"></div><div id="bc-refresh-banner"></div>' +
+      '<div id="bc-loadouts"></div><div id="bc-charhdr"></div><div id="bc-deckhost"></div>';
   }
 
   function braceletMarkup() {
@@ -807,6 +880,13 @@
     var note = $("bc-slotnote");
     if (!note) return;
     var base = P.baseStats(), p = buildProfile();
+    // Defaults mode: the deck's own numbers are not what anything below is scored
+    // on, so printing them here would be a lie of arrangement.
+    if (onDefaults()) {
+      note.textContent = "Scoring on the canonical default profile — the same one the leaderboard ranks everyone on. " +
+        "The control deck is dimmed because nothing below is reading it. Leave every granted slot empty for an unrolled bracelet.";
+      return;
+    }
     var msg = S.useOverride
       ? "Main stat " + nf(base.mainStatRaw) + " raw · weapon power " + nf(base.weaponPowerRaw) + " raw"
       : "Item level " + fx(P.ilvl(), 2) + " · main stat " + nf(base.mainStatRaw) + " raw · weapon power " + nf(base.weaponPowerRaw) + " raw";
@@ -1229,6 +1309,23 @@
       advisorHtml(lastSolve, profile, lines) +
       cutHtml(lastSolve, profile, lines) +
       breakdownHtml(profile, lines, lastSolve);
+    paintCharStats();          // the banner's headline stats read the same solve
+  }
+
+  /**
+   * Refresh the two LIVE figures in the character banner in place. In place,
+   * because a full renderCharHeader would rebuild the rank badge and the field
+   * rank too, and those are async — the banner would blink on every solve.
+   */
+  function paintCharStats() {
+    if (!lastSolve) return;
+    var p = $("bc-sum-pct");
+    if (p) p.textContent = fx(pct(lastSolve.currentScore), 2) + "%";
+    var w = $("bc-sum-worth");
+    if (w) {
+      var val = valueGold(lastSolve.expectedFinal);
+      w.textContent = (val >= 0 ? "" : "−") + gold(Math.abs(val));
+    }
   }
 
   // ------------------------------------------------------------------
@@ -1531,35 +1628,145 @@
     btn.title = on ? "Remove from saved characters" : "Save this character";
   }
 
-  /** How many granted lines the imported bracelet still has rolls for. */
+  /**
+   * The character banner — astrogem's loadout header, with our subject.
+   *
+   *   ★ · class icon · 30px name linking to lostark.bible · cache pill
+   *   chips: region · class · ilvl · bracelet grade · rolls left
+   *   three headline stats: BRACELET % · RANK · WORTH
+   *   the field rank ("Top 11% of Reapers (#3 of 24) · #9 of 30 tracked")
+   *   the character / default settings toggle
+   *
+   * The whole block is clickable and reloads its own character, so the banner and
+   * a saved chip do exactly the same thing. The ★, the name link and the toggle
+   * stop that click, because each of them means something else.
+   *
+   * BRACELET % and WORTH come from the live solve, so they follow the settings
+   * toggle. RANK and the field line come from the character's DEFAULT-profile
+   * score against the board — the board's number against the board's numbers, or
+   * the comparison would be ranking gear.
+   */
   function renderCharHeader() {
     var box = $("bc-charhdr");
     if (!box) return;
     var c = S.char;
-    if (!c || !c.name) { box.innerHTML = ""; box.style.display = "none"; return; }
+    if (!c || !c.name) { box.innerHTML = ""; box.style.display = "none"; setDeckMuted(false); return; }
     box.style.display = "";
+    setDeckMuted(onDefaults());
+
     var chips = "";
     if (c.region) chips += '<span class="bc-chip">' + esc(c.region) + "</span>";
     if (c["class"]) chips += '<span class="bc-chip">' + esc(c["class"]) + "</span>";
     if (c.itemLevel != null) chips += '<span class="bc-chip">ilvl <b>' + esc(Number(c.itemLevel).toLocaleString("en-US")) + "</b></span>";
     chips += '<span class="bc-chip">' + (S.grade === "relic" ? "Relic" : "Ancient") + "</span>";
     chips += '<span class="bc-chip">rolls left <b>' + S.rollsLeft + "</b></span>";
-    box.innerHTML = '<div class="panel"><div class="bc-prof">' +
+
+    // The live figures. Before the first solve lands they read "—" rather than a
+    // stale number from the bracelet that was on screen a moment ago.
+    var curTxt = "—", worthTxt = "—";
+    if (lastSolve) {
+      curTxt = fx(pct(lastSolve.currentScore), 2) + "%";
+      var val = valueGold(lastSolve.expectedFinal);
+      worthTxt = (val >= 0 ? "" : "−") + gold(Math.abs(val));
+    }
+
+    box.innerHTML = '<div class="panel">' +
+      '<div class="bc-prof bc-profwrap" id="bc-profwrap" title="Load ' + esc(c.name) + ' again — bracelet and character settings">' +
       '<button type="button" class="bc-star" id="bc-fav-star"></button>' +
       classIconHtml(c["class"]) +
       '<div class="bc-id">' +
       '<div class="bc-name"><a href="' + bibleUrl(c.region, c.name) + '" target="_blank" rel="noopener">' +
       esc(c.name) + "</a>" + cacheNoteHtml(c) + "</div>" +
       '<div class="bc-meta">' + chips + "</div>" +
-      "</div></div></div>";
+      "</div></div>" +
+      '<div class="bc-sum">' +
+      '<div class="stat"><span class="k">Bracelet %</span><span class="v acc" id="bc-sum-pct">' + curTxt + "</span></div>" +
+      '<div class="stat"><span class="k" data-gloss="A letter for the whole bracelet on the same ladder the model grades families with: its share of the best bracelet on the board. S is 90% of the best or better, A 70%, B 50%, C 30%, D 10%. Scored on the canonical default profile, like the board itself.">Rank</span>' +
+        '<span class="v" id="bc-sum-rank">—</span></div>' +
+      '<div class="stat"><span class="k">Worth</span><span class="v gold" id="bc-sum-worth">' + worthTxt + "</span></div>" +
+      "</div>" +
+      '<div class="bc-fieldrank" id="bc-fieldrank"></div>' +
+      profileModeHtml(c) +
+      "</div>";
+
     var star = $("bc-fav-star");
-    if (!star) return;
-    if (!window.Favorites) { star.style.display = "none"; return; }
-    paintStar(star, c.region, c.name);
-    star.onclick = function () {                             // onclick, not addEventListener:
-      window.Favorites.toggle(c.region, c.name);             // this node is rebuilt constantly
-      paintStar(star, c.region, c.name);
-    };
+    if (star) {
+      if (!window.Favorites) { star.style.display = "none"; }
+      else {
+        paintStar(star, c.region, c.name);
+        star.onclick = function (e) {                          // onclick, not addEventListener:
+          if (e && e.stopPropagation) e.stopPropagation();     // this node is rebuilt constantly
+          window.Favorites.toggle(c.region, c.name);
+          paintStar(star, c.region, c.name);
+        };
+      }
+    }
+
+    // Clicking the banner loads this character again — the same path a saved chip
+    // takes, so the bracelet AND the character settings both come back.
+    var wrap = $("bc-profwrap");
+    if (wrap) {
+      wrap.onclick = function (e) {
+        var t = e && e.target;
+        if (t && t.closest && (t.closest("a") || t.closest("button"))) return;
+        var imp = window.BraceletImport;
+        if (imp && imp.loadCharacter) imp.loadCharacter(c.region, c.name);
+      };
+    }
+
+    var pbtn = $("bc-pmode-btn");
+    if (pbtn) {
+      pbtn.onclick = function (e) {
+        if (e && e.stopPropagation) e.stopPropagation();
+        setProfileMode(onDefaults() ? "character" : "default");
+      };
+    }
+
+    fillFieldRank(c);
+  }
+
+  /** The one two-state button, and the sentence that says which side is live. */
+  function profileModeHtml(c) {
+    var def = onDefaults();
+    var who = esc(c.name);
+    return '<div class="bc-pmode"><span class="lab">Scoring on</span>' +
+      '<button type="button" class="bc-pmodebtn' + (def ? " def" : "") + '" id="bc-pmode-btn">' +
+      (def ? "Default settings" : "Character settings") + "</button>" +
+      '<span class="bc-pmodenote">' +
+      (def
+        ? "Every number below is on the canonical default profile — the one the leaderboard ranks everyone on. " +
+          "The control deck is ignored until you switch back."
+        : "Every number below is on the settings in the deck, which " + who + "'s character page filled in and you can edit. " +
+          "Switch to the defaults to see the figure the leaderboard ranks.") +
+      "</span></div>";
+  }
+
+  function setDeckMuted(on) {
+    var host = $("bc-deckhost");
+    if (host) host.className = on ? "bc-deck-muted" : "";
+  }
+
+  /**
+   * The rank badge and the field-rank line, both off the baked board. Async: the
+   * board is one fetch, session-cached. A late answer is dropped if a different
+   * character has taken the banner in the meantime.
+   */
+  function fillFieldRank(c) {
+    var imp = window.BraceletImport;
+    if (!imp || !imp.fieldRank || c.defaultPct == null) return;
+    imp.fieldRank(c, function (r) {
+      var cur = S.char;
+      if (!cur || cur.name !== c.name || cur.region !== c.region) return;   // superseded
+      var el = $("bc-fieldrank");
+      if (el) el.textContent = r.text;
+      var rk = $("bc-sum-rank");
+      if (rk) {
+        rk.innerHTML = '<span class="bc-rankbadge" style="background:' +
+          (GRADE_COLOR[r.letter] || GRADE_COLOR.F) + '">' + esc(r.letter) + "</span>";
+        rk.title = "Worth " + fx(c.defaultPct, 2) + "% on default settings — " +
+          Math.round(r.share * 100) + "% of the best bracelet on the board.";
+      }
+    });
   }
 
   // ------------------------------------------------------------------
@@ -1623,21 +1830,60 @@
   /**
    * What of a character page's own numbers we can honestly put in the deck.
    *
-   * Today that is item level, and item level alone: the roster payload carries an
-   * average, and the six honing sliders are what the model reads. An average maps
-   * to a uniform honing level (Serca 0 is 1675, every level is +5), which is a
-   * derivation and not a measurement — so every slider it sets is MARKED, editable,
-   * and reverts to a "suggests" note the moment it is touched. Weapon power, main
-   * stat, crit rate, crit damage and gem levels join this list when the worker is
-   * deployed and the character page is being read directly.
+   * ITEM LEVEL is always there: the roster and the page both carry an average, and
+   * the six honing sliders are what the model reads. An average maps to a uniform
+   * honing level (Serca 0 is 1675, every level is +5), which is a derivation and
+   * not a measurement — so every slider it sets is MARKED, editable, and reverts to
+   * a "suggests" note the moment it is touched.
+   *
+   * THE REST arrives only when the Worker reads the character page directly and
+   * sends the `profile` block of ARCHITECTURE §1.1. Each field is applied only if
+   * the record actually carries it — nothing here invents a number:
+   *
+   *   weaponPower + mainStat  -> the raw override pair, and the override switch
+   *                              with them, because a raw main stat that the honing
+   *                              sliders then overwrite would be worse than none
+   *   gemLevels               -> the one gem-level control
+   *   critRate / critDamage   -> the first skill row's crit numbers
+   *
+   * Everything else the deck holds — fight shares, weights, the economy knobs — is
+   * judgment, not data, and is never imported. Nothing about the bracelet itself
+   * comes through here; that is the patch.
    */
   function importProfileValues(c) {
+    if (!c) return;
+    var vals = {}, i, any = false;
     var G = window.BraceletGearData;
-    if (!c || !G || c.itemLevel == null) return;
-    var lvl = clamp(Math.round((Number(c.itemLevel) - G.ILVL0) / G.ILVL_STEP), 0, 25);
-    if (!isFinite(lvl)) return;
-    var vals = {}, i, keys = ["head", "shoulder", "chest", "pants", "gloves", "weapon"];
-    for (i = 0; i < keys.length; i++) vals["gear." + keys[i]] = lvl;
+
+    if (G && c.itemLevel != null) {
+      var lvl = clamp(Math.round((Number(c.itemLevel) - G.ILVL0) / G.ILVL_STEP), 0, 25);
+      if (isFinite(lvl)) {
+        var keys = ["head", "shoulder", "chest", "pants", "gloves", "weapon"];
+        for (i = 0; i < keys.length; i++) vals["gear." + keys[i]] = lvl;
+        any = true;
+      }
+    }
+
+    var pr = c.profile;
+    if (pr) {
+      var wp = num(pr.weaponPower, NaN), ms = num(pr.mainStat, NaN);
+      // Both or neither: the override pair is one setting, and half of it is worse
+      // than none — the model would then read one raw number and one derived one.
+      if (isFinite(wp) && wp > 0 && isFinite(ms) && ms > 0) {
+        vals["ov.weaponPowerRaw"] = Math.round(wp);
+        vals["ov.mainStatRaw"] = Math.round(ms);
+        vals.useOverride = true;
+        any = true;
+      }
+      var gl = num(pr.gemLevels, NaN);
+      if (isFinite(gl) && gl >= 6 && gl <= 10) { vals["kit.gems"] = Math.round(gl); any = true; }
+      var cr = num(pr.critRate, NaN);
+      if (isFinite(cr) && cr > 0 && cr <= 100) { vals["skills.0.cr"] = cr; any = true; }
+      var cd = num(pr.critDamage, NaN);
+      if (isFinite(cd) && cd > 0) { vals["skills.0.cd"] = cd; any = true; }
+    }
+
+    if (!any) { P.setCharacter(c); return; }
     P.applyImported(vals, c);
   }
 
