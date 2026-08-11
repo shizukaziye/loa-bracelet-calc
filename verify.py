@@ -259,8 +259,15 @@ check_true("analytic.traitSolve.finalShift",
 check_true("analytic.traitSolve.gainUnchanged", abs(_with["gain"] - _plain["gain"]) < 1e-9)
 check_true("analytic.traitSolve.dpUnchanged", _with["stats"]["states"] == _plain["stats"]["states"])
 check_true("analytic.traitSolve.pImproveUnchanged", abs(_with["pImprove"] - _plain["pImprove"]) < 1e-12)
+# See verify.js: worth is E[max(0, final% - baseline%)] x gpd, recomputed from this
+# live solve's own distribution rather than restating the formula.
+_w_exp = 0.0
+for _wr in _with["finalScore"]["cdf"]:
+    _w_over = B.damage_percent(_wr["score"]) - _t.get("baselinePct", 0)
+    if _w_over > 0:
+        _w_exp += _wr["p"] * _w_over
 check_true("analytic.traitSolve.valueGold",
-           abs(_with["valueGold"] - _with["expectedFinal"] * _t["goldPer1Pct"]) < 1e-3)
+           abs(_with["valueGold"] - _w_exp * _t["goldPer1Pct"]) < 1e-6)
 
 # ================= 4c. family letter grades =================
 for c in refs["familyGrades"]:
@@ -435,7 +442,11 @@ _three_slot = next(c for c in refs["solves"] if "ancient, 3 slots" in c["label"]
 _relic = next(c for c in refs["solves"] if "relic, 2 slots" in c["label"])
 check_true("analytic.threeBeatsTwo", _three_slot["expectedFinal"] > _two_slot["expectedFinal"])
 check_true("analytic.ancientBeatsRelic", _two_slot["expectedFinal"] > _relic["expectedFinal"])
-check_true("analytic.valueGold", abs(_three_slot["valueGold"] - _three_slot["expectedFinal"] * 30000) < 1e-3)
+# See verify.js: at baseline 0 the worth is never negative, and by Jensen it is at
+# least damage_percent(expectedFinal) x gpd, since the log->percent map is convex.
+check_true("analytic.valueGoldNeverNegative", _three_slot["valueGold"] >= 0)
+check_true("analytic.valueGoldJensen",
+           _three_slot["valueGold"] >= B.damage_percent(_three_slot["expectedFinal"]) * 30000 - 1e-6)
 
 # ================= 9. advise =================
 _setup = refs["adviseSetup"]

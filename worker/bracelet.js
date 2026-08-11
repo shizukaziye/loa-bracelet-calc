@@ -146,23 +146,83 @@ const BROWSER_UA =
 const CHAR_PREFIX  = "c:";          // c:<region>:<name lowercased> -> the character record
 const ROSTER_PREFIX = "rk:";        // rk:<sha256(token) prefix>    -> the caller's verified roster, cached
 const DIRTY_PREFIX = "lb:dirty:";   // lb:dirty:<char key>          -> "this record changed since the last snapshot"
-const QUEUE_PREFIX = "q:";          // q:<char key>                 -> queued page fetch (NO token inside; see enqueue)
+const QUEUE_PREFIX = "q:";          // q:<char key>                 -> queued page fetch. VALUE holds the requester's
+                                    //                                 token; METADATA never does (see enqueue).
 const NOTFOUND_PREFIX = "nf:";      // nf:<char key>                -> short-lived "no such page", so a typo isn't refetched in a loop
-const BUILTAT_KEY = "lb:builtat";   // ms the snapshot was last rebuilt (read by the throttle; unused while ?list=1 is stubbed)
+const FB_PREFIX = "fb:";            // fb:<ts>-<rand6>              -> one feedback note (see §3.6)
+const BUILTAT_KEY = "lb:builtat";   // ms the snapshot was last rebuilt — READ FIRST by the rebuild throttle
 const LASTWRITE_KEY = "lb:lastwrite"; // ms of the most recent real lostark.bible pull
 
-const CHAR_TTL_MS   = 6 * 60 * 60 * 1000;   // a stored bracelet is "fresh" for 6h (design doc: ~6h)
+const CHAR_TTL_MS   = 7 * 24 * 60 * 60 * 1000;  // §2.3: a record is "fresh" for 7 days. Cached records are served at
+                                                // ANY age and only LABELLED `stale` past this — never auto-refetched.
+                                                // The Re-pull button (refresh=1) is the refresh path, deliberately.
 const ROSTER_TTL_S  = 5 * 60;               // the ownership check costs one extra fetch per 5 min, not one per click
 const NOTFOUND_TTL_S = 60 * 60;             // remember not-found for an hour; self-corrects if it was transient
 const QUEUE_TTL_S   = 3 * 24 * 3600;        // a queued fetch expires after 3 days if never drained
 const DIRTY_TTL_S   = 7 * 24 * 3600;        // safety net; the rebuild normally clears the marker
 
 const IMPORT_MAX      = 24;    // characters accepted in one POST /import (a big roster, no more)
-const IMPORT_INLINE    = 3;    // fetched inline before the rest are queued — keeps the request fast and the site polite
-const IMPORT_DELAY_MS  = 1200; // pause between inline page fetches
-const DRAIN_PER_RUN    = 3;    // queued characters fetched per cron minute
-const DRAIN_DELAY_MS   = 3000; // pause between drained page fetches (~1 req / 3s, astrogem's proven pace)
-const DRAIN_BUDGET_MS  = 45000;// stop a drain run well inside the 60s cron
+
+// ---------------------------------------------------------------------------
+// Queue, drain and the circuit breaker
+// ---------------------------------------------------------------------------
+
+const Q_ORDER_KEY = "q:order";          // cron-maintained ordered queue snapshot: position/metrics read it
+                                        // instead of paying a list(). An enqueue DELETES it.
+const Q_ORDER_TTL_MS = 90 * 1000;       // trust the snapshot for 90s (rewritten every active drain minute)
+const Q_ORDER_IDLE_TTL_MS = 10 * 60 * 1000; // an EMPTY snapshot short-circuits the whole cron drain for up to 10 min
+                                        // -> one read per idle minute instead of a lock write + a list.
+const DRAIN_LOCK_KEY = "drain:lock";    // serializes drains (cron + enqueue kicks) so two never double-fetch
+const DRAIN_CONFIG_KEY = "drain:config";// { mode, drainPerMin, lastProbe, interval } — set by POST /admin/control
+const DRAIN_LOG_KEY = "drain:log";      // rolling ~1h of per-run entries, for GET /admin/metrics
+const DRAIN_LOG_MAX_MS = 60 * 60 * 1000;
+const LASTFETCH_KEY = "drain:lastfetch";// ms of the last upstream CHARACTER PAGE fetch — the kick spaces itself off it
+const USAGE_KEY = "usage:drained";      // { month:"YYYY-MM", count } — the monthly budget guard
+
+const DRAIN_MODES = ["run", "off", "probe"];
+const DRAIN_PER_MIN_DEFAULT = 10;       // §2.4: default 10/min…
+const DRAIN_PER_MIN_MAX    = 20;        // …hard ceiling 20/min, because 60000/20 = 3000ms and…
+const DRAIN_MIN_SPACING_MS = 3000;      // …THREE SECONDS BETWEEN PAGE FETCHES IS A CONSTRAINT, NOT A SETTING.
+                                        // Shizu set it; every path that touches a character page — drain,
+                                        // kick, import — honours it. Raising the rate cannot lower it: the
+                                        // pace is max(DRAIN_MIN_SPACING_MS, 60000/rate).
+const DRAIN_BUDGET_MS  = 50000;         // stop a run at ~50s so it never overruns the 60s cron
+const PAUSE_FAIL_LIMIT = 5;             // consecutive transient failures that trip the breaker -> "probe"
+const PAUSE_PROBE_FIRST_MS = 60 * 1000; // first re-probe ~1 min after tripping (catch a quick recovery)…
+const PAUSE_PROBE_MAX_MS = 30 * 60 * 1000; // …then ×2 per failed probe, capped at 30 min. A long outage costs
+                                        // a handful of requests instead of one a minute.
+const MAX_FETCH_ATTEMPTS = 5;           // a queued item that fails this many times is DROPPED, so one
+                                        // permanently-broken name can't sit at the head starving the rest
+const MONTHLY_CHAR_BUDGET = 100000;     // characters cached per calendar month, hard stop. Deliberately well
+                                        // under the account's 1M KV writes/month — which this Worker SHARES
+                                        // with astrogem-bible, so it may not spend the whole budget alone.
+const UNAVAILABLE_MSG = "Character lookups are temporarily unavailable";
+
+// ---------------------------------------------------------------------------
+// The leaderboard snapshot (ARCHITECTURE §1.2 / §2.5)
+// ---------------------------------------------------------------------------
+
+const SNAPSHOT_GZ_KEY = "lb:snapshot:gz";   // the SERVED payload: the §1.2 compact form, gzipped
+const SNAPSHOT_SRC_KEY = "lb:chars:gz";     // the MUTATION source: the same characters as plain objects,
+                                            // gzipped. The served form is index-packed against string
+                                            // tables, so upserting one row into it means rebuilding the
+                                            // tables; keeping the objects is cheaper than unpacking.
+const SNAPSHOT_MIN_INTERVAL_MS = 10 * 60 * 1000;  // Shizu's number: rebuild at most every 10 minutes
+const REBUILD_CURSOR_KEY = "lb:rebuild:cursor";   // { c } — present while a from-scratch build is in flight
+const REBUILD_ACC_KEY = "lb:rebuild:acc:gz";      // the rows accumulated so far, gzipped
+const REBUILD_KEYS_PER_RUN = 750;                 // record reads per tick. Astrogem's UNCHUNKED version blew
+                                                  // the ~1000-subrequest limit at ~5.5k characters, died every
+                                                  // tick, and left its board permanently empty.
+const PARSEVERSION_KEY = "lb:parseversion";       // bumped by POST /admin/rescore
+const RESCORE_PER_CALL = 150;                     // records rescored per admin call (reads+writes stay <1000)
+
+// ---------------------------------------------------------------------------
+// Feedback (§3.6)
+// ---------------------------------------------------------------------------
+
+const FB_MSG_MAX = 2000, FB_TYPE_MAX = 40, FB_CONTACT_MAX = 80, FB_UA_MAX = 160;
+const FB_TTL_S = 90 * 24 * 3600;   // 90 days. `contact` can hold PII and must not sit forever.
+const FB_LIST_MAX = 200;           // newest notes the admin read returns — caps it at ≤200 gets
 
 // ---------------------------------------------------------------------------
 // Scoring — the CANONICAL DEFAULT profile, and nothing else
@@ -1155,18 +1215,26 @@ async function fetchCharacterPage(env, region, name, userToken) {
   if (tok) headers["Authorization"] = "Bearer " + tok;
 
   let resp;
-  try { resp = await fetch(url, { headers: headers, redirect: "follow" }); }
-  catch (e) { return { ok: false, status: 502, error: "upstream_unreachable", message: "lostark.bible did not answer." }; }
+  try {
+    // TIMEOUT EVERY UPSTREAM FETCH. Astrogem has no timeout anywhere, and one hung
+    // connection there eats the entire 50s drain budget — a single slow character
+    // costs every character behind it. Ten seconds is generous for an HTML page.
+    resp = await fetch(url, { headers: headers, redirect: "follow", signal: AbortSignal.timeout(10000) });
+  }
+  catch (e) { return { ok: false, status: 502, error: "upstream_unreachable", message: "lostark.bible did not answer.", upstreamStatus: 0 }; }
 
   if (resp.status === 404) {
-    return { ok: false, status: 404, error: "no_such_character", message: "lostark.bible has no page for that character." };
+    return { ok: false, status: 404, error: "no_such_character", message: "lostark.bible has no page for that character.", upstreamStatus: 404 };
   }
   if (!resp.ok) {
     const authIssue = resp.status === 401 || resp.status === 403;
+    // `upstreamStatus` is the REAL lostark.bible status behind our 502, and the drain
+    // classifies on it: 401/403 is one dead token (drop the item), any other 4xx is a
+    // site-wide block (trip the breaker). Collapsing both to "502" loses that distinction.
     return { ok: false, status: 502, error: "upstream_" + resp.status,
       message: "lostark.bible returned HTTP " + resp.status + "." +
         (authIssue ? " That usually means the BIBLE_TOKEN secret is missing or stale." : ""),
-      authIssue: authIssue || undefined };
+      authIssue: authIssue || undefined, upstreamStatus: resp.status };
   }
 
   const html = await resp.text();
@@ -1286,11 +1354,20 @@ async function loadCharacter(env, region, name, opts) {
       try { await env.CHARS.put(NOTFOUND_PREFIX + key, "1", { expirationTtl: NOTFOUND_TTL_S }); } catch (e) {}
     }
     if (stale) {
+      // SERVE STALE ON ERROR — mandatory, not optional: lostark.bible rate-limits
+      // Cloudflare egress IPs specifically, so this Worker can see a 429 for a page a
+      // home connection loads fine. An old record beats an error every time.
+      //
+      // `fetchError` rides along because the DRAIN must not read this as a success:
+      // ok:true with a stale record means "the caller got something", not "the page
+      // was fetched". Without it the drain would delete the queue item and never retry.
       return { ok: true, cached: true, stale: true,
         staleHours: Math.round((Date.now() - stale.pulledAt) / 3600000),
-        staleReason: res.message || res.error, record: stale };
+        staleReason: res.message || res.error, record: stale,
+        fetchError: { status: res.status, error: res.error, upstreamStatus: res.upstreamStatus || null } };
     }
-    return { ok: false, status: res.status, body: { error: res.error, message: res.message, meta: res.meta } };
+    return { ok: false, status: res.status, upstreamStatus: res.upstreamStatus || null,
+      body: { error: res.error, message: res.message, meta: res.meta } };
   }
 
   const now = Date.now();

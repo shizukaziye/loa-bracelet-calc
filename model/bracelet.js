@@ -1160,6 +1160,14 @@
       return cdf.length ? cdf[cdf.length - 1].score : cur;
     }
 
+    // ---- worth: E[ max(0, final% - baseline%) ] x gold-per-1% ----
+    var valueGold = 0, pBeat = 0;
+    for (i = 0; i < cdf.length; i++) {
+      var over = damagePercent(cdf[i].score) - baselinePct;
+      if (over > 0) { valueGold += cdf[i].p * over; pBeat += cdf[i].p; }
+    }
+    valueGold *= goldPer1Pct;
+
     var ctx = {
       grade: grade, profile: profile, slots: slots, rolls: R,
       atoms: atoms, stateAtoms: stateAtoms, codec: codec,
@@ -1175,7 +1183,20 @@
       traitDamage: traitBonus,
       expectedFinal: expectedFinal,
       gain: expectedFinal - cur,
-      valueGold: (expectedFinal - baselinePct) * goldPer1Pct,
+      // What the bracelet is WORTH, in gold.
+      //
+      // Two things this is not. It is not (mean - baseline): a bracelet you would
+      // not use is worth nothing, never a negative number, so the payoff is
+      // truncated at zero and the expectation is taken over the whole final
+      // distribution — you are paid only in the outcomes that beat the baseline,
+      // weighted by how often they happen and by how far they clear it.
+      //
+      // And it is not measured in log points. `expectedFinal` is a log-space
+      // score; the baseline the user types is a damage percentage. Comparing
+      // them directly (as this did) mixes units and understates the value by a
+      // few percent. Convert each outcome to damage % first.
+      valueGold: valueGold,
+      pBeatBaseline: pBeat,
       bestLockMask: maskEV.length ? maskEV[0] : null,
       maskEV: maskEV,
       evByRollsLeft: evByRollsLeft,

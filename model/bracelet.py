@@ -920,6 +920,19 @@ def solve(opts):
            "layers": layers, "policies": policies, "score": score,
            "goldPer1Pct": gold_per_1pct, "baselinePct": baseline_pct}
 
+    # See bracelet.js: worth is E[max(0, final% - baseline%)] x gold-per-1%.
+    # Truncated at zero — a bracelet you would not use is worth nothing, never a
+    # negative — and converted out of log space first, since the baseline the user
+    # types is a damage percentage rather than a log score.
+    _value_gold = 0.0
+    _p_beat = 0.0
+    for _c in cdf:
+        _over = damage_percent(_c["score"]) - baseline_pct
+        if _over > 0:
+            _value_gold += _c["p"] * _over
+            _p_beat += _c["p"]
+    _value_gold *= gold_per_1pct
+
     return {
         "grade": grade, "slots": slots,
         "unrolled": unrolled,
@@ -928,7 +941,8 @@ def solve(opts):
         "traitDamage": trait_bonus,
         "expectedFinal": expected_final,
         "gain": expected_final - cur,
-        "valueGold": (expected_final - baseline_pct) * gold_per_1pct,
+        "valueGold": _value_gold,
+        "pBeatBaseline": _p_beat,
         "bestLockMask": mask_ev[0] if mask_ev else None,
         "maskEV": mask_ev,
         "evByRollsLeft": ev_by_rolls_left,

@@ -264,8 +264,18 @@ refs.traits.forEach(function (c, i) {
   checkTrue("analytic.traitSolve.gainUnchanged", Math.abs(withT.gain - plain.gain) < 1e-9);
   checkTrue("analytic.traitSolve.dpUnchanged", withT.stats.states === plain.stats.states);
   checkTrue("analytic.traitSolve.pImproveUnchanged", Math.abs(withT.pImprove - plain.pImprove) < 1e-12);
+  // Worth is no longer the log score times gpd — it is E[max(0, final% - baseline%)]
+  // x gpd. Recomputed here straight from this live solve's own distribution, which
+  // is a stronger check than the old identity: it catches a wrong truncation or a
+  // missed unit conversion, not just a scaling slip.
+  var wExp = 0;
+  for (var wi = 0; wi < withT.finalScore.cdf.length; wi++) {
+    var wr = withT.finalScore.cdf[wi];
+    var wOver = B.damagePercent(wr.score) - (t.baselinePct || 0);
+    if (wOver > 0) wExp += wr.p * wOver;
+  }
   checkTrue("analytic.traitSolve.valueGold",
-    Math.abs(withT.valueGold - withT.expectedFinal * t.goldPer1Pct) < 1e-3);
+    Math.abs(withT.valueGold - wExp * t.goldPer1Pct) < 1e-6);
 })();
 
 // ================= 4c. family letter grades =================
@@ -489,9 +499,16 @@ refs.solves.forEach(function (c, i) {
   });
   checkTrue("analytic.threeBeatsTwo", three.expectedFinal > two.expectedFinal);
   checkTrue("analytic.ancientBeatsRelic", two.expectedFinal > relic.expectedFinal);
-  // valueGold is just the score gap times gold per 1% (the refs values are
-  // rounded at 1e-9, which 30000× amplifies — compare loosely).
-  checkTrue("analytic.valueGold", Math.abs(three.valueGold - three.expectedFinal * 30000) < 1e-3);
+  // valueGold is E[max(0, final% - baseline%)] x gold-per-1%, not the log-space
+  // gap it used to be. These cases run at baseline 0, which pins two properties
+  // without restating the formula:
+  //   never negative — a bracelet you would not use is worth nothing; and
+  //   >= damagePercent(expectedFinal) x gpd, because x -> 100(e^(x/100)-1) is
+  //   convex, so by Jensen the mean of the converted outcomes is at least the
+  //   conversion of the mean.
+  checkTrue("analytic.valueGoldNeverNegative", three.valueGold >= 0);
+  checkTrue("analytic.valueGoldJensen",
+    three.valueGold >= B.damagePercent(three.expectedFinal) * 30000 - 1e-6);
 })();
 
 // ================= 9. advise =================
