@@ -96,6 +96,64 @@ var profileVariants = [
     damage: r9(B.lineDamage({ cat: "special", family: c.family, tier: c.tier }, c.grade, p)) };
 });
 
+// ---------------------------------------------------------------- traits
+// The bracelet's two FIXED combat-trait lines. Crit converts exactly (35 pp of
+// crit rate per 699 points) and runs through the crit model; Spec and
+// Swiftness are scored by the class's own weight, in points per 100 points.
+var traitCases = [
+  { label: "default: crit 120 + spec 120", traits: { crit: 120, spec: 120 }, profile: {} },
+  { label: "relic band top: crit 100 + spec 100", traits: { crit: 100, spec: 100 }, profile: {} },
+  { label: "band floor: crit 61 + swift 61", traits: { crit: 61, swift: 61 }, profile: {} },
+  { label: "spec + swift only", traits: { spec: 120, swift: 96 }, profile: {} },
+  { label: "crit only", traits: { crit: 120 }, profile: {} },
+  { label: "crit at cap (crit rate already 100%)", traits: { crit: 120 },
+    profile: { skills: [{ share: 1, critRate: 1.0, critDamage: 2.8 }] } },
+  { label: "zero weights", traits: { crit: 120, spec: 120 },
+    profile: { traitWeights: { spec: 0, swift: 0 } } },
+  { label: "heavy spec weight", traits: { spec: 120 }, profile: { traitWeights: { spec: 0.04 } } },
+  { label: "no traits", traits: {}, profile: {} }
+].map(function (c) {
+  var p = B.normalizeProfile(c.profile);
+  return { label: c.label, traits: c.traits, profile: c.profile, damage: r9(B.traitDamage(c.traits, p)) };
+});
+
+// A solve carrying the fixed traits: the whole readout shifts by exactly that
+// constant, and nothing about the DP's shape changes.
+var traitSolve = (function () {
+  var base = { grade: "ancient", profile: {}, slots: 2, rollsLeft: 3,
+    fixedLines: [], grantedLines: [{ cat: "special", family: 32, tier: "high" }],
+    goldPer1Pct: 30000, baselinePct: 0 };
+  var plain = B.solve(base);
+  var withT = B.solve({ grade: base.grade, profile: base.profile, slots: base.slots,
+    rollsLeft: base.rollsLeft, fixedLines: base.fixedLines, grantedLines: base.grantedLines,
+    goldPer1Pct: base.goldPer1Pct, baselinePct: base.baselinePct,
+    traitValues: { crit: 120, spec: 120 } });
+  return {
+    traitValues: { crit: 120, spec: 120 },
+    grade: base.grade, slots: base.slots, rollsLeft: base.rollsLeft,
+    granted: base.grantedLines, goldPer1Pct: base.goldPer1Pct,
+    traitDamage: r9(withT.traitDamage),
+    plainCurrent: r9(plain.currentScore), plainFinal: r9(plain.expectedFinal),
+    traitCurrent: r9(withT.currentScore), traitFinal: r9(withT.expectedFinal),
+    traitValueGold: r9(withT.valueGold),
+    states: withT.stats.states
+  };
+})();
+
+// ---------------------------------------------------------------- family grades
+// The F-to-S letter each family carries in the slot picker, from the canonical
+// default profile. Captured for both grades, flattened for an easy diff.
+var familyGradeCases = ["relic", "ancient"].map(function (g) {
+  var fg = B.familyGrades(g);
+  var flat = {}, cat, k;
+  ["basic", "trait", "special"].forEach(function (c) {
+    for (k in fg[c]) if (Object.prototype.hasOwnProperty.call(fg[c], k)) {
+      flat[c + ":" + k] = { avg: r9(fg[c][k].avg), share: r9(fg[c][k].share), letter: fg[c][k].letter };
+    }
+  });
+  return { grade: g, bestAvg: r9(fg.bestAvg), entries: flat };
+});
+
 // ---------------------------------------------------------------- pools
 var poolCases = [
   { label: "empty bracelet", grade: "ancient", lines: [] },
@@ -255,6 +313,9 @@ var refs = {
   listed: listed,
   lines: lines,
   profileVariants: profileVariants,
+  traits: traitCases,
+  traitSolve: traitSolve,
+  familyGrades: familyGradeCases,
   pools: poolCases,
   decoder: decoderCases,
   tinyDP: tinyCases,
@@ -265,5 +326,5 @@ var refs = {
 
 fs.writeFileSync(path.join(__dirname, "..", "refs.json"), JSON.stringify(refs, null, 2) + "\n");
 console.log("wrote refs.json  (" +
-  derivation.length + " derivation, " + lines.length + " lines, " + poolCases.length + " pools, " +
+  derivation.length + " derivation, " + lines.length + " lines, " + poolCases.length + " pools, " + traitCases.length + " traits, " +
   decoderCases.length + " decoder, " + tinyCases.length + " tiny DP, " + solveCases.length + " solves)");

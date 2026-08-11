@@ -7,7 +7,8 @@
  *
  * PROTOCOL (app.js drives it)
  *   in   { id, cmd:"solve",  payload:{grade, profile, fixedLines, grantedLines,
- *                                     slots, rollsLeft, goldPer1Pct, baselinePct} }
+ *                                     traitValues, slots, rollsLeft,
+ *                                     goldPer1Pct, baselinePct} }
  *   out  { id, ok:true, cmd:"solve", res:{...} }   // ctx STAYS here, see below
  *   in   { id, cmd:"advise", payload:{current, rolled, rollsLeft} }
  *   out  { id, ok:true, cmd:"advise", res:{verdict, delta, goldDelta, …} }
@@ -27,7 +28,7 @@
 importScripts(
   "data/bracelet-data.js?v=2",
   "data/gear-data.js?v=2",
-  "model/bracelet.js?v=2"
+  "model/bracelet.js?v=3"
 );
 
 var lastCtx = null;
@@ -39,6 +40,7 @@ function solveCmd(p) {
     profile: p.profile,
     fixedLines: p.fixedLines || [],
     grantedLines: p.grantedLines || [],
+    traitValues: p.traitValues || null,
     slots: p.slots,
     rollsLeft: p.rollsLeft,
     goldPer1Pct: p.goldPer1Pct,
@@ -59,6 +61,7 @@ function solveCmd(p) {
     unrolled: r.unrolled,
     currentScore: r.currentScore,
     fixedDamage: r.fixedDamage,
+    traitDamage: r.traitDamage,
     expectedFinal: r.expectedFinal,
     gain: r.gain,
     valueGold: r.valueGold,

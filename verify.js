@@ -157,11 +157,26 @@ refs.profileVariants.forEach(function (c, i) {
   var apMs = Math.sqrt((703826 + 13888) * 1.09 * 241367 * 1.085 / 6) * 1.125 + 2700;
   check("analytic.mainStat.13888",
     r9(B.lineDamage({ cat: "basic", family: "mainStat", value: 13888 }, "ancient", P)), r9(D(apMs / ap0)));
-  // Family 15: mean of burst and sustained.
-  check("analytic.f15.ancient.high", r9(d(15, "high")), r9(D(0.5 * 1.055 + 0.5 * 1.055 / 1.02)));
-  // Family 14: additional damage plus a diluted demon bucket at 60% share.
-  check("analytic.f14.ancient.high", r9(d(14, "high")),
-    r9(D(((1.3844 + 0.035) / 1.3844) * (1 + 0.6 * 0.025 / 1.073))));
+  // Family 15: burst-weighted mean of the burst and sustained cases (w = 0.7).
+  check("analytic.f15.ancient.high", r9(d(15, "high")), r9(D(0.7 * 1.055 + 0.3 * 1.055 / 1.02)));
+  // Family 13: undiluted +3% damage, plus +5% inside stagger windows at a 10% share.
+  check("analytic.f13.ancient.high", r9(d(13, "high")), r9(D(1.03 * (1 + 0.10 * 0.05))));
+  // Families 20/21/22: weapon power at the hard max-stack / full-uptime
+  // assumption. Each component is its own attack-power ratio.
+  function apWp(dw) { return Math.sqrt(703826 * 1.09 * (241367 + dw) * 1.085 / 6) * 1.125 + 2700; }
+  check("analytic.f20.ancient.high", r9(d(20, "high")), r9(D(apWp(1480 * 6) / ap0)));
+  check("analytic.f21.ancient.high", r9(d(21, "high")), r9(D((apWp(9000) / ap0) * (apWp(2400 * 1.0) / ap0))));
+  check("analytic.f22.ancient.high", r9(d(22, "high")), r9(D((apWp(8700) / ap0) * (apWp(150 * 30) / ap0))));
+  // Family 14: additional damage plus a demon bucket that is GATED OFF by
+  // default, so only the additional-damage half of the line scores. That is
+  // what keeps it strictly below family 24, which rolls more of the same stat.
+  check("analytic.f14.ancient.high", r9(d(14, "high")), r9(D((1.3844 + 0.035) / 1.3844)));
+  checkTrue("analytic.f14.belowF24", d(14, "high") < d(24, "high"));
+  // Turn the demon gate on and the second half starts paying.
+  var pDemon = B.normalizeProfile({ demonShare: 1 });
+  check("analytic.f14.demonOn",
+    r9(B.lineDamage({ cat: "special", family: 14, tier: "high" }, "ancient", pDemon)),
+    r9(D(((1.3844 + 0.035) / 1.3844) * (1 + 1 * 0.025 / 1.073))));
   // Party lines: self gain + 2 ally gains, allies fixed at 90% / 280%.
   var allyF = 1 + 0.921 * 1.8;                       // crit resist −2.1pp
   check("analytic.f17.relic.high", r9(d(17, "high", "relic")), r9(D(1 + 3 * (allyF / 2.62 - 1))));
@@ -186,7 +201,7 @@ refs.profileVariants.forEach(function (c, i) {
   check("analytic.f1.default", r9(d(1, "high")), 0);
   // Tiers are monotone within every scoring family.
   for (var id2 = 11; id2 <= 33; id2++) {
-    if (id2 === 26 || id2 === 28 || id2 === 29 || id2 === 30) continue;   // 0 for a DPS
+    if (id2 === 28 || id2 === 29 || id2 === 30) continue;   // pure ally-buff: 0 for a DPS
     checkTrue("analytic.tierMonotone." + id2, d(id2, "low") <= d(id2, "mid") + 1e-12 && d(id2, "mid") <= d(id2, "high") + 1e-12);
     checkTrue("analytic.gradeMonotone." + id2, d(id2, "high", "relic") <= d(id2, "high") + 1e-12);
   }
@@ -194,6 +209,113 @@ refs.profileVariants.forEach(function (c, i) {
   var two = B.setDamage([{ cat: "special", family: 32, tier: "high" }, { cat: "special", family: 23, tier: "high" }], "ancient", P);
   check("analytic.additive", r9(two), r9(d(32, "high") + d(23, "high")));
   check("analytic.damagePercent", r9(B.damagePercent(two)), r9((Math.exp(two / 100) - 1) * 100));
+})();
+
+// ================= 4b. fixed combat traits =================
+refs.traits.forEach(function (c, i) {
+  var p = B.normalizeProfile(c.profile);
+  check("traits[" + i + "] " + c.label, r9(B.traitDamage(c.traits, p)), c.damage);
+});
+
+// First principles.
+(function () {
+  function D(m) { return 100 * Math.log(m); }
+  // Crit: 35 pp per 699 points, additive into the crit model, capped at 100%.
+  var dcr = 120 * 35 / 699 / 100;
+  check("analytic.trait.crit120", r9(B.traitDamage({ crit: 120 }, P)),
+    r9(D((1 + (0.9 + dcr) * 1.8) / (1 + 0.9 * 1.8))));
+  check("analytic.trait.critPP", r9(120 * B.TRAIT_CRIT_PP_PER_POINT), 6.008583691);
+  // Spec / Swiftness: flat points per 100 trait points, no log-space curve.
+  check("analytic.trait.spec120", r9(B.traitDamage({ spec: 120 }, P)), 3);
+  check("analytic.trait.swift96", r9(B.traitDamage({ swift: 96 }, P)), 2.4);
+  // Additive across the two active lines.
+  check("analytic.trait.additive", r9(B.traitDamage({ crit: 120, spec: 120 }, P)),
+    r9(B.traitDamage({ crit: 120 }, P) + B.traitDamage({ spec: 120 }, P)));
+  // A class already at 100% crit gains nothing from a crit trait line.
+  check("analytic.trait.critCapped",
+    r9(B.traitDamage({ crit: 120 }, B.normalizeProfile({ skills: [{ share: 1, critRate: 1, critDamage: 2.8 }] }))), 0);
+  check("analytic.trait.none", r9(B.traitDamage({}, P)), 0);
+  // A granted trait roll is still worth nothing — that is what makes the fixed
+  // trait total a constant the DP never has to see.
+  check("analytic.trait.grantedStillZero",
+    r9(B.lineDamage({ cat: "trait", family: "crit", value: 120 }, "ancient", P)), 0);
+
+  // The solve shifts by exactly the constant, and the DP is untouched.
+  var t = refs.traitSolve;
+  var plain = B.solve({ grade: t.grade, profile: {}, slots: t.slots, rollsLeft: t.rollsLeft,
+    fixedLines: [], grantedLines: t.granted, goldPer1Pct: t.goldPer1Pct, baselinePct: 0 });
+  var withT = B.solve({ grade: t.grade, profile: {}, slots: t.slots, rollsLeft: t.rollsLeft,
+    fixedLines: [], grantedLines: t.granted, goldPer1Pct: t.goldPer1Pct, baselinePct: 0,
+    traitValues: t.traitValues });
+  check("traitSolve.traitDamage", r9(withT.traitDamage), t.traitDamage);
+  check("traitSolve.plainCurrent", r9(plain.currentScore), t.plainCurrent);
+  check("traitSolve.plainFinal", r9(plain.expectedFinal), t.plainFinal);
+  check("traitSolve.traitCurrent", r9(withT.currentScore), t.traitCurrent);
+  check("traitSolve.traitFinal", r9(withT.expectedFinal), t.traitFinal);
+  check("traitSolve.valueGold", r9(withT.valueGold), t.traitValueGold);
+  check("traitSolve.states", withT.stats.states, t.states, true);
+  checkTrue("analytic.traitSolve.currentShift",
+    Math.abs((withT.currentScore - plain.currentScore) - withT.traitDamage) < 1e-9);
+  checkTrue("analytic.traitSolve.finalShift",
+    Math.abs((withT.expectedFinal - plain.expectedFinal) - withT.traitDamage) < 1e-9);
+  checkTrue("analytic.traitSolve.gainUnchanged", Math.abs(withT.gain - plain.gain) < 1e-9);
+  checkTrue("analytic.traitSolve.dpUnchanged", withT.stats.states === plain.stats.states);
+  checkTrue("analytic.traitSolve.pImproveUnchanged", Math.abs(withT.pImprove - plain.pImprove) < 1e-12);
+  checkTrue("analytic.traitSolve.valueGold",
+    Math.abs(withT.valueGold - withT.expectedFinal * t.goldPer1Pct) < 1e-3);
+})();
+
+// ================= 4c. family letter grades =================
+refs.familyGrades.forEach(function (c) {
+  var fg = B.familyGrades(c.grade);
+  var flat = {}, k;
+  ["basic", "trait", "special"].forEach(function (cat) {
+    for (k in fg[cat]) if (Object.prototype.hasOwnProperty.call(fg[cat], k)) flat[cat + ":" + k] = fg[cat][k];
+  });
+  check("familyGrades[" + c.grade + "].bestAvg", r9(fg.bestAvg), c.bestAvg);
+  check("familyGrades[" + c.grade + "].count", Object.keys(flat).length, Object.keys(c.entries).length, true);
+  Object.keys(c.entries).forEach(function (k2) {
+    check("familyGrades[" + c.grade + "]." + k2 + ".avg", r9(flat[k2].avg), c.entries[k2].avg);
+    check("familyGrades[" + c.grade + "]." + k2 + ".share", r9(flat[k2].share), c.entries[k2].share);
+    check("familyGrades[" + c.grade + "]." + k2 + ".letter", flat[k2].letter, c.entries[k2].letter, true);
+  });
+});
+
+// First principles.
+(function () {
+  var fg = B.familyGrades("ancient");
+  var P0 = B.normalizeProfile({});
+  function d(id, t) { return B.lineDamage({ cat: "special", family: id, tier: t }, "ancient", P0); }
+  // The average roll is the three tiers weighted 6 : 3 : 1.
+  check("analytic.familyGrades.avg32", r9(fg.special[32].avg),
+    r9(0.6 * d(32, "low") + 0.3 * d(32, "mid") + 0.1 * d(32, "high")));
+  // Exactly one family tops the table, and it is graded S.
+  var bestId = null, i;
+  for (i = 1; i <= 33; i++) if (bestId === null || fg.special[i].avg > fg.special[bestId].avg) bestId = i;
+  check("analytic.familyGrades.bestShare", r9(fg.special[bestId].share), 1);
+  check("analytic.familyGrades.bestLetter", fg.special[bestId].letter, "S", true);
+  check("analytic.familyGrades.bestAvg", r9(fg.bestAvg), r9(fg.special[bestId].avg));
+  // Nothing scoring nothing may grade above F, and every junk family is junk.
+  var ordered = "FDCBAS";
+  for (i = 1; i <= 33; i++) {
+    if (fg.special[i].avg <= 0) checkTrue("analytic.familyGrades.zeroIsF." + i, fg.special[i].letter === "F");
+    checkTrue("analytic.familyGrades.known." + i, ordered.indexOf(fg.special[i].letter) >= 0);
+  }
+  // Monotone: a higher average can never carry a lower letter.
+  for (i = 1; i <= 33; i++) {
+    for (var j = 1; j <= 33; j++) {
+      if (fg.special[i].avg > fg.special[j].avg) {
+        checkTrue("analytic.familyGrades.monotone." + i + "v" + j,
+          ordered.indexOf(fg.special[i].letter) >= ordered.indexOf(fg.special[j].letter));
+      }
+    }
+  }
+  // Vitality and a granted combat trait are dead weight, so both grade F.
+  check("analytic.familyGrades.vitality", fg.basic.vitality.letter, "F", true);
+  check("analytic.familyGrades.trait", fg.trait.crit.letter, "F", true);
+  // The letters come from the DEFAULTS, so a wild profile cannot move them.
+  var wild = B.familyGrades("ancient");
+  check("analytic.familyGrades.stable", wild.special[32].letter, fg.special[32].letter, true);
 })();
 
 // ================= 5. pools =================

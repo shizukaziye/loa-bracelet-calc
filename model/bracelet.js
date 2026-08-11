@@ -111,6 +111,12 @@
   // Additional-damage from a 60-level astrogem grid: 60 × 0.080667%/level, the
   // loseii astrogem coefficient (bebkok 0.08086, Arsonistic 0.08077 — same thing).
   var ADD_DMG_ASTROGEM_LV60 = 0.0484;
+  // T4 combat-trait conversion for Crit: 35 percentage points of crit rate per
+  // 699 trait points (Shizu, 2026-08-11). Arsonistic's older sheet used
+  // 0.25/699; this is the number that ships.
+  var TRAIT_CRIT_PP_PER_POINT = 35 / 699;
+  // Fixed order, so JS and Python sum the same floats in the same sequence.
+  var TRAIT_KEYS = ["crit", "spec", "swift"];
   // Master node. Arsonistic's sheet reads it as +7% crit rate AND +8.5%
   // additional damage; Shizu's ruling (2026-08-11) is +7% additional damage
   // only, and that is what ships. Do not "fix" without asking him.
@@ -140,6 +146,12 @@
     // Master node: +7% additional damage (Shizu's ruling).
     master: false,
 
+    // How much the class values the Spec and Swiftness combat traits, in SCORE
+    // POINTS per 100 trait points: 0.025 = a 100-point line is worth 2.5 points
+    // of damage. Crit has NO weight — it converts exactly (see traitDamage).
+    // Key "swift" is the Swiftness trait (DATA calls it "swiftness").
+    traitWeights: { spec: 0.025, swift: 0.025 },
+
     // Additional-damage pool: additive inside itself, multiplies as (1 + pool).
     addDamage: {
       weaponQuality: 0.30,          // 100-quality weapon
@@ -151,11 +163,17 @@
     // Bucket shares / uptimes (fraction of your damage the bucket touches).
     // Positional base facts, for setting the shares: front attack is ×1.20 and
     // back attack ×1.05 (+10% crit rate) before any bracelet line.
-    backAttackShare: 0.50,
-    frontAttackShare: 0.00,
-    nonDirectionalShare: 0.35,
-    staggeredShare: 0.05,           // share of damage landing in stagger windows
-    demonShare: 0.60,
+    // Shizu, 2026-08-11: these read as "does this bucket apply to me", not as a
+    // partition of your damage, and all three ship at 100%. The panel and the
+    // model agree, which matters because the leaderboard scores everyone on
+    // these canonical defaults and the family letter grades are read off them.
+    backAttackShare: 1.00,
+    frontAttackShare: 1.00,
+    nonDirectionalShare: 1.00,
+    staggeredShare: 0.10,           // share of damage landing in stagger windows
+    // A boolean gate, not a share: the Demon boss toggle drives exactly 0 or 1.
+    // Flip this one value to ship the tool with it on.
+    demonShare: 0.00,
     demonBase: 0.073,               // existing demon-damage sources dilute the line
     shieldUptime: 0.60,             // family 18
 
@@ -165,14 +183,17 @@
     allyCritDamage: 2.8,
     enemyBaseDR: 0.50,              // enemy damage reduction before any shred
 
-    // Conditional weapon-power families — documented assumptions.
-    wpStacks20: 4.8,                // 6 stacks max, ~80% average fill
-    wpUptime21: 0.90,               // HP≥50% and hitting, refreshed every 5s
-    wpStacks22: 4,                  // +1 stack/30s held 120s -> steady state 4
+    // Conditional weapon-power families — HARD ASSUMPTIONS as of 2026-08-11:
+    // max stacks and full uptime. They are no longer inputs; the panel does not
+    // expose them and the Method tab states them.
+    wpStacks20: 6,                  // one stack per hit per second, 10s each, cap 6 — held
+    wpUptime21: 1.00,               // HP≥50% and hitting, refreshed every 5s — full uptime
+    wpStacks22: 30,                 // max stacks, per the same full-uptime ruling as 20/21
 
-    // Family 15 trades +2% cooldown for damage: mean of the burst case (no
-    // penalty) and the sustained case (damage ÷ 1.02).
-    cooldownPenaltyWeight: 0.5,
+    // Family 15 trades +2% cooldown for damage: a weighted mean of the burst
+    // case (no penalty) and the sustained case (damage ÷ 1.02). 0.7 = mostly
+    // burst, which is how the line actually gets used.
+    cooldownPenaltyWeight: 0.7,
     atkMoveSpeedDamagePerPct: 0,    // attack & move speed is out of scope in v1
 
     // Support-role conversions — STUB, not calibrated. The tool ships DPS-only.
@@ -199,8 +220,8 @@
     if (!p) return out;
     for (var k in p) {
       if (!Object.prototype.hasOwnProperty.call(p, k)) continue;
-      if (k === "addDamage" && p[k]) {
-        for (var a in p[k]) if (Object.prototype.hasOwnProperty.call(p[k], a)) out.addDamage[a] = p[k][a];
+      if ((k === "addDamage" || k === "traitWeights") && p[k]) {
+        for (var a in p[k]) if (Object.prototype.hasOwnProperty.call(p[k], a)) out[k][a] = p[k][a];
       } else if (p[k] !== undefined && p[k] !== null) {
         out[k] = deepCopy(p[k]);
       }
@@ -549,6 +570,109 @@
     return out;
   }
 
+  /**
+   * traitDamage(traits, profile) -> D, the score of the bracelet's two FIXED
+   * combat-trait lines.
+   *
+   * traits = { crit, spec, swift } in trait points; an inactive trait is 0.
+   *
+   *   Crit   converts exactly: 35 pp of crit rate per 699 trait points, fed
+   *          through the per-skill crit model additively with every other
+   *          crit-rate source and capped at 100% — the same path granted
+   *          family 31 takes. So it is worth less to a class already near cap.
+   *   Spec   scored by the class's own weight, in points per 100 trait points.
+   *   Swift  likewise.
+   *
+   * Fixed lines never reroll, so this is a CONSTANT offset on every state the
+   * solver can reach. It is added once, into solve()'s fixedDamage, and never
+   * enters the DP alphabet — a trait rolled into a GRANTED slot still scores 0.
+   */
+  function traitDamage(traits, profile) {
+    profile = profile && profile.role ? profile : normalizeProfile(profile);
+    traits = traits || {};
+    var w = profile.traitWeights || {}, s = 0, i, k, v;
+    for (i = 0; i < TRAIT_KEYS.length; i++) {
+      k = TRAIT_KEYS[i];
+      v = traits[k] || 0;
+      if (!v) continue;
+      if (k === "crit") {
+        if (profile.role === "support") continue;      // crit is a DPS number
+        var dcr = v * TRAIT_CRIT_PP_PER_POINT / 100;
+        s += toD(critFactor(profile, dcr, 0) / critFactor(profile, 0, 0));
+      } else {
+        s += v * (w[k] || 0);
+      }
+    }
+    return s;
+  }
+
+  // ------------------------------------------------------------------
+  // Family letter grades
+  // ------------------------------------------------------------------
+
+  // Within one family the three tiers land 6 : 3 : 1, so an "average roll" of a
+  // family is 0.6 low + 0.3 mid + 0.1 high.
+  var TIER_ODDS = { low: 0.6, mid: 0.3, high: 0.1 };
+  // Share of the best family's average roll -> letter. Monotone, round numbers;
+  // the best family is always S and anything scoring nothing is always F.
+  var FAMILY_GRADE_BANDS = [[0.90, "S"], [0.70, "A"], [0.50, "B"], [0.30, "C"], [0.10, "D"], [-1, "F"]];
+
+  function bandLetter(share) {
+    for (var i = 0; i < FAMILY_GRADE_BANDS.length; i++) {
+      if (share >= FAMILY_GRADE_BANDS[i][0]) return FAMILY_GRADE_BANDS[i][1];
+    }
+    return "F";
+  }
+
+  /**
+   * familyGrades(grade) — an F-to-S letter for every family a granted slot can
+   * hold, rating the family's AVERAGE roll against the best family's.
+   *
+   * Deliberately computed from the CANONICAL DEFAULT profile, never the
+   * caller's: the letter labels a family, not a build, so they must not shuffle
+   * every time someone moves a slider. (The leaderboard will score on the same
+   * defaults for the same reason.)
+   *
+   * -> { grade, bestAvg, basic:{fam:{avg,share,letter}}, trait:{…}, special:{id:{…}} }
+   */
+  function familyGrades(grade) {
+    grade = grade || "ancient";
+    var P = normalizeProfile({});
+    var out = { grade: grade, bestAvg: 0, basic: {}, trait: {}, special: {} };
+    var i, t, avg, tiers = ["low", "mid", "high"];
+
+    var basics = ["mainStat", "vitality"];
+    for (i = 0; i < basics.length; i++) {
+      avg = lineDamage({ cat: "basic", family: basics[i] }, grade, P);   // band-weighted value
+      out.basic[basics[i]] = { avg: avg };
+      if (avg > out.bestAvg) out.bestAvg = avg;
+    }
+    for (i = 0; i < DATA.TRAITS.families.length; i++) {
+      // A trait rolled into a GRANTED slot scores nothing; only the two fixed
+      // trait lines carry value, and those are not draws.
+      out.trait[DATA.TRAITS.families[i].key] = { avg: 0 };
+    }
+    for (i = 0; i < DATA.SPECIALS.length; i++) {
+      var fam = DATA.SPECIALS[i];
+      avg = 0;
+      for (t = 0; t < tiers.length; t++) {
+        avg += TIER_ODDS[tiers[t]] * lineDamage({ cat: "special", family: fam.id, tier: tiers[t] }, grade, P);
+      }
+      out.special[fam.id] = { avg: avg };
+      if (avg > out.bestAvg) out.bestAvg = avg;
+    }
+
+    var cats = ["basic", "trait", "special"], k, e;
+    for (i = 0; i < cats.length; i++) {
+      for (k in out[cats[i]]) if (Object.prototype.hasOwnProperty.call(out[cats[i]], k)) {
+        e = out[cats[i]][k];
+        e.share = out.bestAvg > 0 ? e.avg / out.bestAvg : 0;
+        e.letter = e.avg > 0 ? bandLetter(e.share) : "F";
+      }
+    }
+    return out;
+  }
+
   /** Sum of line damages (additive in log space). */
   function setDamage(lines, grade, profile) {
     profile = normalizeProfile(profile);
@@ -852,7 +976,10 @@
     var fixedPresent = {}, i, j;
     for (i = 0; i < fixedLines.length; i++) fixedPresent[lineFamilyId(fixedLines[i])] = true;
     var fixedCounts = countCats(fixedLines);
-    var fixedDamage = setDamage(fixedLines, grade, profile);
+    // The bracelet's two fixed combat traits are a constant on every reachable
+    // state, so they ride along inside fixedDamage and never reach the DP.
+    var traitBonus = traitDamage(opts.traitValues, profile);
+    var fixedDamage = setDamage(fixedLines, grade, profile) + traitBonus;
 
     // The current granted set, mapped onto draw atoms.
     var startPieces = [];
@@ -1025,6 +1152,7 @@
       unrolled: unrolled,
       currentScore: cur,
       fixedDamage: fixedDamage,
+      traitDamage: traitBonus,
       expectedFinal: expectedFinal,
       gain: expectedFinal - cur,
       valueGold: (expectedFinal - baselinePct) * goldPer1Pct,
@@ -1206,7 +1334,7 @@
     var fixedPresent = {}, i;
     for (i = 0; i < fixedLines.length; i++) fixedPresent[lineFamilyId(fixedLines[i])] = true;
     var fixedCounts = countCats(fixedLines);
-    var fixedDamage = setDamage(fixedLines, grade, profile);
+    var fixedDamage = setDamage(fixedLines, grade, profile) + traitDamage(opts.traitValues, profile);
 
     var startPieces = [];
     var grantedLines = opts.grantedLines || [];
@@ -1378,6 +1506,10 @@
     specialMultiplier: specialMultiplier,
     basicBandExpected: basicBandExpected,
     traitBandExpected: traitBandExpected,
+    traitDamage: traitDamage,
+    familyGrades: familyGrades,
+    FAMILY_GRADE_BANDS: FAMILY_GRADE_BANDS,
+    TRAIT_CRIT_PP_PER_POINT: TRAIT_CRIT_PP_PER_POINT,
     lineDamage: lineDamage,
     lineInfo: lineInfo,
     setDamage: setDamage,

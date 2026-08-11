@@ -23,6 +23,11 @@ VERSION = "0.1.0"
 MODEL_SIG = "bracelet-v1"
 
 ADD_DMG_ASTROGEM_LV60 = 0.0484
+# T4 combat-trait conversion for Crit: 35 pp of crit rate per 699 trait points
+# (Shizu, 2026-08-11). Arsonistic's older sheet used 0.25/699.
+TRAIT_CRIT_PP_PER_POINT = 35 / 699.0
+# Fixed order, so JS and Python sum the same floats in the same sequence.
+TRAIT_KEYS = ["crit", "spec", "swift"]
 # Shizu's ruling: Master is +7% additional damage only.
 MASTER_ADD_DAMAGE = 0.07
 
@@ -40,6 +45,10 @@ DEFAULT_PROFILE = {
     "skills": [{"share": 1, "critRate": 0.90, "critDamage": 2.8}],
     "master": False,
 
+    # Points of damage per 100 trait points, for Spec and Swiftness. Crit has
+    # no weight: it converts exactly (see trait_damage).
+    "traitWeights": {"spec": 0.025, "swift": 0.025},
+
     "addDamage": {
         "weaponQuality": 0.30,
         "pet": 0.01,
@@ -47,11 +56,14 @@ DEFAULT_PROFILE = {
         "neck": 0.026,
     },
 
-    "backAttackShare": 0.50,
-    "frontAttackShare": 0.00,
-    "nonDirectionalShare": 0.35,
-    "staggeredShare": 0.05,
-    "demonShare": 0.60,
+    # All three ship at 100% (Shizu, 2026-08-11): they gate a bucket, they do
+    # not partition your damage.
+    "backAttackShare": 1.00,
+    "frontAttackShare": 1.00,
+    "nonDirectionalShare": 1.00,
+    "staggeredShare": 0.10,
+    # A boolean gate, not a share: the toggle drives exactly 0 or 1.
+    "demonShare": 0.00,
     "demonBase": 0.073,
     "shieldUptime": 0.60,
 
@@ -60,11 +72,12 @@ DEFAULT_PROFILE = {
     "allyCritDamage": 2.8,
     "enemyBaseDR": 0.50,
 
-    "wpStacks20": 4.8,
-    "wpUptime21": 0.90,
-    "wpStacks22": 4,
+    # Hard assumptions (2026-08-11): max stacks, full uptime. Not inputs.
+    "wpStacks20": 6,
+    "wpUptime21": 1.00,
+    "wpStacks22": 30,
 
-    "cooldownPenaltyWeight": 0.5,
+    "cooldownPenaltyWeight": 0.7,
     "atkMoveSpeedDamagePerPct": 0,
 
     "allyApBuffDamagePerPct": 0.45,
@@ -90,9 +103,9 @@ def normalize_profile(p):
     if not p:
         return out
     for k, v in p.items():
-        if k == "addDamage" and v:
+        if k in ("addDamage", "traitWeights") and v:
             for a, av in v.items():
-                out["addDamage"][a] = av
+                out[k][a] = av
         elif v is not None:
             out[k] = _deep_copy(v)
     if not out.get("skills"):
@@ -386,6 +399,82 @@ def line_info(line, grade, profile):
     return out
 
 
+def trait_damage(traits, profile):
+    """Score of the bracelet's two FIXED combat-trait lines.
+
+    traits = {"crit", "spec", "swift"} in trait points; inactive trait = 0.
+    Crit converts exactly (35 pp of crit rate per 699 points) and runs through
+    the per-skill crit model, additive with every other crit source and capped
+    at 100%. Spec and Swiftness use the class's own weight.
+
+    Fixed lines never reroll, so this is a constant on every reachable state:
+    it rides inside solve()'s fixed_damage and never enters the DP alphabet.
+    """
+    profile = profile if (profile and profile.get("role")) else normalize_profile(profile)
+    traits = traits or {}
+    w = profile.get("traitWeights") or {}
+    s = 0.0
+    for k in TRAIT_KEYS:
+        v = traits.get(k) or 0
+        if not v:
+            continue
+        if k == "crit":
+            if profile.get("role") == "support":
+                continue
+            dcr = v * TRAIT_CRIT_PP_PER_POINT / 100.0
+            s += to_d(crit_factor(profile, dcr, 0) / crit_factor(profile, 0, 0))
+        else:
+            s += v * (w.get(k) or 0)
+    return s
+
+
+# Within one family the three tiers land 6 : 3 : 1.
+TIER_ODDS = {"low": 0.6, "mid": 0.3, "high": 0.1}
+# Share of the best family's average roll -> letter. Monotone, round numbers.
+FAMILY_GRADE_BANDS = [(0.90, "S"), (0.70, "A"), (0.50, "B"), (0.30, "C"), (0.10, "D"), (-1, "F")]
+
+
+def _band_letter(share):
+    for lo, letter in FAMILY_GRADE_BANDS:
+        if share >= lo:
+            return letter
+    return "F"
+
+
+def family_grades(grade="ancient"):
+    """An F-to-S letter for every family a granted slot can hold.
+
+    Rated on the family's AVERAGE roll (tiers weighted 6:3:1) against the best
+    family's, and always computed from the CANONICAL DEFAULT profile so the
+    labels do not shuffle when the user moves a slider.
+    """
+    P = normalize_profile({})
+    out = {"grade": grade, "bestAvg": 0.0, "basic": {}, "trait": {}, "special": {}}
+    tiers = ["low", "mid", "high"]
+
+    for fam in ("mainStat", "vitality"):
+        avg = line_damage({"cat": "basic", "family": fam}, grade, P)
+        out["basic"][fam] = {"avg": avg}
+        if avg > out["bestAvg"]:
+            out["bestAvg"] = avg
+    for t in DATA.TRAITS["families"]:
+        # A trait in a GRANTED slot scores nothing; only the two fixed ones count.
+        out["trait"][t["key"]] = {"avg": 0.0}
+    for fam in DATA.SPECIALS:
+        avg = 0.0
+        for tier in tiers:
+            avg += TIER_ODDS[tier] * line_damage({"cat": "special", "family": fam["id"], "tier": tier}, grade, P)
+        out["special"][fam["id"]] = {"avg": avg}
+        if avg > out["bestAvg"]:
+            out["bestAvg"] = avg
+
+    for cat in ("basic", "trait", "special"):
+        for e in out[cat].values():
+            e["share"] = (e["avg"] / out["bestAvg"]) if out["bestAvg"] > 0 else 0.0
+            e["letter"] = _band_letter(e["share"]) if e["avg"] > 0 else "F"
+    return out
+
+
 def set_damage(lines, grade, profile):
     profile = normalize_profile(profile)
     return sum(line_damage(ln, grade, profile) for ln in lines)
@@ -662,7 +751,9 @@ def solve(opts):
     for ln in fixed_lines:
         fixed_present[line_family_id(ln)] = True
     fixed_counts = count_cats(fixed_lines)
-    fixed_damage = set_damage(fixed_lines, grade, profile)
+    # The two fixed combat traits are a constant on every reachable state.
+    trait_bonus = trait_damage(opts.get("traitValues"), profile)
+    fixed_damage = set_damage(fixed_lines, grade, profile) + trait_bonus
 
     start_pieces = []
     for ln in granted_lines:
@@ -815,6 +906,7 @@ def solve(opts):
         "unrolled": unrolled,
         "currentScore": cur,
         "fixedDamage": fixed_damage,
+        "traitDamage": trait_bonus,
         "expectedFinal": expected_final,
         "gain": expected_final - cur,
         "valueGold": (expected_final - baseline_pct) * gold_per_1pct,
@@ -932,7 +1024,7 @@ def brute_solve(opts):
     fixed_lines = opts.get("fixedLines") or []
     fixed_present = dict((line_family_id(ln), True) for ln in fixed_lines)
     fixed_counts = count_cats(fixed_lines)
-    fixed_damage = set_damage(fixed_lines, grade, profile)
+    fixed_damage = set_damage(fixed_lines, grade, profile) + trait_damage(opts.get("traitValues"), profile)
 
     start_pieces = []
     for ln in opts.get("grantedLines") or []:

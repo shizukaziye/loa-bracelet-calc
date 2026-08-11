@@ -62,7 +62,8 @@
       "<p>Additional damage is one pool, additive inside itself, multiplying total damage once as <code>(1 + pool)</code>. The default pool is " + fx(pool * 100, 2) + "%: a 100-quality weapon 30%, pet 1%, a high additional-damage necklace 2.6% and 4.84% from a 60-level astrogem grid. A bracelet line worth +3% is therefore worth <code>1.4144 / 1.3844</code>, not 3%. The Master node adds 7% to this pool and nothing else — that is Shizu's ruling, and it overrides the sheet reading that also credits crit rate.</p>" +
 
       "<h3>The other buckets</h3>" +
-      "<p>Outgoing damage is its own multiplicative bucket and is not diluted. Stagger, demon, back, front and non-directional damage are each scaled by a share you set: what fraction of your damage actually lands in that window or from that angle. <b>Back, front, non-directional and demon shares all start at zero</b>, so those lines score nothing until you tell the tool how your class fights. Demon damage is additionally diluted by the 7.3% you already carry from cards and pets. Family 15 trades +2% cooldown for damage; it is scored as the mean of the burst case (no penalty) and the sustained case (damage divided by 1.02), and you can slide that weight.</p>" +
+      "<p>Outgoing damage is its own multiplicative bucket and is not diluted. Stagger, demon, back, front and Hitmaster damage are each scaled by a share you set: how much of your damage actually lands in that window or from that angle. <b>Back, front and Hitmaster all start at " + fx(p.backAttackShare * 100, 0) + "%</b> — slide one down and that family's lines shrink with it. Stagger windows start at " + fx(p.staggeredShare * 100, 0) + "%. The Demon boss toggle starts off; turning it on says the whole fight is a Demon or Archdemon, and demon damage is then diluted by the " + fx(p.demonBase * 100, 1) + "% you already carry from cards and pets. Family 15 trades +2% cooldown for damage; it is scored as a weighted mean of the burst case (no penalty) and the sustained case (damage divided by 1.02), weighted <b>" + fx(p.cooldownPenaltyWeight * 100, 0) + "% to burst</b> by default, and you can slide that.</p>" +
+      "<p>Three weapon-power families carry a condition, and all three are now scored at their best case rather than as an input you tune. Family 20 stacks once per hit per second and caps at six, so it is scored at six stacks. Family 21's on-hit rider refreshes every five seconds while you are above 50% health, so it is scored at full uptime. Family 22 gains a stack every 30 seconds and holds each for 120, so four stacks is the ceiling it settles at and that is what it gets.</p>" +
 
       "<h2>Party lines get credit for the party</h2>" +
       "<p>Four families help everyone: enemy defense down, enemy crit resist down, enemy crit-damage resist down, and damage to a shielded target. Only one instance counts per party, and this model assumes you are the one carrying it.</p>" +
@@ -70,8 +71,18 @@
       "<p>Defense shred goes through the enemy's damage reduction: if the boss reduces damage by " + fx(p.enemyBaseDR * 100, 0) + "% then shredding a fraction A of its defense multiplies damage by <code>(D+K) / (D(1−A)+K)</code>. Crit resist down reads as crit rate up for the whole party; crit-damage resist down likewise. The shielded-target line is flat damage while a shield is up, scaled by a " + fx(p.shieldUptime * 100, 0) + "% uptime.</p>" +
       "<p>The \"ally attack power buff +B%\" rider that rides along on all four scores <b>zero</b> here. It scales a buff only a support provides; for a damage dealer it is dead text.</p>" +
 
+      "<h2>The two fixed combat traits</h2>" +
+      "<p>Every bracelet arrives with two combat-trait lines, 61–120 points on Ancient and 41–100 on Relic. They never reroll, so whatever they are worth is a constant added to every score the solver can reach — it moves the headline number and the gold, and it changes nothing about which lines to lock.</p>" +
+      "<p><b>Crit converts exactly.</b> A crit trait line gives <code>value × 35 / 699</code> percentage points of crit rate — 35 points of crit rate per 699 trait points — and that goes through the same per-skill crit model a granted crit-rate line does: additive with everything else, capped at 100%. A 120-point crit line is +" + fx(120 * 35 / 699, 2) + " pp of crit rate, worth " + fx(B.damagePercent(B.traitDamage({ crit: 120 }, p)), 2) + "% to the default character and worth nothing at all to a build already at cap.</p>" +
+      "<p><b>Spec and Swiftness are a judgement call</b>, so they are yours to make: set what 100 points of each is worth to your class in percent damage, default 2.5%, and the line scores <code>value × weight ÷ 100</code>. There is no class table behind it. Every other combat trait is treated as inactive.</p>" +
+      "<p>A trait rolled into a <i>granted</i> slot still scores nothing. Only the two fixed lines count, which is what keeps the trait total a constant.</p>" +
+
+      "<h2>The letter on the family picker</h2>" +
+      "<p>Each family in the slot picker carries a grade from F to S. It rates the family's <i>average</i> roll — the three tiers weighted 6 : 3 : 1, the odds of rolling each one — against the best family in the game, banded at 90, 70, 50, 30 and 10 percent of that best. The best family is always S and a family that converts to no damage at all is always F.</p>" +
+      "<p>The letter is always computed on the <b>default character</b>, never on your inputs. A grade labels the family, not your build, so it means the same thing to everyone and does not shuffle every time you move a slider. What a particular roll is worth to <i>you</i> is the tier box beside it and the line-by-line table below.</p>" +
+
       "<h2>Buckets that score nothing</h2>" +
-      "<p>Vitality, all six combat traits, the ten defensive and utility families, and the three support families score 0% damage. That is not a claim they are worthless in game — combat traits in particular drive class mechanics this model does not read. It means they do not convert into a damage percentage, so the tool refuses to invent one. Attack and move speed is in the same bucket: real value through Raid Captain, out of scope for now.</p>" +
+      "<p>Vitality, combat traits in a granted slot, the ten defensive and utility families, and the three support families score 0% damage. That is not a claim they are worthless in game. It means they do not convert into a damage percentage, so the tool refuses to invent one. Attack and move speed is in the same bucket: real value through Raid Captain, out of scope for now.</p>" +
       "<p>This matters for the solver, not just the display. Every line that scores nothing is interchangeable with every other line that scores nothing in the same category, so they all collapse into a single outcome. That is what keeps a three-slot solve down to about 48,000 states instead of millions.</p>" +
 
       "<h2>The roll problem, solved exactly</h2>" +
@@ -92,7 +103,7 @@
 
       "<h2>Where the tables come from</h2>" +
       "<p>Line values and probabilities are transcribed from the official Stove disclosure page, revised 2025-12-30. The listed special-effect percentages sum to 100.00016% because the page rounds; the model normalises at read time and never edits a published number. Basic-stat values are continuous bands from that page, not the four fixed points a community sheet lists — the official page wins. The character baseline is bebkok's gear tables and Arsonistic's DPS sheet, cross-checked against each other and against a live character payload.</p>" +
-      "<p>The model core ships with a battery of " + 814 + " checks: JavaScript against first principles, the exact solver against a brute-force recursion on small cases, and the whole JavaScript model against an independent Python mirror. Both have to pass before anything ships.</p>" +
+      "<p>The model core ships with a battery of " + 1599 + " checks: JavaScript against first principles, the exact solver against a brute-force recursion on small cases, and the whole JavaScript model against an independent Python mirror. Both have to pass before anything ships.</p>" +
 
       "<h2>What this does not model</h2>" +
       "<ul>" +
@@ -102,7 +113,7 @@
       "<li><b>Roll costs.</b> Silver per attempt rises with each roll and was never published. Treated as free.</li>" +
       "<li><b>The Relic to Ancient upgrade.</b> Upgrading bumps existing lines. Pick the grade you are actually holding.</li>" +
       "<li><b>Combat stat caps.</b> Reported as roughly 120 on Ancient, never confirmed for T4.</li>" +
-      "<li><b>Your class.</b> There is no class list. Set the shares — back, front, non-directional, stagger, demon — and the model follows them.</li>" +
+      "<li><b>Your class.</b> There is no class list. Set the shares — back, front, Hitmaster, stagger, demon — and the trait weights, and the model follows them.</li>" +
       "</ul>" +
 
       "<h2>Reading the numbers honestly</h2>" +

@@ -34,7 +34,6 @@
   if (!B || !DATA) return;                       // model failed to load; leave the shell alone
 
   var LS_KEY = "loa-bracelet-calc.v1";
-  var GPD_TIERS = [500000, 1000000, 1500000, 2500000, 3500000, 5000000, 7500000, 10000000];
   var TIERS = DATA.TIERS;                        // ["low","mid","high"]
   var PARTY_IDS = { 16: 1, 17: 1, 18: 1, 19: 1 };
   var DEBOUNCE_MS = 300;
@@ -76,22 +75,31 @@
 
   function defaults() {
     return {
-      v: 1,
+      v: 2,
       grade: "ancient",
       slots: 3,
       rollsLeft: 7,
       rollsTotal: 7,                 // what a FRESH bracelet gets — drives the "unrolled" price
       useOverride: false,
-      gear: { weapon: 25, gloves: 23, other: 21 },
+      // One honing level per piece — six sliders, the weapon alone driving WP.
+      gear: { weapon: 25, head: 21, shoulder: 21, chest: 21, pants: 21, gloves: 23 },
       ov: { mainStatRaw: 703826, weaponPowerRaw: 241367 },
+      // Accessories, gems and the two on/off nodes. wpPct and baseApPct are
+      // DERIVED from these (see wpPctOf / baseApPctOf), not stored.
+      kit: { neck: 2.6, ear1: 3, ear2: 3, gems: 9, stone: true, master: false },
+      // Where the damage lands, how the cooldown line is judged, and what the
+      // class pays for a Spec / Swiftness trait line (points per 100 points).
+      fight: { back: 100, front: 100, nonDir: 100, cdWeight: 70, demon: false, wSpec: 2.5, wSwift: 2.5 },
+      // The bracelet's two FIXED combat traits. Exactly two are ever active;
+      // traitOrder lists the active keys oldest-first so a third can evict one.
+      traits: { crit: { on: true, v: 120 }, spec: { on: true, v: 120 }, swift: { on: false, v: 120 } },
+      traitOrder: ["crit", "spec"],
       adv: {
-        msPct: 9, wpPct: 8.5, baseApPct: 12.5, flatAP: 2700,
+        msPct: 9, karmaWp: 2.5, baseApOverride: false, baseApPct: 12.5, flatAP: 2700,
         accessoryMainStat: 71429, rosterBonus: 2085,
-        addWeapon: 30, addPet: 1, addNeck: 2.6, addAstrogem: 4.84, master: false,
-        backShare: 0, frontShare: 0, nonDirShare: 0, staggerShare: 5,
-        demonShare: 0, demonBase: 7.3, shieldUptime: 60, enemyDR: 50,
-        cdWeight: 0.5, allyCount: 2,
-        wpStacks20: 4.8, wpUptime21: 90, wpStacks22: 4
+        addWeapon: 30, addPet: 1, addAstrogem: 4.84,
+        staggerShare: 10, demonBase: 7.3, shieldUptime: 60, enemyDR: 50,
+        allyCount: 2
       },
       skills: [{ name: "", share: 100, cr: 90, cd: 280 }],
       econ: { gpd: 1500000, baseline: 0 },
@@ -102,6 +110,54 @@
       rolled: null,                  // per-slot rows entered in the cut flow
       history: []
     };
+  }
+
+  // Per-gem base attack power by gem level; eleven of them plus a 9/7 stone.
+  var GEM_AP = { 6: 0.4, 7: 0.6, 8: 0.8, 9: 1.0, 10: 1.2 };
+  var STONE_AP = 1.5;
+  // Slider order, Shizu's: armour first, the weapon last because it is the one
+  // piece that moves weapon power.
+  var PIECES = [["head", "Head"], ["shoulder", "Shoulder"], ["chest", "Chest"],
+    ["pants", "Pants"], ["gloves", "Gloves"], ["weapon", "Weapon"]];
+
+  /** Weapon-power % bucket = the two earring lines + karma. */
+  function wpPctOf() { return num(S.kit.ear1, 0) + num(S.kit.ear2, 0) + num(S.adv.karmaWp, 0); }
+  /** Attack-power % bucket = eleven gems at their level + the ability stone. */
+  function baseApPctOf() {
+    if (S.adv.baseApOverride) return num(S.adv.baseApPct, 0);
+    var per = GEM_AP[Math.round(num(S.kit.gems, 9))] || 0;
+    return 11 * per + (S.kit.stone ? STONE_AP : 0);
+  }
+  // ---- combat traits ----
+  var TRAIT_KEYS = ["crit", "spec", "swift"];
+  var TRAIT_LABELS = { crit: "Crit", spec: "Spec", swift: "Swiftness" };
+  var TRAIT_GLOSS = {
+    crit: "The Crit trait line your bracelet came with, in trait points. It converts exactly — 35 percentage points of crit rate per 699 trait points — and then runs through your skills' own crit numbers, so it is worth nothing to a build already at 100% crit.",
+    spec: "The Specialization trait line your bracelet came with, in trait points. It scores at the Spec weight you set in the Traits block: value × weight ÷ 100.",
+    swift: "The Swiftness trait line your bracelet came with, in trait points. It scores at the Swiftness weight you set in the Traits block: value × weight ÷ 100."
+  };
+  /** The official starting-value band, which moves with the grade. */
+  function traitBand() { return S.grade === "relic" ? [41, 100] : [61, 120]; }
+  /** What the model scores: an inactive trait contributes nothing. */
+  function traitValues() {
+    var out = {}, i, k;
+    for (i = 0; i < TRAIT_KEYS.length; i++) {
+      k = TRAIT_KEYS[i];
+      out[k] = S.traits[k].on ? num(S.traits[k].v, 0) : 0;
+    }
+    return out;
+  }
+  /** Weights are typed as % damage per 100 trait points; the model wants points. */
+  function traitWeights() {
+    return { spec: num(S.fight.wSpec, 0) / 100, swift: num(S.fight.wSwift, 0) / 100 };
+  }
+
+  /** The live item level: the mean of the six piece item levels, unrounded. */
+  function ilvlExact() {
+    var G = window.BraceletGearData, s = 0, i;
+    if (!G) return 0;
+    for (i = 0; i < PIECES.length; i++) s += G.ILVL0 + G.ILVL_STEP * num(S.gear[PIECES[i][0]], 0);
+    return s / 6;
   }
 
   var S = defaults();
@@ -115,11 +171,13 @@
     if (!raw) return;
     var got;
     try { got = JSON.parse(raw); } catch (e) { return; }
-    if (!got || got.v !== 1) return;             // a future format: start clean rather than guess
+    // v2 reshaped the panel (per-piece honing, accessory/gem controls, fight
+    // and trait blocks), so a v1 blob has nothing worth migrating: start clean.
+    if (!got || got.v !== 2) return;
     var d = defaults(), k;
     for (k in d) if (Object.prototype.hasOwnProperty.call(d, k)) {
       if (got[k] === undefined || got[k] === null) continue;
-      if (k === "adv" || k === "gear" || k === "ov" || k === "econ") {
+      if (k === "adv" || k === "gear" || k === "ov" || k === "econ" || k === "kit" || k === "fight" || k === "traits") {
         for (var a in d[k]) if (got[k][a] !== undefined && got[k][a] !== null) d[k][a] = got[k][a];
       } else {
         d[k] = got[k];
@@ -140,20 +198,63 @@
     S.rollsLeft = clamp(Math.round(S.rollsLeft), 0, 20);
     S.rollsTotal = clamp(Math.round(S.rollsTotal), 0, 20);
     if (!S.skills.length) S.skills = [{ name: "", share: 100, cr: 90, cd: 280 }];
+    normalizeShares();
+    fitTraits();
+  }
+
+  /**
+   * Exactly two traits active, every value inside the grade's band. Called on
+   * load and whenever the grade moves, so a Relic bracelet can never show an
+   * Ancient-only 120.
+   */
+  function fitTraits() {
+    var band = traitBand(), i, k, on = [];
+    for (i = 0; i < TRAIT_KEYS.length; i++) {
+      k = TRAIT_KEYS[i];
+      if (!S.traits[k]) S.traits[k] = { on: false, v: band[1] };
+      S.traits[k].v = clamp(Math.round(num(S.traits[k].v, band[1])), band[0], band[1]);
+      if (S.traits[k].on) on.push(k);
+    }
+    // traitOrder is the eviction queue: oldest activation first.
+    var order = [];
+    for (i = 0; i < (S.traitOrder || []).length; i++) {
+      if (on.indexOf(S.traitOrder[i]) >= 0 && order.indexOf(S.traitOrder[i]) === -1) order.push(S.traitOrder[i]);
+    }
+    for (i = 0; i < on.length; i++) if (order.indexOf(on[i]) === -1) order.push(on[i]);
+    while (order.length > 2) { S.traits[order.shift()].on = false; }
+    for (i = 0; i < TRAIT_KEYS.length && order.length < 2; i++) {
+      if (order.indexOf(TRAIT_KEYS[i]) === -1) { S.traits[TRAIT_KEYS[i]].on = true; order.push(TRAIT_KEYS[i]); }
+    }
+    S.traitOrder = order;
+  }
+
+  /** Turn on `key`, evicting the least-recently-activated of the two on now. */
+  function activateTrait(key) {
+    if (S.traits[key].on) return false;                  // never drop below two
+    S.traits[key].on = true;
+    S.traitOrder.push(key);
+    while (S.traitOrder.length > 2) S.traits[S.traitOrder.shift()].on = false;
+    return true;
   }
 
   // ------------------------------------------------------------------
   // state -> model profile
   // ------------------------------------------------------------------
 
+  function pieceLevels() {
+    var g = S.gear, o = {}, i;
+    for (i = 0; i < PIECES.length; i++) o[PIECES[i][0]] = clamp(Math.round(num(g[PIECES[i][0]], 0)), 0, 25);
+    return o;
+  }
+
   function baseStats() {
     if (S.useOverride) {
       return { mainStatRaw: num(S.ov.mainStatRaw, 703826), weaponPowerRaw: num(S.ov.weaponPowerRaw, 241367), ilvl: null };
     }
-    var g = S.gear, a = S.adv;
+    var a = S.adv;
     return B.deriveBaseline({
-      pieceLevels: { head: g.other, shoulder: g.other, chest: g.other, pants: g.other, gloves: g.gloves, weapon: g.weapon },
-      msPct: a.msPct / 100, wpPct: a.wpPct / 100, baseApPct: a.baseApPct / 100, flatAP: a.flatAP,
+      pieceLevels: pieceLevels(),
+      msPct: a.msPct / 100, wpPct: wpPctOf() / 100, baseApPct: baseApPctOf() / 100, flatAP: a.flatAP,
       accessoryMainStat: a.accessoryMainStat, rosterBonus: a.rosterBonus
     });
   }
@@ -173,25 +274,27 @@
       ilvl: base.ilvl || 0,
       mainStatRaw: base.mainStatRaw,
       weaponPowerRaw: base.weaponPowerRaw,
-      msPct: a.msPct / 100, wpPct: a.wpPct / 100, baseApPct: a.baseApPct / 100, flatAP: a.flatAP,
+      msPct: a.msPct / 100, wpPct: wpPctOf() / 100, baseApPct: baseApPctOf() / 100, flatAP: a.flatAP,
       skills: sk,
-      master: !!a.master,
+      master: !!S.kit.master,
+      traitWeights: traitWeights(),
       addDamage: {
         weaponQuality: a.addWeapon / 100, pet: a.addPet / 100,
-        astrogemLv60: a.addAstrogem / 100, neck: a.addNeck / 100
+        astrogemLv60: a.addAstrogem / 100, neck: num(S.kit.neck, 0) / 100
       },
-      backAttackShare: a.backShare / 100,
-      frontAttackShare: a.frontShare / 100,
-      nonDirectionalShare: a.nonDirShare / 100,
+      backAttackShare: S.fight.back / 100,
+      frontAttackShare: S.fight.front / 100,
+      nonDirectionalShare: S.fight.nonDir / 100,
       staggeredShare: a.staggerShare / 100,
-      demonShare: a.demonShare / 100,
+      demonShare: S.fight.demon ? 1 : 0,
       demonBase: a.demonBase / 100,
       shieldUptime: a.shieldUptime / 100,
       allyDpsCount: a.allyCount,
       allyCritRate: 0.90, allyCritDamage: 2.8,
       enemyBaseDR: a.enemyDR / 100,
-      cooldownPenaltyWeight: a.cdWeight,
-      wpStacks20: a.wpStacks20, wpUptime21: a.wpUptime21 / 100, wpStacks22: a.wpStacks22,
+      cooldownPenaltyWeight: S.fight.cdWeight / 100,
+      // Families 20/21/22 are hard assumptions now (max stacks, full uptime);
+      // leaving them out lets the model's own defaults stand.
       atkMoveSpeedDamagePerPct: 0
     });
   }
@@ -286,77 +389,128 @@
       if (k === "weaponPower") wp = true;
       else if (k !== "atkMoveSpeed") only = false;
     }
-    return (wp && only) ? "Weapon Power" : null;      // null = decide by damage
+    return (wp && only) ? "Weapon Power" : null;      // null = decide by the family grade
+  }
+
+  // ---- the granted-slot picker ----
+  //
+  // The FAMILY box names the family and nothing else, prefixed by a letter
+  // grade. Roll values belong to the TIER box: they are a property of the tier,
+  // not of the family, and showing them twice confused the picker. The letters
+  // come from the canonical default profile (Bracelet.familyGrades), so they
+  // label the family rather than the current build and never shuffle mid-edit.
+
+  // The astrogem calculator's rank palette, so a letter reads the same across
+  // the two tools. D and F share the grey, as they do there.
+  var GRADE_COLOR = { S: "#cc5c81", A: "#7e5cc0", B: "#3b7fd0", C: "#4f9d5d", D: "#6f747a", F: "#6f747a" };
+  // Our low / mid / high are the game's Rare / Epic / Legendary rarities.
+  var TIER_META = {
+    low: { label: "Rare", color: "#5aa9e6" },
+    mid: { label: "Epic", color: "#c78cff" },
+    high: { label: "Legendary", color: "#ffb86b" }
+  };
+
+  var famGradeCache = {};
+  function famGrades(grade) {
+    if (!famGradeCache[grade]) famGradeCache[grade] = B.familyGrades(grade);
+    return famGradeCache[grade];
   }
 
   /**
-   * Every family a slot can hold, grouped and priced for THIS profile at the
-   * row's current tier. `msValue` prices the main-stat option at the number the
-   * row actually holds.
+   * The official labels carry placeholders (+A%, +X, +B%) that say nothing
+   * until the tier is known, and an ally-buff rider a damage dealer can ignore.
+   * Strip both and you are left with the family's name.
    */
-  function familyOptions(grade, profile, tier, msValue) {
+  function cleanFamLabel(fam) {
+    var s = fam.label
+      .replace(/;\s*ally[^;]*$/i, "")
+      .replace(/\(1\/party\)/g, "")
+      .replace(/[+−-]\s*[AXB]%?/g, "")
+      .replace(/\s+([;,])/g, "$1")
+      .replace(/\(\s*\)/g, "")
+      .replace(/\s{2,}/g, " ")
+      .trim()
+      .replace(/[;,]$/, "");
+    return s;
+  }
+
+  /** The tier's actual roll, formatted: percentages as %, stats as a count. */
+  function tierValueText(fam, grade, tier) {
+    var vals = fam.values[grade][tier], parts = [], i, j, c;
+    for (i = 0; i < vals.length; i++) {
+      c = null;
+      for (j = 0; j < fam.comp.length; j++) if (fam.comp[j].from === i) { c = fam.comp[j]; break; }
+      var flat = c && (c.k === "weaponPower" || c.k === "mainStat");
+      parts.push("+" + (flat ? nf(vals[i]) : vals[i] + "%"));
+    }
+    return parts.join(" / ");
+  }
+
+  /** Every family a slot can hold, grouped, letter-graded and sorted. */
+  function familyOptions(grade) {
+    var fg = famGrades(grade);
     var G = { Damage: [], Party: [], "Weapon Power": [], Stats: [], Junk: [] };
-    var i, t;
+    var i, g;
 
-    G.Stats.push({ val: "basic:mainStat", text: "Str / Dex / Int",
-      dmg: B.lineDamage({ cat: "basic", family: "mainStat", value: msValue }, grade, profile) });
-    G.Stats.push({ val: "basic:vitality", text: "Vitality", dmg: 0 });
+    G.Stats.push({ val: "basic:mainStat", text: "Str / Dex / Int", letter: fg.basic.mainStat.letter, avg: fg.basic.mainStat.avg });
+    G.Stats.push({ val: "basic:vitality", text: "Vitality", letter: fg.basic.vitality.letter, avg: 0 });
     for (i = 0; i < DATA.TRAITS.families.length; i++) {
-      G.Stats.push({ val: "trait:" + DATA.TRAITS.families[i].key, text: DATA.TRAITS.families[i].label + " (combat trait)", dmg: 0 });
+      var tk = DATA.TRAITS.families[i].key;
+      G.Stats.push({ val: "trait:" + tk, text: DATA.TRAITS.families[i].label + " (combat trait)", letter: fg.trait[tk].letter, avg: 0 });
     }
-
     for (i = 0; i < DATA.SPECIALS.length; i++) {
-      var fam = DATA.SPECIALS[i], best = 0, here = 0;
-      for (t = 0; t < TIERS.length; t++) {
-        var d = B.lineDamage({ cat: "special", family: fam.id, tier: TIERS[t] }, grade, profile);
-        if (d > best) best = d;
-        if (TIERS[t] === tier) here = d;
-      }
-      var g = famGroupOf(fam);
-      if (!g) g = best > 1e-9 ? "Damage" : "Junk";
-      G[g].push({ val: "sp:" + fam.id, text: fam.label, dmg: here, best: best });
+      var fam = DATA.SPECIALS[i], e = fg.special[fam.id];
+      g = famGroupOf(fam);
+      if (!g) g = e.avg > 1e-9 ? "Damage" : "Junk";
+      G[g].push({ val: "sp:" + fam.id, text: cleanFamLabel(fam), letter: e.letter, avg: e.avg });
     }
 
-    var groups = [], order = ["Damage", "Party", "Weapon Power", "Stats", "Junk"], max = 0;
+    var groups = [], order = ["Damage", "Party", "Weapon Power", "Stats", "Junk"];
     for (i = 0; i < order.length; i++) {
-      var items = G[order[i]];
-      items.sort(function (a, b) { return b.dmg - a.dmg; });
-      for (t = 0; t < items.length; t++) if (items[t].dmg > max) max = items[t].dmg;
-      groups.push({ label: order[i], items: items });
-    }
-    for (i = 0; i < groups.length; i++) {
-      for (t = 0; t < groups[i].items.length; t++) groups[i].items[t].color = dmgColor(groups[i].items[t].dmg, max);
+      G[order[i]].sort(function (a, b) { return b.avg - a.avg; });
+      groups.push({ label: order[i], items: G[order[i]] });
     }
     return groups;
   }
 
-  // Colour by share of the best line on offer, so the scale follows the profile
-  // rather than a hardcoded idea of what "good" is.
-  function dmgColor(d, max) {
-    if (d <= 1e-9) return "var(--useless)";
-    if (max <= 0) return "var(--text)";
-    var f = d / max;
-    if (f >= 0.75) return "var(--high)";
-    if (f >= 0.50) return "var(--mid)";
-    if (f >= 0.25) return "var(--low)";
-    return "var(--dim)";
-  }
-
   function pickerHtml(id, groups, selected) {
-    var h = '<select id="' + id + '" class="bc-fam">', i, j;
+    // The box is narrow and long labels are clipped, so the full name of the
+    // family currently in the slot leads the tooltip — nothing is lost.
+    var full = "", i, j;
+    for (i = 0; i < groups.length; i++) {
+      for (j = 0; j < groups[i].items.length; j++) if (groups[i].items[j].val === selected) full = groups[i].items[j].text;
+    }
+    var gloss = (full ? full + " — " : "") +
+      "the effect family this slot holds. The letter is the family's own grade, F to S: how good its AVERAGE roll is next to the best family in the game, always measured on the default character so the letters mean the same thing to everyone. What a particular roll is worth is the rarity box beside it.";
+    var h = '<select id="' + id + '" class="bc-fam" title="' + esc(full) + '" data-gloss="' + esc(gloss) + '">';
     h += '<option value="none"' + (selected === "none" ? " selected" : "") + '>— empty —</option>';
     for (i = 0; i < groups.length; i++) {
       if (!groups[i].items.length) continue;
       h += '<optgroup label="' + esc(groups[i].label) + '">';
       for (j = 0; j < groups[i].items.length; j++) {
         var it = groups[i].items[j];
-        h += '<option value="' + esc(it.val) + '" style="color:' + it.color + '"' +
-          (selected === it.val ? " selected" : "") + '>' +
-          esc(it.text) + "  ·  " + signPct(pct(it.dmg)) + '</option>';
+        h += '<option value="' + esc(it.val) + '" style="color:' + GRADE_COLOR[it.letter] + '" title="' + esc(it.text) + '"' +
+          (selected === it.val ? " selected" : "") + ">" +
+          esc(it.letter + " · " + it.text) + "</option>";
       }
       h += "</optgroup>";
     }
     return h + "</select>";
+  }
+
+  /** The tier box: the three rarities, each showing what it actually rolls. */
+  function tierHtml(id, fam, grade, selected) {
+    var order = ["high", "mid", "low"], h = "", i, t;
+    for (i = 0; i < order.length; i++) {
+      t = order[i];
+      h += '<option value="' + t + '" style="color:' + TIER_META[t].color + '"' +
+        (selected === t ? " selected" : "") + ">" +
+        esc(TIER_META[t].label + " · " + tierValueText(fam, grade, t)) + "</option>";
+    }
+    var cur = TIER_META[selected] ? TIER_META[selected].color : "var(--text)";
+    return '<select id="' + id + '" style="color:' + cur + ';font-weight:700" data-gloss="' +
+      "The rarity this line rolled at, and what it is worth. Legendary is the family's best roll, Epic the middle one, Rare the weakest; the numbers are the actual values for the family on the left." +
+      '">' + h + "</select>";
   }
 
   // ------------------------------------------------------------------
@@ -484,20 +638,21 @@
       profile.mainStatRaw, profile.weaponPowerRaw, profile.msPct, profile.wpPct, profile.baseApPct, profile.flatAP,
       profile.skills, profile.master, profile.addDamage, profile.backAttackShare, profile.frontAttackShare,
       profile.nonDirectionalShare, profile.staggeredShare, profile.demonShare, profile.demonBase,
-      profile.shieldUptime, profile.allyDpsCount, profile.enemyBaseDR, profile.cooldownPenaltyWeight
+      profile.shieldUptime, profile.allyDpsCount, profile.enemyBaseDR, profile.cooldownPenaltyWeight,
+      profile.traitWeights
     ]);
   }
 
   // Gold is deliberately NOT in the key: value = (expectedFinal − baseline) × gpd
   // is arithmetic we redo here, so moving the gold slider never re-solves.
   function keyOf(profile, granted, rolls) {
-    return JSON.stringify([S.grade, S.slots, rolls, fixedLines(), granted]) + "|" + profileSig(profile);
+    return JSON.stringify([S.grade, S.slots, rolls, fixedLines(), granted, traitValues()]) + "|" + profileSig(profile);
   }
 
   function ensureWorker() {
     if (worker) return worker;
     try {
-      worker = new Worker("solver-worker.js?v=2");
+      worker = new Worker("solver-worker.js?v=3");
     } catch (e) {
       worker = null;
       return null;
@@ -571,6 +726,7 @@
     setBusy(true);
     return send("solve", {
       grade: S.grade, profile: profile, fixedLines: fixedLines(), grantedLines: granted,
+      traitValues: traitValues(),
       slots: S.slots, rollsLeft: rolls, goldPer1Pct: 0, baselinePct: 0,
       ctxKey: k, keepCtx: o.keepCtx !== false
     }).then(function (res) {
@@ -655,22 +811,88 @@
       '<input id="' + fldId(path) + '" type="checkbox" data-k="' + path + '" data-t="chk"' + (getPath(S, path) ? " checked" : "") + "> " + esc(label) + "</label></div>";
   }
 
+  // ------------------------------------------------------------------
+  // mouse-first controls
+  //
+  // Sliders, segmented buttons and toggles all read and write S through the
+  // same data-k path the number fields use, so persistence comes for free.
+  // Sliders are native <input type=range>; there is no custom drag code.
+  // ------------------------------------------------------------------
+
+  function chipId(path) { return fldId(path) + "-chip"; }
+  // Chip formats live in a map keyed by name so a drag can re-render the chip
+  // from the DOM alone, without hunting for the function that drew it.
+  var FMT = {
+    plus: function (v) { return "+" + v; },
+    pct: function (v) { return v + "%"; },
+    pct1: function (v) { return fx(v, 1) + "%"; },
+    lv: function (v) { return "Lv " + v; },
+    raw: function (v) { return String(v); }
+  };
+
+  /**
+   * o.cls    extra class on the row ("wep" paints the weapon track accent)
+   * o.gloss  tooltip on the label
+   * o.ticks  labels drawn under the track, one per step
+   * o.edit   the value chip becomes a number input when clicked
+   */
+  function slider(path, label, min, max, step, fmtKey, o) {
+    o = o || {};
+    var fmt = FMT[fmtKey] || FMT.raw;
+    var v = num(getPath(S, path), min), t = "";
+    if (o.ticks) {
+      t = '<div class="bc-ticks" style="grid-template-columns:repeat(' + o.ticks.length + ',1fr)">';
+      for (var i = 0; i < o.ticks.length; i++) t += "<span>" + esc(o.ticks[i]) + "</span>";
+      t += "</div>";
+    }
+    return '<div class="bc-sl' + (o.cls ? " " + o.cls : "") + '">' +
+      '<label class="lb" for="' + fldId(path) + '"' + (o.gloss ? ' data-gloss="' + esc(o.gloss) + '"' : "") + ">" + esc(label) + "</label>" +
+      '<div class="tk"><input id="' + fldId(path) + '" type="range" data-k="' + path + '" data-t="rng" data-fmt="' + esc(fmtKey) + '"' +
+        ' min="' + min + '" max="' + max + '" step="' + step + '" value="' + esc(v) + '"' +
+        (o.disabled ? " disabled" : "") + ">" + t + "</div>" +
+      '<span class="chip' + (o.edit ? " ed" : "") + '" id="' + chipId(path) + '"' +
+        (o.edit ? ' data-editk="' + path + '" data-min="' + min + '" data-max="' + max + '" data-step="' + step + '" title="Click to type an exact value"' : "") +
+        ">" + esc(fmt(v)) + "</span>" +
+      "</div>";
+  }
+
+  function segmented(path, label, options, fmt, gloss) {
+    var cur = String(getPath(S, path)), h = "", i, v;
+    for (i = 0; i < options.length; i++) {
+      v = options[i];
+      h += '<button type="button" data-seg="' + path + '" data-v="' + esc(v) + '" aria-pressed="' +
+        (String(v) === cur ? "true" : "false") + '">' + esc(fmt(v)) + "</button>";
+    }
+    return '<div class="bc-segrow"><span class="lb"' + (gloss ? ' data-gloss="' + esc(gloss) + '"' : "") + ">" + esc(label) + "</span>" +
+      '<div class="bc-seg" role="group" aria-label="' + esc(label) + '">' + h + "</div></div>";
+  }
+
+  function toggle(path, label, gloss) {
+    var on = !!getPath(S, path);
+    return '<button type="button" class="mbtn bc-tgl" data-tgl="' + path + '" aria-pressed="' + (on ? "true" : "false") + '"' +
+      (gloss ? ' data-gloss="' + esc(gloss) + '"' : "") + ">" + esc(label) + " · " + (on ? "on" : "off") + "</button>";
+  }
+
   function styleBlock() {
     return "<style>" +
-      // The inputs panel sticks, but a tall sticky block would cover the whole
-      // screen while you read the results under it. Cap it and let it scroll
-      // inside itself; below tablet width it just scrolls with the page.
-      "#tab-calculator #bc-inputs{max-height:78vh;overflow:auto}" +
-      "@media(max-width:760px){#tab-calculator #bc-inputs{position:static;max-height:none;overflow:visible}}" +
+      // The control deck rides in normal document flow. It used to stick and
+      // scroll inside itself, which meant you had to collapse the panel before
+      // you could read the results under it — Shizu's complaint, 2026-08-11.
+      "#tab-calculator #bc-inputs{position:static;max-height:none;overflow:visible}" +
+      "#tab-calculator .ihdr{cursor:pointer}" +
       "#tab-calculator .bc-busy{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--border);margin-left:8px;vertical-align:middle;transition:background .15s}" +
       "#tab-calculator .bc-busy.on{background:var(--accent);animation:bc-pulse 1s ease-in-out infinite}" +
       "@keyframes bc-pulse{0%,100%{opacity:.25}50%{opacity:1}}" +
       "#tab-calculator .bc-sub{font-size:11px;color:var(--dim);margin:-4px 0 10px}" +
       "#tab-calculator .bc-hdrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}" +
       "#tab-calculator .bc-fam{width:100%}" +
-      "#tab-calculator .bc-slot{display:grid;grid-template-columns:44px minmax(0,1fr) 120px 130px;gap:8px;align-items:end;margin-bottom:8px}" +
+      "#tab-calculator .bc-slot{display:grid;grid-template-columns:44px 168px minmax(0,300px) 120px;gap:8px;align-items:end;margin-bottom:8px;justify-content:start}" +
+      // A long family label is clipped, not stretched: the full name rides in
+      // the tooltip and the title attribute.
+      "#tab-calculator .bc-fam{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
       "#tab-calculator .bc-slot .sn{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;padding-bottom:7px}" +
       "@media(max-width:640px){#tab-calculator .bc-slot{grid-template-columns:1fr;gap:5px}#tab-calculator .bc-slot .sn{padding-bottom:0}}" +
+      "@media(max-width:900px) and (min-width:641px){#tab-calculator .bc-slot{grid-template-columns:44px 150px minmax(0,1fr) 110px}}" +
       // headline cards
       "#tab-calculator .bc-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:14px}" +
       "#tab-calculator .bc-card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 14px}" +
@@ -711,10 +933,59 @@
       "#tab-calculator .bc-hist li{padding:6px 0;border-bottom:1px solid var(--border);line-height:1.5}" +
       "#tab-calculator .bc-hist li:last-child{border-bottom:none}" +
       "#tab-calculator .bc-warn{color:var(--bad);font-size:12.5px;margin:8px 0}" +
-      "#tab-calculator .bc-skill{display:grid;grid-template-columns:minmax(0,1.4fr) 90px 100px 110px 32px;gap:8px;align-items:end;margin-bottom:7px}" +
+      // ---- the two-column control deck -------------------------------
+      "#tab-calculator .bc-deck{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px 22px}" +
+      "@media(max-width:900px){#tab-calculator .bc-deck{grid-template-columns:1fr;gap:0}}" +
+      "#tab-calculator .bc-col{min-width:0}" +
+      "#tab-calculator .bc-gearhdr{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin:12px 0 8px}" +
+      "#tab-calculator .bc-gearhdr .subh{margin:0}" +
+      "#tab-calculator .bc-ilvl{text-align:right;line-height:1}" +
+      "#tab-calculator .bc-ilvl .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);font-weight:700}" +
+      "#tab-calculator .bc-ilvl .v{font-size:28px;font-weight:800;letter-spacing:-.02em;color:var(--accent);font-variant-numeric:tabular-nums;margin-top:3px}" +
+      // ---- slider rows ------------------------------------------------
+      "#tab-calculator .bc-sl{display:grid;grid-template-columns:96px minmax(0,1fr) 52px;gap:10px;align-items:center;margin-bottom:6px}" +
+      "#tab-calculator .bc-sl .lb{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--dim);line-height:1.25}" +
+      "#tab-calculator .bc-sl .chip{font-size:12.5px;font-weight:700;color:var(--accent);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}" +
+      "#tab-calculator .bc-sl .chip.ed{cursor:text;text-decoration:underline dotted;text-underline-offset:3px}" +
+      "#tab-calculator .bc-sl .chip input{width:100%;background:var(--panel2);color:var(--text);border:1px solid var(--accent);border-radius:5px;padding:2px 4px;font:inherit;font-size:12px;text-align:right}" +
+      "#tab-calculator .bc-sl .tk{min-width:0}" +
+      "#tab-calculator .bc-ticks{display:grid;font-size:9.5px;color:var(--dim);text-align:center;margin-top:-2px;letter-spacing:.03em}" +
+      // Native range, styled to the house theme — no custom drag code.
+      "#tab-calculator input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:transparent;margin:0;padding:0;cursor:pointer;display:block}" +
+      "#tab-calculator input[type=range]::-webkit-slider-runnable-track{height:5px;border-radius:3px;background:var(--panel2);border:1px solid var(--border)}" +
+      "#tab-calculator input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:var(--accent);border:none;margin-top:-6px}" +
+      "#tab-calculator input[type=range]::-moz-range-track{height:5px;border-radius:3px;background:var(--panel2);border:1px solid var(--border)}" +
+      "#tab-calculator input[type=range]::-moz-range-thumb{width:15px;height:15px;border-radius:50%;background:var(--accent);border:none}" +
+      "#tab-calculator input[type=range]:focus{outline:none}" +
+      "#tab-calculator input[type=range]:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 3px rgba(102,199,255,.35)}" +
+      "#tab-calculator input[type=range]:focus-visible::-moz-range-thumb{box-shadow:0 0 0 3px rgba(102,199,255,.35)}" +
+      "#tab-calculator input[type=range]:disabled{opacity:.45;cursor:not-allowed}" +
+      // The weapon is the only piece that moves weapon power: mark its track.
+      "#tab-calculator .bc-sl.wep input[type=range]::-webkit-slider-runnable-track{background:rgba(102,199,255,.30);border-color:var(--accent)}" +
+      "#tab-calculator .bc-sl.wep input[type=range]::-moz-range-track{background:rgba(102,199,255,.30);border-color:var(--accent)}" +
+      // ---- segmented controls and toggles -----------------------------
+      "#tab-calculator .bc-segrow{display:grid;grid-template-columns:96px minmax(0,1fr);gap:10px;align-items:center;margin-bottom:6px}" +
+      "#tab-calculator .bc-seg{display:flex;gap:4px}" +
+      "#tab-calculator .bc-seg button{flex:1 1 0;min-width:0;background:var(--panel2);border:1px solid var(--border);color:var(--dim);" +
+        "border-radius:6px;padding:5px 2px;font-size:11.5px;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap}" +
+      "#tab-calculator .bc-seg button:hover{color:var(--text);border-color:var(--accent)}" +
+      "#tab-calculator .bc-seg button[aria-pressed=true]{color:#06121f;background:var(--accent);border-color:var(--accent)}" +
+      "#tab-calculator .bc-tgl[aria-pressed=true]{color:var(--accent);border-color:var(--accent);background:rgba(102,199,255,.16)}" +
+      "#tab-calculator .bc-tgl[aria-pressed=true]:hover{color:var(--accent)}" +
+      // ---- the bracelet's two fixed combat traits ---------------------
+      "#tab-calculator .bc-sl.bc-trrow{grid-template-columns:74px 96px 72px;justify-content:start}" +
+      "#tab-calculator .bc-trrow input[type=number]{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 7px;font:inherit;font-size:13px;width:100%}" +
+      "#tab-calculator .bc-trrow input[type=number]:focus{outline:1px solid var(--accent)}" +
+      "#tab-calculator .bc-trrow input:disabled{opacity:.45;cursor:not-allowed}" +
+      "#tab-calculator .bc-tract{padding:4px 8px;font-size:11px;width:100%}" +
+      "@media(max-width:640px){#tab-calculator .bc-sl.bc-trrow{grid-template-columns:62px 84px 66px;gap:6px}}" +
+      // ---- skills: typed, not slid (Shizu's call for this block only) ----
+      "#tab-calculator .bc-skill{display:grid;grid-template-columns:110px minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) 26px;gap:7px;align-items:end;margin-bottom:7px}" +
       "@media(max-width:640px){#tab-calculator .bc-skill{grid-template-columns:1fr 1fr}" +
-      "#tab-calculator .bc-skill .bc-x{justify-self:start;width:44px}}" +
-      "#tab-calculator .bc-x{background:var(--panel2);border:1px solid var(--border);color:var(--dim);border-radius:6px;height:29px;cursor:pointer;font-family:inherit;font-size:14px}" +
+      "#tab-calculator .bc-skill .bc-x{justify-self:start;width:44px}" +
+      "#tab-calculator .bc-sl,#tab-calculator .bc-segrow{grid-template-columns:82px minmax(0,1fr) 46px;gap:7px}" +
+      "#tab-calculator .bc-segrow{grid-template-columns:82px minmax(0,1fr)}}" +
+      "#tab-calculator .bc-x{background:var(--panel2);border:1px solid var(--border);color:var(--dim);border-radius:6px;height:29px;width:100%;padding:0;cursor:pointer;font-family:inherit;font-size:14px;line-height:1}" +
       "#tab-calculator .bc-x:hover{color:var(--bad);border-color:var(--bad)}" +
       // A checkbox has no field above it to line up with, and its label is a
       // sentence rather than a caption — give it the whole row.
@@ -731,16 +1002,30 @@
       '  <div class="ihdr"><span>Character &amp; bracelet<span class="bc-busy" id="bc-busy"></span></span>' +
       '    <span class="tgl" id="bc-toggle"><span id="bc-caret">&#9662;</span></span></div>' +
       '  <div id="bc-inputs-body">' +
-      '    <div class="ig" id="bc-basics"></div>' +
-      '    <div class="subh">Skills — damage share, crit rate, crit damage</div>' +
-      '    <div id="bc-skills"></div>' +
-      '    <div class="barrow"><button class="mbtn" id="bc-addskill" type="button">+ Add skill</button>' +
-      '      <span class="note" id="bc-sharenote"></span></div>' +
-      '    <div class="subh">Economy</div>' +
-      '    <div class="ig" id="bc-econ"></div>' +
-      '    <div class="barrow">' +
-      '      <button class="mbtn" id="bc-advtoggle" type="button">Advanced ▾</button>' +
-      '      <button class="mbtn" id="bc-reset" type="button">Reset to defaults</button>' +
+      '    <div id="bc-top"></div>' +
+      '    <div class="bc-deck">' +
+      '      <div class="bc-col">' +
+      '        <div class="bc-gearhdr"><div class="subh">Gear</div>' +
+      '          <div class="bc-ilvl"><div class="k" data-gloss="The mean of your six pieces\' item levels, live. Serca level 0 is item level 1675 and every honing level is +5, so +25 across the board is 1800. Item level itself does not enter the damage math — the honing levels behind it do.">Item level</div>' +
+      '            <div class="v" id="bc-ilvl">—</div></div></div>' +
+      '        <div id="bc-gear"></div>' +
+      '        <div id="bc-kit"></div>' +
+      '        <div class="barrow">' +
+      '          <button class="mbtn" id="bc-advtoggle" type="button">Advanced ▾</button>' +
+      '          <button class="mbtn" id="bc-reset" type="button">Reset</button>' +
+      '        </div>' +
+      '      </div>' +
+      '      <div class="bc-col">' +
+      '        <div class="subh">Fight</div>' +
+      '        <div id="bc-fight"></div>' +
+      '        <div class="subh">Traits</div>' +
+      '        <div id="bc-traitw"></div>' +
+      '        <div class="subh">Skills — share, crit rate, crit damage</div>' +
+      '        <div id="bc-skills"></div>' +
+      '        <div class="barrow"><button class="mbtn" id="bc-addskill" type="button">+ Add skill</button></div>' +
+      '        <div class="subh">Economy</div>' +
+      '        <div id="bc-econ"></div>' +
+      '      </div>' +
       '    </div>' +
       '    <div id="bc-adv" style="display:none"></div>' +
       '  </div>' +
@@ -753,6 +1038,9 @@
       '  <div class="bc-hdrow"><h2 style="margin:0">Bracelet</h2>' +
       '    <button class="mbtn" id="bc-clear" type="button">Mark as unrolled</button></div>' +
       '  <div class="bc-sub" id="bc-slotnote"></div>' +
+      '  <div class="subh">Combat traits — the two fixed lines</div>' +
+      '  <div id="bc-traits"></div>' +
+      '  <div class="subh">Granted slots</div>' +
       '  <div id="bc-slots"></div>' +
       '  <div id="bc-fixed"></div>' +
       '</div>';
@@ -767,79 +1055,259 @@
   // input rendering
   // ------------------------------------------------------------------
 
-  function renderBasics() {
-    var lv = [], i;
-    for (i = 0; i <= 25; i++) lv.push({ v: i, t: "+" + i });
-    var ch = slotChoices(), chOpts = [], j;
-    for (j = 0; j < ch.length; j++) chOpts.push({ v: ch[j], t: ch[j] + " slots" });
-
-    var h = "";
+  function renderTop() {
+    var h = '<div class="ig">';
     h += fldSel("grade", "Grade", [{ v: "ancient", t: "Ancient" }, { v: "relic", t: "Relic" }],
       "Ancient bracelets roll 2 or 3 granted slots and higher line values; Relic rolls 1 or 2.");
-    h += fldSel("slots", "Granted slots", chOpts,
-      "The rerollable lines. Ancient: 3 slots on 25% of drops, 2 on 75%. Slot count moves the value of an unrolled bracelet a lot.");
-    h += fldNum("rollsLeft", "Rolls left", "1", "A fresh bracelet has 4 rolls plus up to 3 reconversion-ticket rolls = 7. The cut flow counts this down.");
-    h += fldChk("useOverride", "Enter WP / main stat directly", "Skip the honing table and type the two raw numbers straight off your character sheet (before the % buckets).");
-    if (S.useOverride) {
-      h += fldNum("ov.mainStatRaw", "Main stat (raw)", "1", "Before the main-stat % bucket: the five armour pieces + accessories + base + roster.");
-      h += fldNum("ov.weaponPowerRaw", "Weapon power (raw)", "1", "Before the weapon-power % bucket: the weapon's table value.");
-    } else {
-      h += fldSel("gear.weapon", "Weapon honing", lv, "Serca honing level of the weapon. Level 25 = item level 1800.");
-      h += fldSel("gear.gloves", "Gloves honing", lv, "Serca honing level of the gloves.");
-      h += fldSel("gear.other", "Other four", lv, "Head, shoulder, chest and pants — all at this honing level.");
-    }
-    $("bc-basics").innerHTML = h;
-    updateBasicsNote();
+    h += fldSel("slots", "Granted slots", (function () {
+      var ch = slotChoices(), o = [], j;
+      for (j = 0; j < ch.length; j++) o.push({ v: ch[j], t: ch[j] + " slots" });
+      return o;
+    })(), "The rerollable lines. Ancient: 3 slots on 25% of drops, 2 on 75%. Slot count moves the value of an unrolled bracelet a lot.");
+    h += fldNum("rollsLeft", "Rolls left", "1",
+      "A fresh bracelet has 4 rolls plus up to 3 reconversion-ticket rolls = 7. The cut flow counts this down.");
+    h += "</div>";
+    h += fldChk("useOverride", "Enter WP / main stat directly",
+      "Skip the honing sliders and type the two raw numbers straight off your character sheet (before the % buckets).");
+    $("bc-top").innerHTML = h;
   }
 
-  // The live read-out under the bracelet header. Split out of renderBasics so a
-  // keystroke can refresh it without rebuilding the fields under the cursor.
+  // ---- left column: GEAR ----
+
+  function renderGear() {
+    var h = "", i, k;
+    if (S.useOverride) {
+      h += '<div class="ig">';
+      h += fldNum("ov.mainStatRaw", "Main stat (raw)", "1", "Before the main-stat % bucket: the five armour pieces + accessories + base + roster.");
+      h += fldNum("ov.weaponPowerRaw", "Weapon power (raw)", "1", "Before the weapon-power % bucket: the weapon's table value.");
+      h += "</div>";
+      h += '<div class="note">The percentage buckets still apply on top: main stat ' + fx(S.adv.msPct, 1) +
+        "%, weapon power " + fx(wpPctOf(), 1) + "%, attack power " + fx(baseApPctOf(), 1) +
+        "%. Change them under Advanced.</div>";
+    } else {
+      for (i = 0; i < PIECES.length; i++) {
+        k = PIECES[i][0];
+        h += slider("gear." + k, PIECES[i][1], 0, 25, 1, "plus", {
+          cls: k === "weapon" ? "wep" : "",
+          gloss: k === "weapon"
+            ? "Serca honing level of the weapon. It alone sets weapon power; +25 is item level 1800."
+            : "Serca honing level of the " + PIECES[i][1].toLowerCase() + ". The five armour pieces feed main stat."
+        });
+      }
+    }
+    $("bc-gear").innerHTML = h;
+    updateIlvl();
+  }
+
+  /** The big number the eye checks after every slider move. */
+  function updateIlvl() {
+    var el = $("bc-ilvl");
+    if (!el) return;
+    el.textContent = S.useOverride ? "—" : fx(ilvlExact(), 2);
+  }
+
+  function renderKit() {
+    var box = $("bc-kit");
+    if (!box) return;
+    if (S.useOverride) { box.innerHTML = ""; return; }
+    var pc = function (v) { return v + "%"; };
+    var h = "";
+    h += segmented("kit.neck", "Neck dmg", [0, 0.7, 1.6, 2.6], pc,
+      "Your necklace's additional-damage line. It joins one additive pool with the weapon, pet and astrogem grid, and a bracelet line worth +3% is diluted against that whole pool. 0.7% is the low tier, 2.6% a high roll, 0% no line at all.");
+    h += segmented("kit.ear1", "Earring 1 WP", [0, 0.8, 1.8, 3], pc,
+      "The first earring's weapon-power line. Both earrings plus karma make the weapon-power percentage bucket, which multiplies your raw weapon power and every flat weapon-power line the bracelet gives you.");
+    h += segmented("kit.ear2", "Earring 2 WP", [0, 0.8, 1.8, 3], pc,
+      "The second earring's weapon-power line. Same bucket as the first.");
+    h += slider("kit.gems", "Damage gems", 6, 10, 1, "lv",
+      { ticks: ["6", "7", "8", "9", "10"],
+        gloss: "All eleven damage gems at this level. Per gem: lv6 0.4% · lv7 0.6% · lv8 0.8% · lv9 1.0% · lv10 1.2% attack power. It cancels out of most line ratios, but it shifts the balance between the square-root term and flat attack power." });
+    h += '<div class="barrow">' +
+      toggle("kit.stone", "9/7 stone",
+        "A 9/7 ability stone is +1.5% attack power on top of the eleven gems. Turn it off for a 9/6 or worse.") +
+      toggle("kit.master",
+        "Master", "The Master ark-grid node. Shizu's ruling: it counts as +7% additional damage and nothing else, which overrides the sheet reading that also credits crit rate.") +
+      "</div>";
+    h += '<div class="note" data-gloss="The two percentage buckets these controls add up to. Weapon power = earring 1 + earring 2 + karma. Attack power = eleven gems + the ability stone. Both are overridable under Advanced.">' +
+      "Weapon power bucket " + fx(wpPctOf(), 1) + "% · attack power bucket " + fx(baseApPctOf(), 1) + "%.</div>";
+    box.innerHTML = h;
+  }
+
+  // ---- right column: FIGHT / TRAITS / SKILLS / ECONOMY ----
+
+  function renderFight() {
+    var h = "";
+    h += slider("fight.back", "Back", 0, 100, 1, "pct",
+      { gloss: "How much of your damage lands from behind. A back-attack line is multiplied by this before it scores, so drop it to 0 if you never hit the back." });
+    h += slider("fight.front", "Front", 0, 100, 1, "pct",
+      { gloss: "How much of your damage lands on the head or front. Scales the front-attack lines the same way." });
+    h += slider("fight.nonDir", "Hitmaster", 0, 100, 1, "pct",
+      { gloss: "How much of your damage comes from skills with no positional requirement — what the Hitmaster lines pay for. Awakening does not count." });
+    h += slider("fight.cdWeight", "CD penalty wt", 0, 100, 1, "pct",
+      { gloss: "Family 15 buys damage with +2% cooldown. At 100% you are judged on burst, where the extra cooldown never bites; at 0% on sustained, where the damage is divided by 1.02. 70% is the shipped assumption." });
+    h += '<div class="barrow">' +
+      toggle("fight.demon", "Demon boss",
+        "On: the fight is a Demon or Archdemon boss, so demon-damage lines score in full — still diluted by the demon damage you already carry from cards and pets. Off: they score nothing.") +
+      "</div>";
+    $("bc-fight").innerHTML = h;
+  }
+
+  function renderTraitWeights() {
+    var h = "";
+    h += slider("fight.wSpec", "Spec weight", 0, 4, 0.1, "pct1",
+      { gloss: "What 100 points of Specialization is worth to your class, in % damage. There is no class table behind this — it is your call. A 120-point Spec line then scores value × weight ÷ 100." });
+    h += slider("fight.wSwift", "Swift weight", 0, 4, 0.1, "pct1",
+      { gloss: "What 100 points of Swiftness is worth to your class, in % damage. Crit needs no weight: it converts exactly, at 35 points of crit rate per 699 trait points, and is worth whatever that is to your skills." });
+    $("bc-traitw").innerHTML = h;
+  }
+
+  // ---- skill shares: always exactly 100 ----
+
+  /**
+   * Split `total` across `weights` as integers, largest remainder first. All
+   * weights zero means share it equally.
+   */
+  function distribute(weights, total) {
+    var n = weights.length, i, sum = 0, w = [];
+    for (i = 0; i < n; i++) { w.push(Math.max(0, num(weights[i], 0))); sum += w[i]; }
+    if (!n) return [];
+    if (sum <= 0) { for (i = 0; i < n; i++) w[i] = 1; sum = n; }
+    var floors = [], order = [], acc = 0;
+    for (i = 0; i < n; i++) {
+      var x = w[i] / sum * total, f = Math.floor(x);
+      floors.push(f); acc += f; order.push({ i: i, frac: x - f });
+    }
+    order.sort(function (a, b) { return (b.frac - a.frac) || (a.i - b.i); });
+    var rem = Math.round(total - acc);
+    for (i = 0; i < rem; i++) floors[order[i % n].i] += 1;
+    return floors;
+  }
+
+  /** Force the stored shares to integers summing to exactly 100. */
+  function normalizeShares() {
+    var w = [], i;
+    for (i = 0; i < S.skills.length; i++) w.push(num(S.skills[i].share, 0));
+    var got = distribute(w, 100);
+    for (i = 0; i < S.skills.length; i++) S.skills[i].share = got[i];
+  }
+
+  /** Move one share and rebalance the rest proportionally, total still 100. */
+  function setShare(idx, v) {
+    var n = S.skills.length, i, w = [], others = [];
+    if (n < 2) { S.skills[0].share = 100; return; }
+    v = clamp(Math.round(num(v, 0)), 0, 100);
+    for (i = 0; i < n; i++) if (i !== idx) { others.push(i); w.push(num(S.skills[i].share, 0)); }
+    var got = distribute(w, 100 - v);
+    S.skills[idx].share = v;
+    for (i = 0; i < others.length; i++) S.skills[others[i]].share = got[i];
+  }
+
+  /**
+   * Push the rebalanced shares back onto the other fields without a rebuild —
+   * `skip` is the box being typed in, which must keep its cursor.
+   */
+  function syncShares(skip) {
+    for (var i = 0; i < S.skills.length; i++) {
+      if (i === skip) continue;
+      var el = $("bc-sk-share-" + i);
+      if (el && String(el.value) !== String(S.skills[i].share)) el.value = S.skills[i].share;
+    }
+  }
+
+  /**
+   * Skills stay TYPED (Shizu reversed the slider call for this block only):
+   * a narrow name box and three compact number fields per skill. The share
+   * field is still policed — the numbers always add to exactly 100.
+   */
+  function renderSkills() {
+    var h = "", i, one = S.skills.length < 2;
+    for (i = 0; i < S.skills.length; i++) {
+      var s = S.skills[i];
+      h += '<div class="bc-skill">' +
+        '<div class="fld"><label>Name</label>' +
+        '<input type="text" data-sk="' + i + '" data-f="name" value="' + esc(s.name || "") + '" placeholder="name" aria-label="Skill name"></div>' +
+        '<div class="fld"><label data-gloss="How much of your damage this skill deals. The shares always add to exactly 100 — type one and the others move to make room. With a single skill it is locked at 100.">Share %</label>' +
+        '<input id="bc-sk-share-' + i + '" type="number" step="1" min="0" max="100" data-sk="' + i + '" data-f="share" value="' + esc(s.share) + '"' +
+        (one ? " disabled" : "") + "></div>" +
+        '<div class="fld"><label data-gloss="This skill\'s crit rate before any bracelet line. A crit-rate line is capped at 100%, which is why it quietly dies on a high-crit build.">Crit rate %</label>' +
+        '<input type="number" step="0.1" data-sk="' + i + '" data-f="cr" value="' + esc(s.cr) + '"></div>' +
+        '<div class="fld"><label data-gloss="What a crit deals, as a multiple. 280% means a crit hits for 2.8 times, not 3.8.">Crit dmg %</label>' +
+        '<input type="number" step="1" data-sk="' + i + '" data-f="cd" value="' + esc(s.cd) + '"></div>' +
+        '<button class="bc-x" type="button" data-delsk="' + i + '"' + (one ? " disabled" : "") +
+        ' title="Remove this skill">&times;</button>' +
+        "</div>";
+    }
+    $("bc-skills").innerHTML = h;
+  }
+
+  // ---- economy: a linear baseline and a LOG gold slider ----
+  // Gold per 1% spans two orders of magnitude, so the track is log10: position
+  // 0-200 maps to 100k-10M, each step about +2.3%.
+  var GPD_MIN = 100000, GPD_MAX = 10000000, GPD_STEPS = 200;
+  function sig3(v) {
+    if (!(v > 0)) return 0;
+    var e = Math.pow(10, Math.floor(Math.log(v) / Math.LN10) - 2);
+    return Math.round(v / e) * e;
+  }
+  function gpdPos(v) {
+    v = clamp(num(v, GPD_MIN), GPD_MIN, GPD_MAX);
+    return Math.round(GPD_STEPS * (Math.log(v) / Math.LN10 - 5) / 2);
+  }
+  function gpdFromPos(pos) {
+    return sig3(Math.pow(10, 5 + (clamp(pos, 0, GPD_STEPS) / GPD_STEPS) * 2));
+  }
+
+  function renderEcon() {
+    var h = '<div class="bc-sl">' +
+      '<label class="lb" for="bc-gpd" data-gloss="What one percent of damage is worth to you in gold. It is a rate you choose, not a market read — the same convention the accessory and astrogem tools use, so a bracelet, an accessory and a gem can be priced against each other. Higher for a whale roster, lower for a fresh one. The track is logarithmic: 100k at the left, 10M at the right.">Gold per 1%</label>' +
+      '<div class="tk"><input id="bc-gpd" type="range" data-gpd="1" min="0" max="' + GPD_STEPS + '" step="1" value="' + gpdPos(S.econ.gpd) + '"></div>' +
+      '<span class="chip" id="bc-gpd-chip">' + esc(gold(num(S.econ.gpd, 0))) + "</span></div>";
+    h += slider("econ.baseline", "Baseline %", 0, 25, 0.5, "pct1", {
+      edit: true,
+      gloss: "The bracelet you would wear instead. Worth is (expected final − baseline) × gold per 1%, so leaving it at 0 prices this bracelet against no bracelet at all. Click the number to type an exact one."
+    });
+    $("bc-econ").innerHTML = h;
+  }
+
+  // The live read-out under the bracelet header. Split out so a slider drag can
+  // refresh it without rebuilding the fields under the cursor.
   function updateBasicsNote() {
     var note = $("bc-slotnote");
     if (!note) return;
     var base = baseStats(), p = buildProfile();
     var msg = S.useOverride
       ? "Main stat " + nf(base.mainStatRaw) + " raw · weapon power " + nf(base.weaponPowerRaw) + " raw"
-      : "Item level " + base.ilvl + " · main stat " + nf(base.mainStatRaw) + " raw · weapon power " + nf(base.weaponPowerRaw) + " raw";
+      : "Item level " + fx(ilvlExact(), 2) + " · main stat " + nf(base.mainStatRaw) + " raw · weapon power " + nf(base.weaponPowerRaw) + " raw";
     msg += " · attack power " + nf(B.attackPower(p, 0, 0)) + " · additional damage pool " + fx(B.addDamagePool(p) * 100, 2) + "%";
-    note.textContent = msg + ". Leave every slot empty for an unrolled bracelet.";
+    msg += " · fixed traits " + signPct(pct(B.traitDamage(traitValues(), p)));
+    note.textContent = msg + ". Leave every granted slot empty for an unrolled bracelet.";
   }
 
-  function renderSkills() {
-    var h = "", i;
-    for (i = 0; i < S.skills.length; i++) {
-      var s = S.skills[i];
-      h += '<div class="bc-skill">' +
-        '<div class="fld"><label>Name (optional)</label><input type="text" data-sk="' + i + '" data-f="name" value="' + esc(s.name || "") + '" placeholder="e.g. Awakening"></div>' +
-        '<div class="fld"><label>Share %</label><input type="number" step="1" data-sk="' + i + '" data-f="share" value="' + esc(s.share) + '"></div>' +
-        '<div class="fld"><label>Crit rate %</label><input type="number" step="0.1" data-sk="' + i + '" data-f="cr" value="' + esc(s.cr) + '"></div>' +
-        '<div class="fld"><label>Crit damage %</label><input type="number" step="1" data-sk="' + i + '" data-f="cd" value="' + esc(s.cd) + '"></div>' +
-        '<button class="bc-x" type="button" data-delsk="' + i + '"' + (S.skills.length < 2 ? " disabled" : "") + '>&times;</button>' +
+  // ---- the bracelet's two fixed combat traits ----
+
+  function renderTraits() {
+    var box = $("bc-traits");
+    if (!box) return;
+    var band = traitBand(), h = "", i, k, t;
+    for (i = 0; i < TRAIT_KEYS.length; i++) {
+      k = TRAIT_KEYS[i];
+      t = S.traits[k];
+      // Typed, not slid: these are numbers read straight off the bracelet.
+      h += '<div class="bc-sl bc-trrow">' +
+        '<span class="lb" data-gloss="' + esc(TRAIT_GLOSS[k]) + '">' + esc(TRAIT_LABELS[k]) + "</span>" +
+        '<input id="bc-tr-' + k + '" type="number" data-tr="' + k + '"' +
+          ' min="' + band[0] + '" max="' + band[1] + '" step="1" value="' + esc(t.v) + '"' +
+          (t.on ? "" : " disabled") + ">" +
+        '<button type="button" class="mbtn bc-tgl bc-tract" data-tron="' + k + '" aria-pressed="' + (t.on ? "true" : "false") + '"' +
+          ' data-gloss="' + (t.on
+            ? "This trait is one of the two your bracelet carries. Turn a different one on to swap it out — there are always exactly two."
+            : "Turn this trait on. A bracelet carries exactly two, so whichever of the two has been on longest turns off.") + '">' +
+          (t.on ? "active" : "off") + "</button>" +
         "</div>";
     }
-    $("bc-skills").innerHTML = h;
-    updateShareNote();
-  }
-
-  function updateShareNote() {
-    var n = $("bc-sharenote");
-    if (!n) return;
-    var sum = 0, i;
-    for (i = 0; i < S.skills.length; i++) sum += num(S.skills[i].share, 0);
-    var ok = Math.abs(sum - 100) < 0.01;
-    n.textContent = ok ? "Shares sum to 100%."
-      : "Shares sum to " + fx(sum, 1) + "% — they are normalised for you, but they read cleaner at 100.";
-    n.className = ok ? "note" : "note bc-warn";
-  }
-
-  function renderEcon() {
-    var tiers = [], i;
-    for (i = 0; i < GPD_TIERS.length; i++) tiers.push({ v: GPD_TIERS[i], t: gold(GPD_TIERS[i]) + " gold" });
-    var h = fldSel("econ.gpd", "Gold per 1% damage", tiers,
-      "What one percent of damage is worth to you in gold — the same convention the accessory and astrogem tools use. Higher for a whale roster, lower for a fresh one.");
-    h += fldNum("econ.baseline", "Baseline bracelet %", "0.1",
-      "The bracelet you would use instead. Value is (expected final − baseline) × gold per 1%. Leave at 0 to price against no bracelet at all.");
-    $("bc-econ").innerHTML = h;
+    h += '<div class="note">Every bracelet comes with two combat traits, ' + band[0] + "&ndash;" + band[1] +
+      " points on " + (S.grade === "relic" ? "Relic" : "Ancient") +
+      ". They never reroll, so they are a constant added to every score below.</div>";
+    box.innerHTML = h;
   }
 
   function renderAdvanced() {
@@ -852,8 +1320,10 @@
 
     var h = '<div class="subh">Stat buckets</div><div class="ig">';
     h += fldNum("adv.msPct", "Main stat %", "0.1", "Everything multiplying raw main stat: 8% skins + 1% stronghold ranch by default.");
-    h += fldNum("adv.wpPct", "Weapon power %", "0.1", "6% from two earring weapon-power lines + 2.5% karma.");
-    h += fldNum("adv.baseApPct", "Attack power %", "0.1", "11 damage gems at level 9 (1.0% each) + a 9/7 ability stone (1.5%). It cancels out of most ratios but shifts the balance between the square-root term and flat attack power.");
+    h += fldNum("adv.karmaWp", "Karma weapon power %", "0.1", "Karma's share of the weapon-power bucket. The two earring lines are set in the Gear column.");
+    h += fldChk("adv.baseApOverride", "Override attack power % (ignore the gem slider)",
+      "By default the attack-power bucket is eleven gems at their level plus the ability stone. Tick this to type it instead.");
+    h += fldNum("adv.baseApPct", "Attack power %", "0.1", "It cancels out of most ratios but shifts the balance between the square-root term and flat attack power.");
     h += fldNum("adv.flatAP", "Flat attack power", "1", "Ark-grid cores. Flat attack power is what stops a weapon-power line from being a pure square-root ratio.");
     h += fldNum("adv.accessoryMainStat", "Accessory main stat", "1", "Neck 17,857 + two earrings 13,889 + two rings 12,897, all at the top of their range with no flat-stat rolls.");
     h += fldNum("adv.rosterBonus", "Roster bonus", "1", "Main stat from roster level.");
@@ -862,60 +1332,62 @@
     h += '<div class="subh">Additional damage pool</div><div class="ig">';
     h += fldNum("adv.addWeapon", "Weapon quality %", "0.1", "A 100-quality weapon gives 30%.");
     h += fldNum("adv.addPet", "Pet %", "0.1", "Pet additional damage.");
-    h += fldNum("adv.addNeck", "Necklace %", "0.1", "A high additional-damage necklace.");
     h += fldNum("adv.addAstrogem", "Astrogem grid %", "0.01", "60 grid levels × 0.080667% per level.");
-    h += fldChk("adv.master", "Master node (+7% additional damage)", "Shizu's ruling: the Master node counts as +7% additional damage and nothing else.");
     h += "</div>";
+    h += '<div class="note">The necklace line and the Master node are in the Gear column.</div>';
 
-    h += '<div class="subh">Where your damage lands</div><div class="ig">';
-    h += fldNum("adv.backShare", "Back attack %", "1", "Share of your damage that hits from behind. Left at 0 by default — set it and the back-attack lines start scoring.");
-    h += fldNum("adv.frontShare", "Front attack %", "1", "Share of your damage that hits the front.");
-    h += fldNum("adv.nonDirShare", "Non-directional %", "1", "Share from skills with no positional requirement (Awakening excluded).");
+    h += '<div class="subh">Fight assumptions</div><div class="ig">';
     h += fldNum("adv.staggerShare", "Stagger windows %", "1", "Share of your damage dealt while the boss is staggered.");
-    h += fldNum("adv.demonShare", "Demon bosses %", "1", "Share of your damage dealt to Demon / Archdemon bosses.");
     h += fldNum("adv.demonBase", "Demon damage held %", "0.1", "Demon damage you already carry from cards and pets — it dilutes a demon line.");
     h += fldNum("adv.shieldUptime", "Shield uptime %", "1", "How much of the fight your party sits under a shield, for the shielded-target line.");
     h += fldNum("adv.enemyDR", "Enemy damage reduction %", "1", "The boss's damage reduction before any shred. It sets how much a defense shred is worth: gain = (D+K)/(D(1−A)+K).");
-    h += fldNum("adv.cdWeight", "Burst weight", "0.05", "Family 15 trades +2% cooldown for damage. 1 scores pure burst (no penalty), 0 scores pure sustained; 0.5 is the mean of the two.");
     h += fldNum("adv.allyCount", "Ally DPS in party", "1", "How many other damage dealers share your party debuffs. Each is assumed to deal what you deal before the line.");
     h += "</div>";
-
-    h += '<div class="subh">Conditional weapon-power lines</div><div class="ig">';
-    h += fldNum("adv.wpStacks20", "Family 20 stacks held", "0.1", "The on-hit stacking weapon-power line caps at 6 stacks. 4.8 is roughly 80% average fill.");
-    h += fldNum("adv.wpUptime21", "Family 21 uptime %", "1", "The HP≥50% on-hit rider lasts 5s and refreshes on every hit, so it is up nearly all the time.");
-    h += fldNum("adv.wpStacks22", "Family 22 stacks held", "0.1", "One stack every 30s held for 120s settles at four.");
-    h += "</div>";
+    h += '<div class="note">The conditional weapon-power families (20, 21 and 22) are no longer knobs: they are scored at max stacks and full uptime.</div>';
 
     h += '<div class="subh">Fixed lines (come with the drop, never rerolled)</div>';
-    h += '<div class="bc-sub">Optional. They score their own damage and they lock their family and category slot out of every future roll, so they change what an empty bracelet is worth.</div>';
+    h += '<div class="bc-sub">Optional, and separate from the two combat traits above. They score their own damage and they lock their family and category slot out of every future roll, so they change what an empty bracelet is worth.</div>';
     h += '<div id="bc-fixedrows"></div>';
     h += '<div class="barrow"><button class="mbtn" id="bc-addfixed" type="button"' + (S.fixedRows.length >= 2 ? " disabled" : "") + '>+ Add fixed line</button></div>';
 
     box.innerHTML = h;
+    var apField = $(fldId("adv.baseApPct"));
+    if (apField && !S.adv.baseApOverride) { apField.value = fx(baseApPctOf(), 2); apField.disabled = true; }
     renderFixedRows();
   }
 
+  /** Every input control, rebuilt. Used by init, by Reset and by a shape change. */
+  function renderInputs() {
+    renderTop(); renderGear(); renderKit(); renderFight(); renderTraitWeights();
+    renderSkills(); renderEcon(); renderAdvanced(); renderTraits();
+    updateBasicsNote();
+  }
+
+
   function rowMarkup(idx, row, prefix, label) {
-    var grade = S.grade, profile = buildProfile();
+    var grade = S.grade;
     var isBasic = row.fam.indexOf("basic:") === 0;
     var isSpecial = row.fam.indexOf("sp:") === 0;
     var famKey = isBasic ? row.fam.slice(6) : "mainStat";
     var msValue = (row.value === null || row.value === undefined || row.value === "") ? defaultBasicValue(grade, famKey) : num(row.value, defaultBasicValue(grade, famKey));
-    var groups = familyOptions(grade, profile, row.tier || "mid", msValue);
+    var groups = familyOptions(grade);
     var rg = msRange(grade, famKey);
 
+    // Rarity first, family second: the rarity is the short, high-signal box and
+    // the family name is long, so the eye reads left to right without hopping.
     var h = '<div class="bc-slot">' +
-      '<div class="sn">' + esc(label) + "</div>" +
-      '<div class="fld">' + pickerHtml(prefix + "-fam-" + idx, groups, row.fam) + "</div>";
+      '<div class="sn">' + esc(label) + "</div>";
     if (isSpecial) {
-      h += '<div class="fld"><select id="' + prefix + "-tier-" + idx + '">' +
-        opts([{ v: "low", t: "Low (Heroic)" }, { v: "mid", t: "Mid (Epic)" }, { v: "high", t: "High (Legendary)" }], row.tier || "mid") +
-        "</select></div>";
+      var fam = DATA.SPECIAL_BY_ID[Number(row.fam.slice(3))];
+      h += '<div class="fld">' + (fam ? tierHtml(prefix + "-tier-" + idx, fam, grade, row.tier || "mid") : "") + "</div>";
     } else {
       h += "<div></div>";
     }
+    h += '<div class="fld">' + pickerHtml(prefix + "-fam-" + idx, groups, row.fam) + "</div>";
     if (isBasic) {
-      h += '<div class="fld"><input type="number" id="' + prefix + "-val-" + idx + '" step="1" min="' + rg[0] + '" max="' + rg[1] + '" value="' + msValue + '"></div>';
+      h += '<div class="fld"><input type="number" id="' + prefix + "-val-" + idx + '" step="1" min="' + rg[0] + '" max="' + rg[1] +
+        '" value="' + msValue + '" data-gloss="The number this stat line actually rolled. The official bands run ' +
+        rg[0] + "–" + rg[1] + ' on ' + (grade === "relic" ? "Relic" : "Ancient") + '."></div>';
     } else {
       h += "<div></div>";
     }
@@ -1010,7 +1482,8 @@
       '<div class="med" style="left:' + x(q.p50) + '"></div>' +
       '<div class="cur" style="left:' + x(cur) + '" data-gloss="Where the bracelet sits right now."></div>' +
       "</div>" +
-      '<div class="bc-qlab"><span>p10 ' + fx(pct(q.p10), 2) + "%</span><span>p25 " + fx(pct(q.p25), 2) +
+      '<div class="bc-qlab" data-gloss="The spread of where this bracelet finishes, over every way the remaining rolls can land under the best play. p10 means one bracelet in ten ends below this; p90, one in ten ends above. The blue box is the middle half, the blue line the median, the orange line where you are today.">' +
+      "<span>p10 " + fx(pct(q.p10), 2) + "%</span><span>p25 " + fx(pct(q.p25), 2) +
       "%</span><span>median " + fx(pct(q.p50), 2) + "%</span><span>p75 " + fx(pct(q.p75), 2) +
       "%</span><span>p90 " + fx(pct(q.p90), 2) + "%</span></div>";
   }
@@ -1029,7 +1502,7 @@
       '</div><div class="s">(' + fx(finPct, 2) + "% − " + fx(baseD, 2) + "% baseline) × " + gold(gpd()) + " gold.</div></div>";
     if (freshSolve) {
       var fval = valueGold(freshSolve.expectedFinal);
-      h += '<div class="bc-card"><div class="k">Unrolled, ' + S.slots + ' slots</div><div class="v">' + gold(fval) +
+      h += '<div class="bc-card"><div class="k" data-gloss="What a sealed bracelet of this grade and slot count is worth before anyone opens it: the average final score over every set it could roll, with all its rolls still to spend. This is the number a buyer is actually paying for. Slot count moves it a long way.">Unrolled, ' + S.slots + ' slots</div><div class="v">' + gold(fval) +
         '</div><div class="s">What an empty ' + S.grade + " bracelet with " + S.slots + " granted slots and " +
         S.rollsTotal + " rolls is worth: " + fx(pct(freshSolve.expectedFinal), 2) + "%.</div></div>";
     }
@@ -1070,7 +1543,7 @@
       (second ? ", worth " + gold(deltaGold(best.ev, second.ev)) + " gold more than the next best mask" : "") +
       ". A lock is only worth it when the line it holds is scarcer than what a fresh draw would give you — the solver weighs both, over every remaining roll.</p>";
 
-    h += '<div class="bc-tabwrap"><table><thead><tr><th>Lock</th><th class="num">Expected final</th><th class="num">vs best</th></tr></thead><tbody>';
+    h += '<div class="bc-tabwrap"><table><thead><tr><th><span data-gloss="Which slots you pay to keep before pressing reroll. Everything not listed is rerolled together — one attempt rerolls every unlocked slot at once.">Lock</span></th><th class="num"><span data-gloss="The average score this bracelet finishes at if you lock exactly these slots now and then play the remaining rolls perfectly. Rolls are free, so rolling always beats stopping.">Expected final</span></th><th class="num"><span data-gloss="What choosing this mask instead of the best one costs you, in gold, at your gold-per-1% rate.">vs best</span></th></tr></thead><tbody>';
     var n = Math.min(res.maskEV.length, 6), k;
     for (k = 0; k < n; k++) {
       var m = res.maskEV[k], fl = locksFromKeys(m.lockedKeys, lines, S.grade, profile), names = [], j;
@@ -1086,7 +1559,7 @@
     }
 
     h += '<div class="grid c2" style="margin-top:14px">';
-    h += "<div><div class=\"subh\">Chance this improves</div><div style=\"font-size:22px;font-weight:800\">" +
+    h += "<div><div class=\"subh\"><span data-gloss=\"How often the bracelet you end up with beats the one you are holding. It is not the chance any single roll is better — you keep the old set whenever the new one is worse, so the only way to finish below where you started is to never take a roll.\">Chance this improves</span></div><div style=\"font-size:22px;font-weight:800\">" +
       fx(res.pImprove * 100, 1) + "%</div><div class=\"note\">Probability the bracelet ends above its current " +
       fx(pct(res.currentScore), 2) + "%, over all " + S.rollsLeft + " remaining rolls played well.</div></div>";
     h += "<div><div class=\"subh\">Where it can land</div>" + quantileStrip(res.finalScore.quantiles, res.currentScore) +
@@ -1095,19 +1568,49 @@
     return h;
   }
 
+  /** One row per active combat trait, with the arithmetic in its tooltip. */
+  function traitRows(profile) {
+    var tv = traitValues(), out = [], i, k, one;
+    for (i = 0; i < TRAIT_KEYS.length; i++) {
+      k = TRAIT_KEYS[i];
+      if (!tv[k]) continue;
+      one = {};
+      one[k] = tv[k];
+      var d = B.traitDamage(one, profile), why;
+      if (k === "crit") {
+        var pp = tv[k] * B.TRAIT_CRIT_PP_PER_POINT;
+        why = tv[k] + " Crit converts at 35 points of crit rate per 699 trait points = +" + fx(pp, 2) +
+          " pp crit rate, worth " + signPct(pct(d)) + " once your skills' crit rate and crit damage are applied.";
+      } else {
+        why = tv[k] + " " + TRAIT_LABELS[k] + " at " + fx(num(k === "spec" ? S.fight.wSpec : S.fight.wSwift, 0), 1) +
+          "% per 100 points = " + fx(d, 2) + " points of damage.";
+      }
+      out.push({ label: TRAIT_LABELS[k] + " " + tv[k], damage: d, why: why });
+    }
+    return out;
+  }
+
   function breakdownHtml(profile, lines, res) {
     var all = fixedLines().concat(lines);
-    if (!all.length) return "";
+    var traits = traitRows(profile);
+    if (!all.length && !traits.length) return "";
     var h = '<div class="panel"><h2 style="margin-top:0">Line by line</h2><div class="bc-tabwrap"><table>' +
       '<thead><tr><th>Slot</th><th>Line</th><th class="num">Damage</th><th class="num">Share</th></tr></thead><tbody>';
     var total = 0, i, ds = [];
+    for (i = 0; i < traits.length; i++) total += traits[i].damage;
     for (i = 0; i < all.length; i++) { var d = B.lineDamage(all[i], S.grade, profile); ds.push(d); total += d; }
+    function shareCell(x) { return '<td class="num">' + (total > 1e-9 ? fx(x / total * 100, 0) + "%" : "—") + "</td>"; }
+    for (i = 0; i < traits.length; i++) {
+      h += "<tr><td>Trait " + (i + 1) + "</td><td>" + esc(traits[i].label) + "</td>" +
+        '<td class="num"><span data-gloss="' + esc(traits[i].why) + '">' + signPct(pct(traits[i].damage)) + "</span></td>" +
+        shareCell(traits[i].damage) + "</tr>";
+    }
     var nFixed = fixedLines().length;
     for (i = 0; i < all.length; i++) {
       var lbl = i < nFixed ? "Fixed " + (i + 1) : "Slot " + (i - nFixed + 1);
       h += "<tr><td>" + lbl + "</td><td>" + esc(lineLabel(all[i], S.grade)) + '</td>' +
         '<td class="num"><span data-gloss="' + esc(explainLine(all[i], S.grade, profile)) + '">' + signPct(pct(ds[i])) + "</span></td>" +
-        '<td class="num">' + (total > 1e-9 ? fx(ds[i] / total * 100, 0) + "%" : "—") + "</td></tr>";
+        shareCell(ds[i]) + "</tr>";
     }
     h += "</tbody></table></div>";
     h += '<p class="note">Every line is scored D = 100·ln(multiplier), so multiplicative gains add up. The bracelet total is the exact (e^(ΣD/100) − 1)×100 = <b>' +
@@ -1252,38 +1755,121 @@
   }
   function redrawLive() {
     updateBasicsNote();
-    updateShareNote();
+    updateIlvl();
     redrawSlots();
   }
 
   var SHAPE_FIELDS = { grade: 1, slots: 1, useOverride: 1 };
 
+  /** Rebuild every control, then the bracelet rows under it. */
+  function redrawAll() {
+    keepFocus(function () { renderInputs(); renderSlots(); });
+  }
+
+  /** A segmented/toggle press solves at once — no debounce to sit through. */
+  function solveNow() {
+    if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
+    recompute();
+  }
+
   function onFieldChange(el) {
     var path = el.getAttribute && el.getAttribute("data-k"), t = el.getAttribute("data-t");
     if (!path) return false;
     if (t === "chk") setPath(S, path, !!el.checked);
+    else if (t === "rng") setPath(S, path, Number(el.value));
     else if (t === "num") setPath(S, path, num(el.value, getPath(S, path)));
     else setPath(S, path, isNaN(Number(el.value)) ? el.value : Number(el.value));
     if (path === "rollsLeft") S.rollsTotal = Math.max(S.rollsTotal, num(el.value, 7));
     if (path === "grade" || path === "slots") { S.locks = null; S.rolled = null; lastVerdict = null; }
     save();
+    if (t === "rng") {
+      // Mid-drag: repaint the chip and the derived read-outs only. Rebuilding
+      // the control would tear the slider out from under the mouse.
+      var chip = $(chipId(path)), f = FMT[el.getAttribute("data-fmt")] || FMT.raw;
+      if (chip) chip.textContent = f(Number(el.value));
+      if (path.indexOf("gear.") === 0) updateIlvl();
+      if (path === "kit.gems") updateKitNote();
+    }
     if (SHAPE_FIELDS[path]) {
+      if (path === "grade") fitTraits();
       fitRows();
-      keepFocus(function () { renderBasics(); renderSlots(); renderFixedRows(); });
+      redrawAll();
+    } else if (path === "adv.baseApOverride") {
+      keepFocus(function () { renderKit(); renderAdvanced(); });
+    } else if (path.indexOf("adv.") === 0) {
+      // Karma and the attack-power override feed the two derived buckets the
+      // Gear column prints; refresh that line without rebuilding the field.
+      updateKitNote();
     }
     redrawLive();
     schedule();
     return true;
   }
 
+  /** The one derived line under the gem slider that a drag has to keep honest. */
+  function updateKitNote() {
+    var box = $("bc-kit");
+    if (!box) return;
+    var n = box.getElementsByClassName("note");
+    if (n.length) n[0].textContent = "Weapon power bucket " + fx(wpPctOf(), 1) +
+      "% · attack power bucket " + fx(baseApPctOf(), 1) + "%.";
+  }
+
+  /** Turn a value chip into a small number input, and back on blur or Enter. */
+  function editChip(chip, get, set) {
+    if (chip.getElementsByTagName("input").length) return;
+    var lo = Number(chip.getAttribute("data-min")), hi = Number(chip.getAttribute("data-max"));
+    var step = num(chip.getAttribute("data-step"), 1);
+    var inp = document.createElement("input");
+    inp.type = "number"; inp.min = lo; inp.max = hi; inp.step = step < 1 ? "0.01" : "1"; inp.value = get();
+    chip.textContent = "";
+    chip.appendChild(inp);
+    inp.focus();
+    inp.select();
+    // Blur and change both mean "done"; whichever lands first closes the box.
+    var closed = false;
+    function finish(keep) {
+      if (closed) return;
+      closed = true;
+      if (keep !== false) {
+        var v = clamp(num(inp.value, get()), lo, hi);
+        set(step < 1 ? Math.round(v * 100) / 100 : Math.round(v));
+        save();
+      }
+      renderInputs(); redrawLive(); solveNow();
+    }
+    inp.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter") finish();
+      else if (ev.key === "Escape") finish(false);
+      ev.stopPropagation();
+    });
+    inp.addEventListener("blur", function () { finish(); });
+    inp.addEventListener("change", function (ev) { ev.stopPropagation(); finish(); });
+    inp.addEventListener("input", function (ev) { ev.stopPropagation(); });
+  }
+
   function bindPanel() {
     var panel = $("bc-inputs");
     function fieldEvent(e) {
       var el = e.target;
-      if (el.getAttribute && el.getAttribute("data-sk") !== null) {
+      if (el.id === "bc-gpd") {
+        S.econ.gpd = gpdFromPos(Number(el.value));
+        var gc = $("bc-gpd-chip");
+        if (gc) gc.textContent = gold(S.econ.gpd);
+        save(); schedule();                       // gold is not in the solve key: a cache hit
+        return;
+      }
+      if (el.getAttribute && el.getAttribute("data-sk") !== null && el.getAttribute("data-f")) {
         var i = Number(el.getAttribute("data-sk")), f = el.getAttribute("data-f");
         if (!S.skills[i]) return;
-        S.skills[i][f] = f === "name" ? el.value : num(el.value, S.skills[i][f]);
+        if (f === "name") S.skills[i].name = el.value;
+        else if (f === "share") {
+          // An empty or half-typed box must not rebalance to nonsense; wait for
+          // a number, then move the others to keep the total at exactly 100.
+          if (el.value === "" || isNaN(Number(el.value))) return;
+          setShare(i, el.value);
+          syncShares(i);
+        } else S.skills[i][f] = num(el.value, S.skills[i][f]);
         save(); redrawLive(); schedule();
         return;
       }
@@ -1293,11 +1879,55 @@
     panel.addEventListener("input", fieldEvent);
     panel.addEventListener("change", fieldEvent);
 
+    // Leaving a share box snaps it to the number actually stored, so a typed
+    // 150 or an emptied box cannot sit there contradicting the total.
+    panel.addEventListener("focusout", function (e) {
+      var el = e.target;
+      if (!el.getAttribute || el.getAttribute("data-f") !== "share") return;
+      var i = Number(el.getAttribute("data-sk"));
+      if (!S.skills[i]) return;
+      if (el.value === "" || isNaN(Number(el.value))) { setShare(i, S.skills[i].share); save(); }
+      renderSkills(); redrawLive(); schedule();
+    });
+
     panel.addEventListener("click", function (e) {
-      var t = e.target, d;
-      if (t.id === "bc-addskill") { S.skills.push({ name: "", share: 0, cr: 90, cd: 280 }); save(); renderSkills(); redrawSlots(); schedule(); }
-      else if (t.getAttribute && (d = t.getAttribute("data-delsk")) !== null && d !== "") {
-        if (S.skills.length > 1) { S.skills.splice(Number(d), 1); save(); renderSkills(); redrawSlots(); schedule(); }
+      var t = e.target, d, seg, tgl, chip;
+      // A click can land on the chip's own text node in some browsers.
+      if (t && t.className && String(t.className).indexOf("chip") >= 0) chip = t;
+
+      if ((seg = t.getAttribute && t.getAttribute("data-seg"))) {
+        var raw = t.getAttribute("data-v");
+        setPath(S, seg, (raw !== "" && !isNaN(Number(raw))) ? Number(raw) : raw);
+        save();
+        keepFocus(function () { renderKit(); renderAdvanced(); });
+        redrawLive(); solveNow();
+        return;
+      }
+      if ((tgl = t.getAttribute && t.getAttribute("data-tgl"))) {
+        setPath(S, tgl, !getPath(S, tgl));
+        save();
+        keepFocus(function () { renderKit(); renderFight(); renderAdvanced(); });
+        redrawLive(); solveNow();
+        return;
+      }
+      if (chip && chip.getAttribute("data-editk")) {
+        var ep = chip.getAttribute("data-editk");
+        editChip(chip, function () { return getPath(S, ep); }, function (v) { setPath(S, ep, v); });
+        return;
+      }
+
+      if (t.id === "bc-addskill") {
+        S.skills.push({ name: "", share: 0, cr: 90, cd: 280 });
+        normalizeShares();                       // a new skill enters at an equal share
+        var eq = distribute((function () { var w = [], j; for (j = 0; j < S.skills.length; j++) w.push(1); return w; })(), 100), j2;
+        for (j2 = 0; j2 < S.skills.length; j2++) S.skills[j2].share = eq[j2];
+        save(); renderSkills(); redrawSlots(); solveNow();
+      } else if (t.getAttribute && (d = t.getAttribute("data-delsk")) !== null && d !== "") {
+        if (S.skills.length > 1) {
+          S.skills.splice(Number(d), 1);
+          normalizeShares();
+          save(); renderSkills(); redrawSlots(); solveNow();
+        }
       } else if (t.id === "bc-advtoggle") { S.advOpen = !S.advOpen; save(); renderAdvanced(); }
       else if (t.id === "bc-addfixed") {
         if (S.fixedRows.length < 2) { S.fixedRows.push(blankRow()); save(); renderAdvanced(); schedule(); }
@@ -1306,19 +1936,22 @@
           try { localStorage.removeItem(LS_KEY); } catch (er) { /* ignore */ }
           S = defaults(); lastVerdict = null; cache = {}; cacheOrder = [];
           freshSolve = null; lastSolve = null; freshSolveKey = null; lastSolveKey = null; workerCtxKey = null;
-          fitRows(); renderBasics(); renderSkills(); renderEcon(); renderAdvanced(); renderSlots();
-          recompute();
+          fitRows(); renderInputs(); renderSlots();
+          solveNow();
         }
       }
     });
 
-    $("bc-toggle").addEventListener("click", function () {
+    // The whole header row collapses the panel, not just the little arrow.
+    var hdr = panel.getElementsByClassName("ihdr")[0];
+    hdr.addEventListener("click", function () {
       var body = $("bc-inputs-body"), c = $("bc-caret");
       var hidden = body.style.display === "none";
       body.style.display = hidden ? "" : "none";
       c.innerHTML = hidden ? "&#9662;" : "&#9656;";
     });
   }
+
 
   // Slot / fixed / rolled rows share one delegated handler, keyed by the id
   // prefix the row was rendered with.
@@ -1360,11 +1993,27 @@
       schedule();
     });
     root.addEventListener("input", function (e) {
-      var id = e.target.id || "";
-      if (/^bc-[rfn]-val-\d+$/.test(id)) { handleRowEvent(e.target); save(); schedule(); }
+      var id = e.target.id || "", tr;
+      if (/^bc-[rfn]-val-\d+$/.test(id)) { handleRowEvent(e.target); save(); schedule(); return; }
+      if ((tr = e.target.getAttribute && e.target.getAttribute("data-tr"))) {
+        // Clamp what the MODEL sees to the official band, but leave the box
+        // alone while it is being typed in.
+        var bd = traitBand();
+        S.traits[tr].v = clamp(Math.round(num(e.target.value, S.traits[tr].v)), bd[0], bd[1]);
+        save(); updateBasicsNote(); schedule();
+      }
+    });
+    root.addEventListener("focusout", function (e) {
+      if (e.target.getAttribute && e.target.getAttribute("data-tr")) renderTraits();
     });
     root.addEventListener("click", function (e) {
-      var t = e.target, lk;
+      var t = e.target, lk, tron;
+      if ((tron = t.getAttribute && t.getAttribute("data-tron"))) {
+        // Exactly two traits are ever active: turning a third on drops the one
+        // that has been on longest. Clicking an active one is a no-op.
+        if (activateTrait(tron)) { save(); renderTraits(); updateBasicsNote(); solveNow(); }
+        return;
+      }
       if (t.id === "bc-clear") {
         S.rows = []; fitRows(); S.locks = null; S.rolled = null; lastVerdict = null;
         save(); redrawSlots(); recompute();
@@ -1446,7 +2095,7 @@
     }
     S.rollsLeft = Math.max(0, S.rollsLeft - 1);
     S.locks = null; S.rolled = null; lastVerdict = null;
-    save(); renderBasics(); renderSlots(); recompute();   // rollsLeft moved: redraw its field too
+    save(); renderTop(); renderSlots(); recompute();   // rollsLeft moved: redraw its field too
   }
 
   function undo() {
@@ -1455,7 +2104,7 @@
     S.rows = e.prevRows;
     S.rollsLeft = e.rollsBefore;
     S.locks = null; S.rolled = null; lastVerdict = null;
-    fitRows(); save(); renderBasics(); renderSlots(); recompute();
+    fitRows(); save(); renderTop(); renderSlots(); recompute();
   }
 
   // ------------------------------------------------------------------
@@ -1469,10 +2118,7 @@
     load();
     fitRows();
     pane.innerHTML = tabMarkup();
-    renderBasics();
-    renderSkills();
-    renderEcon();
-    renderAdvanced();
+    renderInputs();
     renderSlots();
     bindPanel();
     bindBody();

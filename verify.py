@@ -169,9 +169,25 @@ check_true("analytic.flatAP dampens WP lines",
 _ap_ms = math.sqrt((703826 + 13888) * 1.09 * 241367 * 1.085 / 6) * 1.125 + 2700
 check("analytic.mainStat.13888",
       r9(B.line_damage({"cat": "basic", "family": "mainStat", "value": 13888}, "ancient", P)), r9(_D(_ap_ms / _ap0)))
-check("analytic.f15.ancient.high", r9(_d(15, "high")), r9(_D(0.5 * 1.055 + 0.5 * 1.055 / 1.02)))
-check("analytic.f14.ancient.high", r9(_d(14, "high")),
-      r9(_D(((1.3844 + 0.035) / 1.3844) * (1 + 0.6 * 0.025 / 1.073))))
+check("analytic.f15.ancient.high", r9(_d(15, "high")), r9(_D(0.7 * 1.055 + 0.3 * 1.055 / 1.02)))
+check("analytic.f13.ancient.high", r9(_d(13, "high")), r9(_D(1.03 * (1 + 0.10 * 0.05))))
+
+
+def _ap_wp(dw):
+    return math.sqrt(703826 * 1.09 * (241367 + dw) * 1.085 / 6) * 1.125 + 2700
+
+
+check("analytic.f20.ancient.high", r9(_d(20, "high")), r9(_D(_ap_wp(1480 * 6) / _ap0)))
+check("analytic.f21.ancient.high", r9(_d(21, "high")),
+      r9(_D((_ap_wp(9000) / _ap0) * (_ap_wp(2400 * 1.0) / _ap0))))
+check("analytic.f22.ancient.high", r9(_d(22, "high")),
+      r9(_D((_ap_wp(8700) / _ap0) * (_ap_wp(150 * 30) / _ap0))))
+check("analytic.f14.ancient.high", r9(_d(14, "high")), r9(_D((1.3844 + 0.035) / 1.3844)))
+check_true("analytic.f14.belowF24", _d(14, "high") < _d(24, "high"))
+_p_demon = B.normalize_profile({"demonShare": 1})
+check("analytic.f14.demonOn",
+      r9(B.line_damage({"cat": "special", "family": 14, "tier": "high"}, "ancient", _p_demon)),
+      r9(_D(((1.3844 + 0.035) / 1.3844) * (1 + 1 * 0.025 / 1.073))))
 _ally_f = 1 + 0.921 * 1.8
 check("analytic.f17.relic.high", r9(_d(17, "high", "relic")), r9(_D(1 + 3 * (_ally_f / 2.62 - 1))))
 check("analytic.f17.allyFactor", r9(_ally_f), 2.6578)
@@ -188,7 +204,7 @@ check("analytic.vitality", r9(B.line_damage({"cat": "basic", "family": "vitality
 check("analytic.trait", r9(B.line_damage({"cat": "trait", "family": "crit", "value": 120}, "ancient", P)), 0)
 check("analytic.f1.default", r9(_d(1, "high")), 0)
 for _id in range(11, 34):
-    if _id in (26, 28, 29, 30):
+    if _id in (28, 29, 30):
         continue
     check_true("analytic.tierMonotone.%d" % _id,
                _d(_id, "low") <= _d(_id, "mid") + 1e-12 and _d(_id, "mid") <= _d(_id, "high") + 1e-12)
@@ -197,6 +213,87 @@ _two = B.set_damage([{"cat": "special", "family": 32, "tier": "high"},
                      {"cat": "special", "family": 23, "tier": "high"}], "ancient", P)
 check("analytic.additive", r9(_two), r9(_d(32, "high") + _d(23, "high")))
 check("analytic.damagePercent", r9(B.damage_percent(_two)), r9((math.exp(_two / 100) - 1) * 100))
+
+# ================= 4b. fixed combat traits =================
+for i, c in enumerate(refs["traits"]):
+    _p = B.normalize_profile(c["profile"])
+    check("traits[%d] %s" % (i, c["label"]), r9(B.trait_damage(c["traits"], _p)), c["damage"])
+
+_dcr = 120 * 35 / 699.0 / 100.0
+check("analytic.trait.crit120", r9(B.trait_damage({"crit": 120}, P)),
+      r9(_D((1 + (0.9 + _dcr) * 1.8) / (1 + 0.9 * 1.8))))
+check("analytic.trait.critPP", r9(120 * B.TRAIT_CRIT_PP_PER_POINT), 6.008583691)
+check("analytic.trait.spec120", r9(B.trait_damage({"spec": 120}, P)), 3)
+check("analytic.trait.swift96", r9(B.trait_damage({"swift": 96}, P)), 2.4)
+check("analytic.trait.additive", r9(B.trait_damage({"crit": 120, "spec": 120}, P)),
+      r9(B.trait_damage({"crit": 120}, P) + B.trait_damage({"spec": 120}, P)))
+check("analytic.trait.critCapped",
+      r9(B.trait_damage({"crit": 120},
+                        B.normalize_profile({"skills": [{"share": 1, "critRate": 1, "critDamage": 2.8}]}))), 0)
+check("analytic.trait.none", r9(B.trait_damage({}, P)), 0)
+check("analytic.trait.grantedStillZero",
+      r9(B.line_damage({"cat": "trait", "family": "crit", "value": 120}, "ancient", P)), 0)
+
+_t = refs["traitSolve"]
+_plain = B.solve({"grade": _t["grade"], "profile": {}, "slots": _t["slots"], "rollsLeft": _t["rollsLeft"],
+                  "fixedLines": [], "grantedLines": _t["granted"],
+                  "goldPer1Pct": _t["goldPer1Pct"], "baselinePct": 0})
+_with = B.solve({"grade": _t["grade"], "profile": {}, "slots": _t["slots"], "rollsLeft": _t["rollsLeft"],
+                 "fixedLines": [], "grantedLines": _t["granted"],
+                 "goldPer1Pct": _t["goldPer1Pct"], "baselinePct": 0,
+                 "traitValues": _t["traitValues"]})
+check("traitSolve.traitDamage", r9(_with["traitDamage"]), _t["traitDamage"])
+check("traitSolve.plainCurrent", r9(_plain["currentScore"]), _t["plainCurrent"])
+check("traitSolve.plainFinal", r9(_plain["expectedFinal"]), _t["plainFinal"])
+check("traitSolve.traitCurrent", r9(_with["currentScore"]), _t["traitCurrent"])
+check("traitSolve.traitFinal", r9(_with["expectedFinal"]), _t["traitFinal"])
+check("traitSolve.valueGold", r9(_with["valueGold"]), _t["traitValueGold"])
+check("traitSolve.states", _with["stats"]["states"], _t["states"], exact=True)
+check_true("analytic.traitSolve.currentShift",
+           abs((_with["currentScore"] - _plain["currentScore"]) - _with["traitDamage"]) < 1e-9)
+check_true("analytic.traitSolve.finalShift",
+           abs((_with["expectedFinal"] - _plain["expectedFinal"]) - _with["traitDamage"]) < 1e-9)
+check_true("analytic.traitSolve.gainUnchanged", abs(_with["gain"] - _plain["gain"]) < 1e-9)
+check_true("analytic.traitSolve.dpUnchanged", _with["stats"]["states"] == _plain["stats"]["states"])
+check_true("analytic.traitSolve.pImproveUnchanged", abs(_with["pImprove"] - _plain["pImprove"]) < 1e-12)
+check_true("analytic.traitSolve.valueGold",
+           abs(_with["valueGold"] - _with["expectedFinal"] * _t["goldPer1Pct"]) < 1e-3)
+
+# ================= 4c. family letter grades =================
+for c in refs["familyGrades"]:
+    fg = B.family_grades(c["grade"])
+    flat = {}
+    for cat in ("basic", "trait", "special"):
+        for k, v in fg[cat].items():
+            flat["%s:%s" % (cat, k)] = v
+    check("familyGrades[%s].bestAvg" % c["grade"], r9(fg["bestAvg"]), c["bestAvg"])
+    check("familyGrades[%s].count" % c["grade"], len(flat), len(c["entries"]), exact=True)
+    for k, want in c["entries"].items():
+        check("familyGrades[%s].%s.avg" % (c["grade"], k), r9(flat[k]["avg"]), want["avg"])
+        check("familyGrades[%s].%s.share" % (c["grade"], k), r9(flat[k]["share"]), want["share"])
+        check("familyGrades[%s].%s.letter" % (c["grade"], k), flat[k]["letter"], want["letter"], exact=True)
+
+_fg = B.family_grades("ancient")
+check("analytic.familyGrades.avg32", r9(_fg["special"][32]["avg"]),
+      r9(0.6 * _d(32, "low") + 0.3 * _d(32, "mid") + 0.1 * _d(32, "high")))
+_best = max(range(1, 34), key=lambda i: _fg["special"][i]["avg"])
+check("analytic.familyGrades.bestShare", r9(_fg["special"][_best]["share"]), 1)
+check("analytic.familyGrades.bestLetter", _fg["special"][_best]["letter"], "S", exact=True)
+check("analytic.familyGrades.bestAvg", r9(_fg["bestAvg"]), r9(_fg["special"][_best]["avg"]))
+_ORDERED = "FDCBAS"
+for _i in range(1, 34):
+    if _fg["special"][_i]["avg"] <= 0:
+        check_true("analytic.familyGrades.zeroIsF.%d" % _i, _fg["special"][_i]["letter"] == "F")
+    check_true("analytic.familyGrades.known.%d" % _i, _fg["special"][_i]["letter"] in _ORDERED)
+for _i in range(1, 34):
+    for _j in range(1, 34):
+        if _fg["special"][_i]["avg"] > _fg["special"][_j]["avg"]:
+            check_true("analytic.familyGrades.monotone.%dv%d" % (_i, _j),
+                       _ORDERED.index(_fg["special"][_i]["letter"]) >= _ORDERED.index(_fg["special"][_j]["letter"]))
+check("analytic.familyGrades.vitality", _fg["basic"]["vitality"]["letter"], "F", exact=True)
+check("analytic.familyGrades.trait", _fg["trait"]["crit"]["letter"], "F", exact=True)
+check("analytic.familyGrades.stable", B.family_grades("ancient")["special"][32]["letter"],
+      _fg["special"][32]["letter"], exact=True)
 
 # ================= 5. pools =================
 for i, c in enumerate(refs["pools"]):
