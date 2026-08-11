@@ -17,11 +17,17 @@
  *     low = Rare blue, mid = Epic purple, high = Legendary gold. A Legendary junk
  *     line sitting far below a Rare crit line is the lesson the table teaches.
  *
- * BANDING: S >=95 - A >=65 - B >=55 - C >=45 - D >0 - F = no damage, as a
- * percentage of the BEST line for the current profile, with empty bands drawn
- * explicitly rather than skipped. The best line is the best line FOR THE CURRENT
+ * BANDING: the shared eighteen-step subrank ladder in subrank.js — S+ >=95,
+ * S >=90, S- >=85, down to F- — applied to 100 x d / best, THE BEST LINE IN
+ * THIS VIEW. Both views band the same way: by family against the best family,
+ * by roll against the best roll. The best line is the best line FOR THE CURRENT
  * PROFILE, so the bands move as the profile does. That is the feature, and the
  * copy above the table says so.
+ *
+ * A line that does no damage is pinned to F- whatever the arithmetic says. On a
+ * six-band ladder every empty band was drawn, because an empty A tier was
+ * information; on eighteen it is noise, so empty bands are skipped and the strip
+ * above the table carries the shape of the distribution instead.
  *
  * THE DECK. There is exactly one control deck in the document and mount() MOVES
  * it (see profile.js's header). This tab claims it on activation; app.js claims
@@ -33,8 +39,8 @@
 (function () {
   "use strict";
 
-  var B = window.Bracelet, DATA = window.BraceletData, P = window.Profile;
-  if (!B || !DATA || !P) return;                 // model or spine missing; leave the placeholder
+  var B = window.Bracelet, DATA = window.BraceletData, P = window.Profile, SR = window.Subrank;
+  if (!B || !DATA || !P || !SR) return;          // model, spine or ladder missing; leave the placeholder
 
   var PANE_ID = "tab-tierlist";
   var DECK_HOST = "bctl-deckhost";
@@ -54,25 +60,29 @@
   // bands and palettes
   // ------------------------------------------------------------------
 
-  // loa-tierlist's own ladder and hues, so a user who knows that site reads this
-  // table without being taught anything.
-  // Bands are a % of the best line, but NOT the loa-tierlist ladder: that one is
-  // tuned for raid classes bunched within 20% of each other. Bracelet families run
-  // from 100% down to 37%, and thirteen of them do no damage at all, so the 98/95/90
-  // ladder put every real line in F. Here F means EXACTLY ONE THING — the line is
-  // worth nothing — and the live bands rank the twenty that do something.
-  var BANDS = [
-    { key: "S", pct: 95, hue: "#E8CD8A", glow: true },
-    { key: "A", pct: 65, hue: "#E25C55" },
-    { key: "B", pct: 55, hue: "#E29A50" },
-    { key: "C", pct: 45, hue: "#D9C25F" },
-    { key: "D", pct: 0.0001, hue: "#7DB56E" },
-    { key: "F", pct: 0, hue: "#7290C7" }
-  ];
-  function bandOf(pct) {
-    for (var i = 0; i < BANDS.length; i++) if (pct >= BANDS[i].pct) return BANDS[i];
-    return BANDS[BANDS.length - 1];
-  }
+  // The one ladder, from subrank.js. Eighteen steps on flat 5-point bands of the
+  // best line in the view, wearing the astrogem calculator's own rank colours.
+  var BANDS = SR.BANDS;
+  var BOTTOM = SR.BOTTOM;                       // F- — where a worthless line is pinned
+
+  /** The band for a percentage of the best line; a line worth nothing is F-, full stop. */
+  function bandFor(d, pct) { return d > 0 ? SR.of(pct) : BOTTOM; }
+
+  // The six letter GROUPS, for the strip: eighteen dashed cuts and eighteen
+  // letters on one 1000-unit axis is a picket fence. The strip draws one cut per
+  // GROUP boundary — 85, 70, 55, 40, 25 — and one letter per group, which is the
+  // old six-band picture with the ladder's own colours on it.
+  var GROUPS = (function () {
+    var out = [], i, b;
+    for (i = 0; i < BANDS.length; i++) {
+      b = BANDS[i];
+      if (!out.length || out[out.length - 1].letter !== b.letter) {
+        out.push({ letter: b.letter, hue: BANDS[Math.min(i + 1, BANDS.length - 1)].hue, bottom: 0 });
+      }
+      out[out.length - 1].bottom = isFinite(b.min) ? b.min : 0;
+    }
+    return out;                       // descending: S 85, A 70, B 55, C 40, D 25, F 0
+  })();
 
   // Rarity of a roll, and the house tokens for it. The three tiers ARE the three
   // rarities in game: low Rare, mid Epic, high Legendary.
@@ -209,7 +219,7 @@
       var r = rows[i];
       r.rank = i + 1;
       r.pct = best > 0 ? r.d / best * 100 : 0;
-      r.band = r.d > 0 ? bandOf(r.pct) : BANDS[BANDS.length - 1];
+      r.band = bandFor(r.d, r.pct);
       r.dmg = B.damagePercent(r.d);
     }
     return { rows: rows, best: best, bestRow: rows[0] || null };
@@ -255,29 +265,32 @@
       if (lane === -1) lane = laneCount - 1;
       laneLastX[lane] = x;
       var fill = view === "roll" && e.tier ? RARITY[e.tier].hue : e.band.hue;
-      dots += '<circle' + (e.band.key === "S" ? ' class="tlrb"' : "") + ' cx="' + fx(x, 1) + '" cy="' +
+      dots += '<circle cx="' + fx(x, 1) + '" cy="' +
         (106 - lane * laneDy) + '" r="4.6" fill="' + fill + '" stroke="#0d1017" stroke-width="1.6">' +
         "<title>" + esc(e.name) + (e.tier ? " (" + e.tier + ")" : "") + " — " + fx(e.dmg, 2) +
         "% (" + fx(e.pct, 1) + "% of best)</title></circle>";
     }
 
-    // the band cuts, drawn to scale: this IS the methodology
+    // the GROUP cuts, drawn to scale: this IS the methodology. One per letter
+    // group rather than one per subrank — eighteen dashed lines across 930 units
+    // is a fence, not a chart, and the group edges are the ones a reader reasons
+    // about ("this is B territory").
     var cuts = "", letters = "", cutXs = [];
-    for (i = 0; i < BANDS.length; i++) {
-      var b = BANDS[i];
-      var upper = i === 0 ? hi : maxDmg * BANDS[i - 1].pct / 100;
-      var lower = b.pct ? maxDmg * b.pct / 100 : lo;
-      if (b.pct && lower > lo && lower < hi) {
+    for (i = 0; i < GROUPS.length; i++) {
+      var g = GROUPS[i];
+      var upper = i === 0 ? hi : maxDmg * GROUPS[i - 1].bottom / 100;
+      var lower = g.bottom ? maxDmg * g.bottom / 100 : lo;
+      if (g.bottom && lower > lo && lower < hi) {
         var cx = X(lower);
         cutXs.push(cx);
         cuts += '<line x1="' + fx(cx, 1) + '" y1="68" x2="' + fx(cx, 1) +
           '" y2="124" stroke="#97a0b4" stroke-width="1" stroke-dasharray="2 4" opacity=".55"/>' +
-          '<text x="' + fx(cx, 1) + '" y="140" text-anchor="middle" class="tlax">' + b.pct + "%</text>";
+          '<text x="' + fx(cx, 1) + '" y="140" text-anchor="middle" class="tlax">' + g.bottom + "%</text>";
       }
       var l = Math.max(lower, lo), u = Math.min(upper, hi);
       if (u > l && (u - l) / (hi - lo) > 0.03) {
         letters += '<text x="' + fx((X(l) + X(u)) / 2, 1) + '" y="46" text-anchor="middle" class="tlrl' +
-          (b.key === "S" ? " tlrb" : "") + '" fill="' + b.hue + '">' + b.key + "</text>";
+          '" fill="' + g.hue + '">' + g.letter + "</text>";
       }
     }
 
@@ -294,7 +307,7 @@
       esc(bestRow.name) + (bestRow.tier ? " (" + bestRow.tier + ")" : "") + " · " + fx(bestRow.dmg, 2) + "%</text>";
     axis += '<text x="' + X0 + '" y="154" text-anchor="start" class="tlcap">% damage on ' +
       (grade === "relic" ? "a Relic" : "an Ancient") + " bracelet, for your character →</text>";
-    axis += '<text x="' + X1 + '" y="154" text-anchor="end" class="tlcap">dashed cuts are the band thresholds (% of the best line)</text>';
+    axis += '<text x="' + X1 + '" y="154" text-anchor="end" class="tlcap">dashed cuts are the letter-group edges (% of the best line); each group holds three subranks</text>';
 
     return '<svg viewBox="0 0 1000 162" role="img" aria-label="Every effect on a damage-percent axis with the tier thresholds drawn to scale">' +
       axis + cuts + letters + dots + "</svg>";
@@ -310,7 +323,6 @@
   function rowHTML(r, grade, ghostPct) {
     var id = "tl" + (SEQ++);
     REG[id] = { row: r, grade: grade, ghost: ghostPct };
-    var letter = P.letterOf("sp:" + r.fam.id, grade) || "F";
     var barHue = view === "roll" && r.tier ? RARITY[r.tier].hue : r.band.hue;
     var vals = r.valsOverride !== undefined ? r.valsOverride : tierValueText(r.fam, grade, r.tier || "mid");
     var ghost = "";
@@ -323,7 +335,8 @@
     return '<div class="tl-row" data-tip="' + id + '" data-key="' + esc(r.key) + '" tabindex="0" role="button" ' +
       'aria-label="' + esc(r.name + (r.tier ? " " + r.tier : "") + ", " + fx(r.dmg, 2) + " percent damage, band " + r.band.key) + '">' +
       '<span class="tl-rank">' + pad2(r.rank) + "</span>" +
-      '<span class="tl-gl" style="color:' + r.band.hue + '" title="this row\'s band">' + r.band.key + "</span>" +
+      '<span class="tl-gl" style="color:' + r.band.bg +
+      '" title="this row\'s subrank">' + r.band.key + "</span>" +
       '<span class="tl-nm">' + rar + esc(r.name) +
       (r.tier ? ' <em style="color:' + RARITY[r.tier].hue + '">' + RARITY[r.tier].name + "</em>" : "") + "</span>" +
       '<span class="tl-vals">' + esc(vals) + "</span>" +
@@ -333,6 +346,13 @@
       "</div>";
   }
 
+  /**
+   * One section per band THAT HAS ROWS. On the old six-band ladder every band
+   * was drawn even when empty, because an empty A tier said something; at
+   * eighteen steps most of the ladder is empty in any one view and drawing it
+   * all buries the rows under a wall of "nothing here". The strip above already
+   * shows where the gaps are, to scale.
+   */
   function bandsHTML(res, grade) {
     var dr = defaultRank(grade);
     var out = "", i, j;
@@ -340,23 +360,33 @@
       var b = BANDS[i];
       var mine = [];
       for (j = 0; j < res.rows.length; j++) if (res.rows[j].band.key === b.key) mine.push(res.rows[j]);
+      if (!mine.length) continue;
       var body = "";
       for (j = 0; j < mine.length; j++) {
         var dref = dr.by[mine[j].key];
         var gp = (dref && dr.best > 0) ? dref.pct : null;
         body += rowHTML(mine[j], grade, gp);
       }
-      // Empty bands are DRAWN, not skipped — an empty A tier is information.
-      if (!body) {
-        body = '<div class="tl-empty">nothing in the ' +
-          (b.key === "F" ? "no damage" : b.key === "D" ? "&gt;0%" : "&#8805;" + b.pct + "%") + " band</div>";
-      }
       out += '<section class="tl-band">' +
-        '<div class="tl-chip' + (b.glow ? " tl-chip-z" : "") + (b.key === "S" ? " tl-chip-s" : "") +
-        '" style="--tl-hue:' + b.hue + '"><span>' + b.key + "</span></div>" +
+        '<div class="tl-chip' + (b.top ? " tl-chip-z" : "") +
+        '" style="--tl-bg:' + b.bg + ';--tl-fg:' + b.fg + '"><span data-gloss="' + esc(bandGloss(b, res)) + '">' +
+        esc(b.key) + "</span></div>" +
         '<div class="tl-rows">' + body + "</div></section>";
     }
     return out;
+  }
+
+  /** What a band chip means, in one sentence, for the tooltip. */
+  function bandGloss(b, res) {
+    var best = res.bestRow;
+    var name = best ? (best.name + (best.tier ? " (" + best.tier + ")" : "")) : "the best line";
+    if (b === BOTTOM) {
+      return "F- — under 10% of the best line, or worth nothing at all. " +
+        "A line that does no damage for this character is pinned here whatever the arithmetic says.";
+    }
+    var upper = b.i === 0 ? 100 : BANDS[b.i - 1].min;
+    return b.key + " — " + b.min + "% to " + upper + "% of the best line, which is " + name +
+      " at " + fx(best ? best.dmg : 0, 2) + "% damage for your character.";
   }
 
   // ------------------------------------------------------------------
@@ -383,7 +413,7 @@
   function tipHTML(entry, res) {
     var r = entry.row, grade = entry.grade, fam = r.fam;
     var dr = defaultRank(grade), dref = dr.by[r.key];
-    var pill = '<span class="tp-pill' + (r.band.key === "S" ? " tlrb" : "") + '" style="background:' + r.band.hue + '">' + r.band.key + "</span>";
+    var pill = '<span class="tp-pill" style="background:' + r.band.bg + ';color:' + r.band.fg + '">' + r.band.key + "</span>";
     var h = '<div class="tp-head">' + esc(r.name) + " " + pill +
       '<span class="tp-rank">#' + pad2(r.rank) + " of " + res.rows.length + "</span></div>";
 
@@ -398,7 +428,7 @@
       var tr = TIERS[t], d = r.tierD[t];
       var dmg = B.damagePercent(d);
       var p = res.best > 0 ? d / res.best * 100 : 0;
-      var bd = d > 0 ? bandOf(p) : BANDS[BANDS.length - 1];
+      var bd = bandFor(d, p);
       var isMe = r.tier === tr;                       // the row's own tier, in the by-roll view
       h += '<tr class="' + (isMe ? "tp-best" : "") + '">' +
         '<td><span class="tp-rar" style="background:' + RARITY[tr].hue + '"></span>' +
@@ -406,7 +436,7 @@
         "<td>" + esc(tierValueText(fam, grade, tr)) + "</td>" +
         '<td class="tp-num">' + fmtOdds(tierOdds(fam, tr)) + "</td>" +
         '<td class="tp-num">' + fx(dmg, 2) + "%</td>" +
-        '<td class="tp-num"><span class="tp-tier' + (bd.key === "S" ? " tlrb" : "") + '" style="background:' + bd.hue + '">' +
+        '<td class="tp-num"><span class="tp-tier" style="background:' + bd.bg + ';color:' + bd.fg + '">' +
         bd.key + "</span> " + fx(p, 1) + "%</td></tr>";
     }
     h += "</tbody></table>";
@@ -422,9 +452,11 @@
       ' <span class="tp-dim">= 100 &#215; ln(' + fx(mult, 6) + ")</span></span>";
     kv += '<span class="tp-k">damage</span><span class="tp-v">' + fx(r.dmg, 3) +
       '% <span class="tp-dim">= (e<sup>' + fx(r.d, 3) + "/100</sup> &#8722; 1) &#215; 100</span></span>";
-    kv += '<span class="tp-k">band</span><span class="tp-v">' + fx(r.pct, 1) + "% of the best line" +
-      (r.band.key === "F" ? ' <span class="tp-dim">&#183; does no damage for this character</span>'
-        : ' <span class="tp-dim">&#183; ' + fx(r.pct - r.band.pct, 1) + "pp above the " + r.band.key + " cut</span>") + "</span>";
+    kv += '<span class="tp-k">subrank</span><span class="tp-v">' + fx(r.pct, 1) + "% of the best line" +
+      (r.d <= 0 ? ' <span class="tp-dim">&#183; does no damage for this character, so F-</span>'
+        : !isFinite(r.band.min) ? ' <span class="tp-dim">&#183; under the F cut, so F-</span>'
+        : ' <span class="tp-dim">&#183; ' + fx(r.pct - r.band.min, 1) + "pp above the " + r.band.key + " cut at " +
+          r.band.min + "%</span>") + "</span>";
     h += '<div class="tp-sec"><div class="tp-sec-h">Worth to your character</div><div class="tp-grid">' + kv + "</div></div>";
 
     // how your build differs from the canonical default
@@ -433,7 +465,7 @@
       var word = Math.abs(dd) < 0.05 ? "the same place" : (dd > 0 ? "higher" : "lower");
       h += '<div class="tp-sec"><div class="tp-sec-h">Compared to the default character</div><div class="tp-grid">' +
         '<span class="tp-k">default</span><span class="tp-v">#' + pad2(dref.rank) + " &#183; " + fx(dref.dmg, 2) +
-        "% &#183; " + fx(dref.pct, 1) + '% of best <span class="tp-tier" style="background:' + dref.band.hue + '">' + dref.band.key + "</span></span>" +
+        "% &#183; " + fx(dref.pct, 1) + '% of best <span class="tp-tier" style="background:' + dref.band.bg + ';color:' + dref.band.fg + '">' + dref.band.key + "</span></span>" +
         '<span class="tp-k">yours</span><span class="tp-v">#' + pad2(r.rank) + " &#183; " + fx(r.dmg, 2) +
         "% &#183; " + fx(r.pct, 1) + "% of best</span>" +
         '<span class="tp-k">shift</span><span class="tp-v">' + (Math.abs(dd) < 0.05 ? "sits in " + word :
@@ -532,15 +564,16 @@
 
   function copyHTML() {
     return '<div class="tl-copy">' +
-      "<p><b>Bands are a percentage of the best line for <i>your</i> character.</b> " +
-      "S is 98% of the best line or better, then A 95, B 90, C 85, D 80; anything under 80% is F. " +
+      "<p><b>Subranks are a percentage of the best line for <i>your</i> character.</b> " +
+      "The ladder runs in flat five-point steps — S+ from 95%, S from 90%, S- from 85%, on down through " +
+      "A, B, C and D to F+ at 20% and F at 10%. Anything under 10%, and anything worth no damage at all, is F-. " +
       "That best line is whatever the profile below makes best, so <b>every number here moves when you change the profile</b> — " +
-      "drag a slider and the table reorders under your hand, with no wait.</p>" +
-      "<p>The small letter beside each name is a different thing: the family's grade on the " +
-      '<span data-gloss="The canonical default character the leaderboard scores on. Family letters are fixed to it so they label a family, not a build, and never shuffle mid-edit.">default character</span>' +
-      ", on the Calculator picker's own coarser ladder. It is here so the two tools can never disagree about a family — " +
-      "the band chip is <i>your</i> character, the small letter is the picker's. " +
-      "The faint tick on each bar is where the line sits for that default character: bar past the tick means it is worth more to you than to the average build.</p>" +
+      "drag a slider and the table reorders under your hand, with no wait. " +
+      "Both views band the same way: <i>by family</i> against the best family, <i>by roll</i> against the best single roll.</p>" +
+      "<p>The same eighteen steps grade a whole bracelet on the Leaderboard, so an S- there and an S- here " +
+      "are read off one ladder. The faint tick on each bar is where the line sits for the " +
+      '<span data-gloss="The canonical default character the leaderboard scores on — Bracelet.normalizeProfile({}), every setting untouched.">default character</span>' +
+      ": bar past the tick means the line is worth more to you than to the average build.</p>" +
       "</div>";
   }
 
@@ -564,7 +597,7 @@
   function headHTML() {
     return '<div class="tl-head">' +
       '<span class="tl-rank">#</span>' +
-      '<span class="tl-gl" data-gloss="The band this row sits in, for your current character.">band</span>' +
+      '<span class="tl-gl" data-gloss="The subrank this row sits in, for your current character: its damage as a percentage of the best line in this view, on the shared S+ to F- ladder.">rank</span>' +
       '<span class="tl-nm">Effect</span>' +
       '<span class="tl-vals">' + (view === "family" ? "Roll (mid)" : "Roll") + "</span>" +
       '<span class="tl-odds" data-gloss="Chance one granted slot lands this, from the official listed percentages: renormalised by their own sum and scaled to the special category\'s 30 points.">Odds</span>' +
@@ -580,8 +613,9 @@
       (grade === "relic" ? "a Relic" : "an Ancient") + " bracelet, ranked by the same % damage figure the Calculator reports. " +
       "Odds are the official listed probabilities, renormalised the way the disclosure page requires " +
       "(listed ÷ the listed sum, scaled to the 30-point special category). " +
-      "A family whose every tier scores nothing sits in F at 0% — it is not broken, it is worth nothing to a damage dealer. " +
-      "F is a wide band and most families live there; the rows inside it are still in order, and the strip above shows the real spread. " +
+      "A family whose every tier scores nothing sits in F- at 0% — it is not broken, it is worth nothing to a damage dealer. " +
+      "F- is a wide band and most families live there; the rows inside it are still in order, and the strip above shows the real spread. " +
+      "A subrank nobody landed in is left out rather than drawn empty — at eighteen steps that is most of them. " +
       "Combat traits and Vitality are not listed: rolled into a granted slot they score nothing at all." +
       "</div>";
   }
@@ -696,27 +730,29 @@
       "#tab-tierlist .tlend{font-family:'SF Mono',Menlo,Consolas,monospace;font-size:11px;fill:var(--text)}" +
       "#tab-tierlist .tlrl{font-size:16px;font-weight:800}" +
       // the table
-      "#tab-tierlist .tl-head,#tab-tierlist .tl-row{display:grid;grid-template-columns:26px 16px minmax(140px,1fr) 128px 62px minmax(90px,180px) 60px;" +
+      "#tab-tierlist .tl-head,#tab-tierlist .tl-row{display:grid;grid-template-columns:26px 26px minmax(140px,1fr) 128px 62px minmax(90px,180px) 60px;" +
       "gap:10px;align-items:center}" +
       "#tab-tierlist .tl-head{padding:14px 8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);font-weight:600}" +
       "#tab-tierlist .tl-head .tl-bar,#tab-tierlist .tl-head .tl-pct,#tab-tierlist .tl-head .tl-odds{background:none;border:0}" +
       "#tab-tierlist .tl-band{display:grid;grid-template-columns:64px 1fr;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)}" +
       "#tab-tierlist .tl-band:last-child{border-bottom:none}" +
       "#tab-tierlist .tl-chip{align-self:start;position:sticky;top:8px}" +
+      // 18 subranks means two-character chips ("S+", "B-"), so the type is sized
+      // to the widest of them rather than to a single letter.
       "#tab-tierlist .tl-chip span{display:flex;width:64px;height:64px;align-items:center;justify-content:center;" +
-      "background:var(--tl-hue);color:#0d1017;border-radius:6px;font-size:30px;font-weight:900;line-height:1}" +
-      "#tab-tierlist .tl-chip-z span{box-shadow:0 0 26px rgba(232,205,138,.38)}" +
-      // S tier: 90deg so the gradient's two ends are the same red and the tile has
-      // no seam; 0%->400% is exactly three tile widths, so the slide loops clean.
-      "#tab-tierlist .tl-chip-s span{background:linear-gradient(90deg,#FF8A80,#FFC46B,#F8E081,#8CE99A,#7FD0FF,#C9A2FF,#FF8A80);background-size:400% 100%}" +
-      "#tab-tierlist .tlrb,.tl-pop .tlrb{will-change:filter}" +
+      "background:var(--tl-bg);color:var(--tl-fg);border-radius:6px;font-size:26px;font-weight:900;line-height:1;" +
+      "letter-spacing:-.02em;text-decoration:none;cursor:help}" +
+      // The champagne S+ gets a glow and nothing else. The animated rainbow is
+      // reserved for a bracelet that scored a flat 100 on the Leaderboard: if the
+      // top BAND wore it, it would stop meaning the ceiling.
+      "#tab-tierlist .tl-chip-z span{box-shadow:0 0 26px rgba(230,213,166,.38)}" +
       "#tab-tierlist .tl-rows{min-width:0}" +
       "#tab-tierlist .tl-row{padding:5px 8px;border-radius:6px;cursor:pointer;font-size:12.5px}" +
       "#tab-tierlist .tl-row:nth-child(even){background:rgba(255,255,255,.022)}" +
       "#tab-tierlist .tl-row:hover{background:var(--panel2);outline:1px solid var(--border)}" +
       "#tab-tierlist .tl-row:focus-visible{outline:2px solid var(--accent);outline-offset:1px}" +
       "#tab-tierlist .tl-rank{font-family:'SF Mono',Menlo,Consolas,monospace;font-size:11px;color:var(--dim);text-align:right}" +
-      "#tab-tierlist .tl-gl{font-weight:900;font-size:12px;text-align:center}" +
+      "#tab-tierlist .tl-gl{font-weight:900;font-size:12px;text-align:center;letter-spacing:-.03em;white-space:nowrap}" +
       "#tab-tierlist .tl-nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
       "#tab-tierlist .tl-nm em{font-style:normal;font-size:10px;letter-spacing:.04em;text-transform:uppercase;opacity:.85}" +
       "#tab-tierlist .tl-rar{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:6px;vertical-align:1px}" +
@@ -728,14 +764,13 @@
       "#tab-tierlist .tl-ghost{position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;background:var(--text);" +
       "opacity:.55;text-decoration:none;border-radius:1px}" +
       "#tab-tierlist .tl-pct{font-family:'SF Mono',Menlo,Consolas,monospace;font-size:12px;text-align:right;font-variant-numeric:tabular-nums}" +
-      "#tab-tierlist .tl-empty{font-family:'SF Mono',Menlo,Consolas,monospace;font-size:11px;color:var(--dim);opacity:.7;padding:12px 8px}" +
       "#tab-tierlist .tl-foot{margin-top:18px;color:var(--dim);font-size:12px;line-height:1.65;max-width:82ch}" +
       "#tab-tierlist .tl-foot b{color:var(--text)}" +
       // the hover card
       ".tl-pop{position:absolute;z-index:9999;max-width:460px;min-width:360px;background:#10131c;border:1px solid var(--border);" +
       "border-radius:8px;box-shadow:0 10px 34px rgba(0,0,0,.62);padding:11px 13px;color:var(--text);font:12px/1.45 inherit}" +
       ".tl-pop .tp-head{font-size:13px;font-weight:800;color:var(--accent);margin-bottom:6px;display:flex;align-items:center;gap:8px}" +
-      ".tl-pop .tp-pill{font-size:10px;letter-spacing:.04em;color:#0d1017;border-radius:99px;padding:1px 8px;font-weight:900}" +
+      ".tl-pop .tp-pill{font-size:10px;letter-spacing:.04em;border-radius:99px;padding:1px 8px;font-weight:900}" +
       ".tl-pop .tp-rank{margin-left:auto;font-family:'SF Mono',Menlo,monospace;font-size:10px;color:var(--dim);font-weight:400}" +
       ".tl-pop .tp-full{font-size:11.5px;color:var(--dim);margin:0 0 8px;line-height:1.4}" +
       ".tl-pop .tp-tbl{width:100%;border-collapse:collapse;margin:0 0 4px;font-size:11.5px}" +
@@ -746,7 +781,7 @@
       ".tl-pop .tp-tbl tr:last-child td{border-bottom:none}" +
       ".tl-pop td.tp-num{text-align:right;font-family:'SF Mono',Menlo,monospace;font-size:11px}" +
       ".tl-pop .tp-rar{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:5px}" +
-      ".tl-pop .tp-tier{display:inline-block;min-width:15px;text-align:center;border-radius:4px;color:#0d1017;font-size:10px;" +
+      ".tl-pop .tp-tier{display:inline-block;min-width:15px;text-align:center;border-radius:4px;font-size:10px;" +
       "font-weight:900;padding:0 4px;line-height:1.4}" +
       ".tl-pop .tp-best td{color:var(--text);font-weight:700}" +
       ".tl-pop .tp-dim{color:var(--dim);font-weight:400;font-size:10.5px}" +
@@ -759,24 +794,21 @@
       ".tl-pop .tp-foot{margin-top:8px;font-size:10.5px;color:var(--dim);opacity:.85}" +
       // motion, with a static fallback that is the same gradient standing still
       "@media (prefers-reduced-motion:no-preference){" +
-      "#tab-tierlist .tl-chip-s span{animation:tl-slide 8s linear infinite}" +
-      "#tab-tierlist .tlrb,.tl-pop .tlrb{animation:tl-hue 6s linear infinite}" +
-      "@keyframes tl-slide{from{background-position:0% 50%}to{background-position:400% 50%}}" +
-      "@keyframes tl-hue{from{filter:hue-rotate(0deg)}to{filter:hue-rotate(360deg)}}}" +
+      "#tab-tierlist .tl-chip-z span{box-shadow:0 0 26px rgba(230,213,166,.38),0 0 42px rgba(230,213,166,.18)}}" +
       // Phones: seven columns will not fit, and squeezing them turns the effect
       // name into two characters. Give the name the full width on its own line
       // and put the bar, the odds and the damage on a second — and drop the
       // column header, which no longer describes anything.
       "@media (max-width:760px){" +
       "#tab-tierlist .tl-head{display:none}" +
-      "#tab-tierlist .tl-row{grid-template-columns:22px 14px minmax(0,1fr) 58px 52px;" +
+      "#tab-tierlist .tl-row{grid-template-columns:22px 22px minmax(0,1fr) 58px 52px;" +
       "grid-template-areas:'rank gr nm nm nm' 'bar bar bar odds pct';gap:4px 7px;padding:7px 4px}" +
       "#tab-tierlist .tl-row .tl-rank{grid-area:rank}#tab-tierlist .tl-row .tl-gl{grid-area:gr}" +
       "#tab-tierlist .tl-row .tl-nm{grid-area:nm}#tab-tierlist .tl-row .tl-bar{grid-area:bar;align-self:center}" +
       "#tab-tierlist .tl-row .tl-odds{grid-area:odds}#tab-tierlist .tl-row .tl-pct{grid-area:pct}" +
       "#tab-tierlist .tl-vals{display:none}" +
       "#tab-tierlist .tl-band{grid-template-columns:44px 1fr;gap:10px}" +
-      "#tab-tierlist .tl-chip span{width:44px;height:44px;font-size:22px;border-radius:5px}" +
+      "#tab-tierlist .tl-chip span{width:44px;height:44px;font-size:18px;border-radius:5px}" +
       "#tab-tierlist .tl-row{font-size:12px;padding:5px 4px}" +
       ".tl-pop{max-width:calc(100vw - 20px);min-width:0}}";
     var st = document.createElement("style");

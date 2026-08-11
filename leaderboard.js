@@ -30,12 +30,24 @@
  *   different ones. Every loadout is scored; the board ranks the highest, and a
  *   marker beside the name names the alternatives.
  *
+ * THE COLUMNS
+ *   ★ · Rank · iLvl · Character · Grade · Damage % · Effects · Last pulled.
+ *   GRADE is the whole bracelet on the shared 0–100 subrank scale (subrank.js):
+ *   0 is an empty bracelet — two 40 traits and three lines worth nothing — and
+ *   100 is the three best distinct families at their best roll with both traits
+ *   capped. EFFECTS is three subrank letters, one per line, each scored as that
+ *   line's share of the strongest single roll on its grade: the same yardstick
+ *   the Tier List's by-roll view bands on. Hover any of them for the full text.
+ *   Bracelet grade (Relic/Ancient), rolls left and gap-to-#1 used to have their
+ *   own columns; they said less than the space they cost.
+ *
  * NETWORK: this file talks to our own origin (the seed file) and, when configured,
  * to our own Worker. It never touches lostark.bible — only the Worker may, and only
  * with the token.
  *
  * Model API used (window.Bracelet, never modified): normalizeProfile,
- * decodeBibleBracelet, traitDamage, setDamage, damagePercent, lineInfo, DATA.
+ * decodeBibleBracelet, traitDamage, setDamage, damagePercent, lineDamage,
+ * lineInfo, DATA. Plus window.Subrank for the ladder and the 0–100 grade.
  */
 (function () {
   "use strict";
@@ -53,6 +65,7 @@
 
   var B = (typeof window !== "undefined" && window.Bracelet) || null;
   var Favs = (typeof window !== "undefined" && window.Favorites) || null;
+  var SR = (typeof window !== "undefined" && window.Subrank) || null;
 
   // The one profile this tab ever scores on. Computed once: it is a constant.
   var DEFAULT_PROFILE = B ? B.normalizeProfile({}) : null;
@@ -62,7 +75,7 @@
   // ------------------------------------------------------------------
 
   var rawChars = [];      // every row as loaded, scored, unfiltered
-  var allChars = [];      // the current DISPLAY list, tagged _rank/_idx/_gap
+  var allChars = [];      // the current DISPLAY list, tagged _rank/_idx
   var searchQuery = "";
   var classFilter = "";
   var page = 1;
@@ -241,9 +254,14 @@
   }
 
   /**
-   * score(rawStats) -> { grade, pct, linesPct, lines, traits, unmapped }
+   * score(rawStats) -> { grade, pct, linesPct, lines, traits, traitVals, unmapped, grade0to100 }
    * `pct` is the whole bracelet, `linesPct` the effect lines alone (the figure
    * comparable to lostark.bible's own "Bracelet Effects +X%").
+   *
+   * `grade0to100` is Subrank.braceletScore() on the SAME two terms — the effect
+   * lines through setDamage() and the two fixed combat traits through
+   * traitDamage(). setDamage() returns zero for a trait line by design, so the
+   * trait term has to be added separately or every bracelet reads as junk.
    */
   function score(stats) {
     if (!B || !stats || !stats.length) return null;
@@ -264,11 +282,30 @@
     return {
       grade: dec.grade,
       traits: traitLines,
+      traitVals: traits,
       lines: lines,
       pct: B.damagePercent(traitD + linesD),
       linesPct: B.damagePercent(linesD),
-      unmapped: (dec.unknown || []).length
+      unmapped: (dec.unknown || []).length,
+      // No Subrank on the page (a stale index.html, a failed script) is not a
+      // reason to lose the board: the column simply goes blank.
+      grade0to100: SR ? SR.braceletScore({ lines: lines, traits: traits, grade: dec.grade }) : null
     };
+  }
+
+  /**
+   * One effect line's subrank: its damage on the canonical default character as
+   * a share of the STRONGEST SINGLE ROLL on that grade — the Tier List's by-roll
+   * yardstick, so an S+ pill here and an S+ row there mean the same thing.
+   * A line worth nothing is pinned to the bottom band whatever the arithmetic.
+   */
+  function lineSubrank(line, grade) {
+    if (!SR) return null;
+    var d = 0;
+    try { d = B.lineDamage(line, grade, DEFAULT_PROFILE) || 0; } catch (e) { d = 0; }
+    var best = SR.bestRoll(grade);
+    var pct = (best > 0 && d > 0) ? 100 * d / best : 0;
+    return { d: d, pct: pct, band: d > 0 ? SR.of(pct) : SR.BOTTOM };
   }
 
   // ---- line text -------------------------------------------------------------
@@ -290,33 +327,47 @@
       .trim()
       .replace(/[;,]$/, "");
   }
-  /** One effect line as a pill: short name + tier, with the full text on hover. */
+  /**
+   * One effect line as a SUBRANK PILL — the letter and nothing else, coloured by
+   * the ladder. Three of them read as "S+ S+ S" at a glance, which is the whole
+   * point of the change; every word the old pill printed moved into the tooltip,
+   * so nothing was lost, only unstacked.
+   */
   function linePill(line, grade) {
-    var txt, gloss, tier = line.tier || "";
+    var sr = lineSubrank(line, grade);
+    var what, worth, tier = line.tier || "";
     if (line.cat === "basic") {
-      txt = (line.family === "mainStat" ? "Str/Dex/Int" : "Vitality") + " +" + nf(line.value);
-      gloss = txt + " — a stat line, worth little on a bracelet.";
+      what = (line.family === "mainStat" ? "Str / Dex / Int" : "Vitality") + " +" + nf(line.value);
+      worth = line.family === "mainStat"
+        ? "A flat main-stat line — real damage, but a fraction of what an effect line is worth."
+        : "Vitality is dead weight on a damage dealer: the model scores it zero.";
       tier = "";
     } else if (line.cat === "trait") {
-      txt = "Combat trait +" + nf(line.value);
-      gloss = "A combat trait in a granted slot. The model scores it zero: only the two " +
+      what = "Combat trait +" + nf(line.value);
+      worth = "A combat trait in a granted slot. The model scores it zero: only the two " +
         "trait lines the bracelet came with count.";
       tier = "";
     } else {
       var fam = resolveFam(line.family);
-      if (!fam) return '<span class="lb-pill lb-pill-unk" data-gloss="This line uses a stat index the model does not map yet, so it scores zero.">unmapped</span>';
+      if (!fam) {
+        return '<span class="lb-sr lb-sr-unk" data-gloss="This line uses a stat index the model does not map yet, ' +
+          'so it scores zero. The real bracelet is worth more than this row says.">?</span>';
+      }
       var vals = (fam.values[grade] && fam.values[grade][line.tier]) || [];
-      var short = cleanFamLabel(fam);
-      if (short.length > 26) short = short.slice(0, 25).replace(/[\s,;]+$/, "") + "…";
-      txt = short;
-      var info = B.lineInfo(line, grade, DEFAULT_PROFILE);
-      gloss = fam.label + " · " + (line.tier || "?") +
-        (vals.length ? " (" + vals.join(" / ") + ")" : "") +
-        " — worth " + fx(B.damagePercent(info.damage || 0), 2) + "% on the default character." +
-        (line.fixed ? " Locked." : "");
+      what = cleanFamLabel(fam) + (tier ? " · " + tier : "") + (vals.length ? " (" + vals.join(" / ") + ")" : "");
+      worth = "Full text: " + fam.label + ".";
     }
-    return '<span class="lb-pill' + (tier ? " t-" + tier : "") + (line.fixed ? " fixed" : "") +
-      '" data-gloss="' + esc(gloss) + '">' + esc(txt) + (tier ? '<i>' + esc(tier) + '</i>' : "") + '</span>';
+    var pct = sr ? sr.pct : 0;
+    var key = sr ? sr.band.key : "?";
+    var gloss = key + " · " + what + " — worth " +
+      fx(B.damagePercent(sr ? sr.d : 0), 2) + "% damage on the default character, " +
+      (pct > 0 ? fx(pct, 1) + "% of the strongest single roll an " +
+        (grade === "relic" ? "Relic" : "Ancient") + " can carry." : "which is nothing at all.") +
+      " " + worth + (line.fixed ? " This line is locked." : "");
+    var col = sr ? sr.band : SR.BOTTOM;
+    return '<span class="lb-sr' + (line.fixed ? " fixed" : "") +
+      '" style="background:' + col.bg + ';color:' + col.fg +
+      '" data-gloss="' + esc(gloss) + '">' + esc(key) + '</span>';
   }
 
   // ------------------------------------------------------------------
@@ -437,7 +488,6 @@
       c._s = b ? b.score : null;
       c._pct = b ? b.pct : (c.storedPct != null ? c.storedPct : null);
       c._grade = c._s ? c._s.grade : null;
-      c._rolls = b ? b.rollsRemaining : null;
       if (b && b.itemLevel != null && c.itemLevel == null) c.itemLevel = Math.round(b.itemLevel);
     });
     return chars;
@@ -480,7 +530,7 @@
 // The fixed column widths add up to more than a narrow laptop window. When they
 // do, the TABLE scrolls sideways inside its own box — the page never does.
 '  #tab-leaderboard .lb-tw{overflow-x:auto}' +
-'  #tab-leaderboard .lb-tw table{min-width:830px}' +
+'  #tab-leaderboard .lb-tw table{min-width:660px}' +
 '  #tab-leaderboard td,#tab-leaderboard th{overflow:hidden}' +
 '  #tab-leaderboard tbody tr{cursor:pointer}' +
 '  #tab-leaderboard tbody tr:hover{background:var(--panel2)}' +
@@ -493,27 +543,39 @@
 '  #tab-leaderboard .lb-rank{font-variant-numeric:tabular-nums;color:var(--dim);font-weight:700}' +
 '  #tab-leaderboard .lb-ilvl{color:var(--text);font-weight:700;font-variant-numeric:tabular-nums}' +
 '  #tab-leaderboard .lb-dmg{color:var(--accent);font-weight:800;font-variant-numeric:tabular-nums}' +
-'  #tab-leaderboard .lb-gap{color:var(--dim);font-variant-numeric:tabular-nums;font-size:12px}' +
-'  #tab-leaderboard .lb-gap.top{color:var(--good);font-weight:700}' +
-'  #tab-leaderboard .lb-rolls{color:var(--dim);font-variant-numeric:tabular-nums;font-size:12px}' +
-'  #tab-leaderboard .lb-rolls b{color:var(--text)}' +
 '  #tab-leaderboard .lb-age{font-variant-numeric:tabular-nums;color:var(--dim)}' +
 '  #tab-leaderboard .lb-dash{color:var(--dim)}' +
 '  #tab-leaderboard img.lb-classicon{width:20px;height:20px;vertical-align:middle;margin-right:7px;' +
      'object-fit:contain;opacity:.9;flex:0 0 auto;filter:brightness(0) invert(.82)}' +
-'  #tab-leaderboard .lb-grade{font-weight:700;font-size:12px}' +
-'  #tab-leaderboard .lb-grade.ancient{color:var(--ancient)}' +
-'  #tab-leaderboard .lb-grade.relic{color:var(--relic)}' +
-// effect-line pills
+// the overall grade: a big subrank badge, astrogem's rank shape, plus the number
+'  #tab-leaderboard .lb-gradecell{white-space:nowrap}' +
+'  #tab-leaderboard .lb-badge{display:inline-flex;align-items:center;justify-content:center;min-width:34px;' +
+     'height:26px;padding:0 6px;border-radius:6px;font-weight:900;' +
+     'font-size:15px;line-height:1;letter-spacing:-.02em;vertical-align:middle;text-decoration:none;cursor:help}' +
+'  #tab-leaderboard .lb-badge.top{box-shadow:0 0 14px rgba(230,213,166,.45)}' +
+// The perfect-bracelet rainbow, lifted from astrogem's styles.css. The inline
+// background shorthand resets background-size, so the tiling needs !important;
+// 0%->400% is exactly three tile widths, so the slide loops without a seam.
+// Static gradient under reduced-motion.
+'  #tab-leaderboard .rank-rainbow{background-size:400% 100% !important}' +
+'  @media (prefers-reduced-motion:no-preference){' +
+'    #tab-leaderboard .rank-rainbow{animation:rank-rainbow-slide 8s linear infinite}' +
+'    @keyframes rank-rainbow-slide{from{background-position:0% 50%}to{background-position:400% 50%}}' +
+'  }' +
+'  #tab-leaderboard .lb-score{margin-left:7px;color:var(--text);font-weight:700;font-size:12.5px;' +
+     'font-variant-numeric:tabular-nums;vertical-align:middle}' +
+// only phones show this: there the Damage % column collapses to buy the name room
+'  #tab-leaderboard .lb-dmgmini{display:none}' +
+// effect lines, as subrank letters
 '  #tab-leaderboard .lb-lines{display:flex;gap:4px;flex-wrap:nowrap;overflow:hidden}' +
-'  #tab-leaderboard .lb-pill{background:var(--panel2);border:1px solid var(--border);border-radius:99px;' +
-     'padding:1px 7px;font-size:10.5px;line-height:1.6;color:var(--dim);white-space:nowrap;' +
-     'text-decoration:none;cursor:help;max-width:104px;overflow:hidden;text-overflow:ellipsis}' +
-'  #tab-leaderboard .lb-pill i{font-style:normal;opacity:.75;margin-left:4px}' +
-'  #tab-leaderboard .lb-pill.t-high{color:var(--high);border-color:#4a3a25}' +
-'  #tab-leaderboard .lb-pill.t-mid{color:var(--text)}' +
-'  #tab-leaderboard .lb-pill.fixed{border-style:dashed}' +
-'  #tab-leaderboard .lb-pill-unk{color:var(--bad)}' +
+'  #tab-leaderboard .lb-sr{display:inline-flex;align-items:center;justify-content:center;min-width:26px;' +
+     'height:19px;padding:0 4px;border-radius:5px;box-shadow:inset 0 0 0 1px transparent;' +
+     'font-weight:900;font-size:11.5px;line-height:1;letter-spacing:-.03em;' +
+     'text-decoration:none;cursor:help;flex:0 0 auto}' +
+// A locked line keeps the dashed tell the old pill had, drawn INSIDE the chip so
+// it costs no width — the ring is the panel colour, which reads as a cut edge.
+'  #tab-leaderboard .lb-sr.fixed{outline:1px dashed var(--bg);outline-offset:-3px}' +
+'  #tab-leaderboard .lb-sr-unk{color:var(--bad) !important;background:none !important;box-shadow:inset 0 0 0 1px var(--bad)}' +
 // the multi-loadout marker
 '  #tab-leaderboard .lb-lo{flex:0 0 auto;margin-left:6px;font-size:10px;font-weight:800;color:var(--mid);' +
      'border:1px solid var(--border);border-radius:5px;padding:0 4px;cursor:help;text-decoration:none}' +
@@ -569,13 +631,24 @@
 '  @media(max-width:700px){' +
 '    #tab-leaderboard .panel{padding-left:6px;padding-right:6px}' +
 '    #tab-leaderboard .lb-tw table{min-width:0}' +
-'    #tab-leaderboard .lc-ilvl{width:0 !important}#tab-leaderboard .lb-ilvl{padding-left:0 !important;padding-right:0 !important;color:transparent}' +
-'    #tab-leaderboard .lc-grade{width:0 !important}#tab-leaderboard .lb-gradecell{padding-left:0 !important;padding-right:0 !important}' +
-'    #tab-leaderboard .lc-lines{width:0 !important}#tab-leaderboard .lb-linescell{padding-left:0 !important;padding-right:0 !important}' +
-'    #tab-leaderboard .lc-rolls{width:0 !important}#tab-leaderboard .lb-rollscell{padding-left:0 !important;padding-right:0 !important}' +
+// Age is the LAST cell, so display:none is safe there and nowhere else.
 '    #tab-leaderboard .lc-age{width:0 !important}#tab-leaderboard .lb-agecell{display:none}' +
-'    #tab-leaderboard .lc-star{width:26px !important}#tab-leaderboard .lc-rank{width:30px !important}' +
-'    #tab-leaderboard .lc-dmg{width:58px !important}#tab-leaderboard .lc-gap{width:52px !important}' +
+// Damage % collapses and reappears under the grade badge, which buys the name
+// about seventy pixels — the difference between a readable name and four letters.
+'    #tab-leaderboard .lc-dmg{width:0 !important}' +
+'    #tab-leaderboard .lb-dmg{padding-left:0 !important;padding-right:0 !important;font-size:0}' +
+'    #tab-leaderboard .lb-dmgmini{display:block;color:var(--accent);font-weight:700;font-size:10.5px;' +
+       'font-variant-numeric:tabular-nums;margin-top:2px}' +
+// The grade cell stacks instead of sitting on one line: badge, then number,
+// then the damage the collapsed column used to carry.
+'    #tab-leaderboard .lb-score{display:block;margin-left:0;font-size:11px}' +
+'    #tab-leaderboard .lc-star{width:22px !important}#tab-leaderboard .lc-rank{width:28px !important}' +
+'    #tab-leaderboard .lc-ilvl{width:38px !important}#tab-leaderboard .lb-ilvl{font-size:11px}' +
+'    #tab-leaderboard .lc-grade{width:46px !important}' +
+'    #tab-leaderboard .lc-lines{width:82px !important}' +
+'    #tab-leaderboard .lb-sr{min-width:22px;height:17px;font-size:10.5px;padding:0 2px}' +
+'    #tab-leaderboard .lb-lines{gap:3px}' +
+'    #tab-leaderboard .lb-badge{min-width:28px;height:22px;font-size:13px;padding:0 4px}' +
 '    #tab-leaderboard img.lb-classicon{width:16px;height:16px;margin-right:4px}' +
 '    #tab-leaderboard .lb-region{display:none}' +
 '    #tab-leaderboard td,#tab-leaderboard th{padding-left:3px;padding-right:3px}' +
@@ -623,6 +696,13 @@
 '  <p><b>Why your rank is not your Calculator number.</b> The Calculator scores your bracelet on <i>your</i> character: your crit, ' +
      'your gear, your fight. This board deliberately does not. If it used each player&rsquo;s own settings it would be ranking gear ' +
      'and fight profiles, not bracelets, and nobody&rsquo;s rank would mean anything.</p>' +
+'  <p><b>The 0&ndash;100 grade.</b> The Damage % column answers &ldquo;how much&rdquo;; the Grade column answers ' +
+     '&ldquo;how close to the ceiling&rdquo;. It is a straight line between two fixed points: <b>0</b> is an empty bracelet &mdash; ' +
+     'two combat traits at 40 and three effect lines worth nothing &mdash; and <b>100</b> is the three best distinct effect ' +
+     'families at their best roll with both traits at the grade&rsquo;s cap. On an Ancient that ceiling is ' +
+     '<b>22.87% damage</b> and that floor is <b>2.00%</b>. Each effect line gets its own letter on the same ladder, ' +
+     'scored against the strongest single roll its grade can carry &mdash; the Tier List&rsquo;s by-roll yardstick, so a letter ' +
+     'means one thing across both tabs.</p>' +
 '  <p><b>Loadouts.</b> A lostark.bible character page carries one loadout per tab &mdash; Raid, Chaos Dungeon, sometimes an ' +
      'estimated raid one &mdash; and each has its own bracelet. Every loadout is scored and the board ranks the highest. ' +
 '     The <span class="lb-lo">2</span> marker beside a name means that character wears more than one distinct bracelet; hover it for the others.</p>' +
@@ -685,18 +765,31 @@
       '">' + c.distinctBrackets + '</span>';
   }
 
+  /**
+   * The whole bracelet as one big subrank badge plus its 0–100 number — the
+   * headline verdict, in the shape astrogem uses for a rank. The damage figure
+   * rides along in a second line that only phones show, where the Damage %
+   * column has been collapsed to make room for the name.
+   */
   function gradeCell(c) {
-    if (!c._grade) return '<span class="lb-dash">&mdash;</span>';
-    return '<span class="lb-grade ' + esc(c._grade) + '">' + (c._grade === "relic" ? "Relic" : "Ancient") + '</span>';
-  }
-
-  function rollsCell(c) {
-    var r = c._rolls;
-    if (!r) return '<span class="lb-dash">&mdash;</span>';
-    var b = r.base || 0, t = r.ticket || 0;
-    if (!b && !t) return '<span class="lb-rolls" data-gloss="Fully rolled — no rerolls left, so this bracelet is finished.">none</span>';
-    return '<span class="lb-rolls" data-gloss="' + b + ' free reroll' + (b === 1 ? "" : "s") + ' and ' + t +
-      ' ticket reroll' + (t === 1 ? "" : "s") + ' left.">' + '<b>' + b + '</b>+<b>' + t + '</b></span>';
+    var g = c._s && c._s.grade0to100;
+    if (!g) return '<span class="lb-dash">&mdash;</span>';
+    var b = g.band;
+    var gloss = "Bracelet grade " + fx(g.score, 1) + " out of 100, subrank " + b.key + ". " +
+      "0 is an empty " + (c._grade === "relic" ? "Relic" : "Ancient") +
+      " — two 40 combat traits and three lines worth nothing; 100 is the three best distinct " +
+      "effect families at their best roll with both traits at the cap. This bracelet is worth " +
+      fx(c._pct == null ? 0 : c._pct, 2) + "% damage on the default character, against " +
+      fx(B.damagePercent(g.perfect), 2) + "% for that perfect one.";
+    // A flat 100 — and only a flat 100 — wears the animated rainbow. astrogem
+    // gates it on the config being perfect rather than on the band, for the same
+    // reason: an S+ is not a ceiling, and the rainbow has to mean the ceiling.
+    var col = SR.colorOf(b.key, g.isPerfect);
+    return '<span class="lb-badge' + (b.top ? " top" : "") + (col.cls ? " " + col.cls : "") +
+      '" style="background:' + col.bg + ';color:' + col.fg +
+      '" data-gloss="' + esc(gloss) + '">' + esc(b.key) + '</span>' +
+      '<span class="lb-score">' + fx(g.score, 1) + '</span>' +
+      '<span class="lb-dmgmini">' + (c._pct == null ? "&mdash;" : fx(c._pct, 2) + "%") + '</span>';
   }
 
   function linesCell(c) {
@@ -704,12 +797,6 @@
     var h = '<div class="lb-lines">', i;
     for (i = 0; i < c._s.lines.length; i++) h += linePill(c._s.lines[i], c._s.grade);
     return h + '</div>';
-  }
-
-  function gapCell(c) {
-    if (c._gap == null) return '<span class="lb-gap top" data-gloss="The top of the board.">&mdash;</span>';
-    return '<span class="lb-gap" data-gloss="How much less damage this bracelet is worth than the #1 bracelet, in percentage points.">' +
-      '−' + fx(c._gap, 2) + '</span>';
   }
 
   /**
@@ -724,16 +811,14 @@
     return '<tr data-i="' + i + '">' +
       starCell(c, i) +
       '<td class="lb-rank">#' + rankNum + '</td>' +
+      '<td class="lb-ilvl">' + (c.itemLevel ? nf(c.itemLevel) : '<span class="lb-dash">&mdash;</span>') + '</td>' +
       '<td class="lb-char"><span class="lb-charwrap">' + classIconHtml(c["class"]) +
         '<a class="lb-name" href="' + bibleUrl(c.region, c.name) + '" target="_blank" rel="noopener"' +
         ' onclick="event.stopPropagation()" title="' + esc(c.name || "") + '">' + esc(c.name || "—") + '</a>' +
         '<span class="lb-region">' + esc(c.region || "") + '</span>' + loadoutMarker(c) + warn + '</span></td>' +
-      '<td class="lb-ilvl">' + (c.itemLevel ? nf(c.itemLevel) : '<span class="lb-dash">&mdash;</span>') + '</td>' +
       '<td class="lb-gradecell">' + gradeCell(c) + '</td>' +
       '<td class="lb-dmg">' + (c._pct == null ? '<span class="lb-dash">&mdash;</span>' : fx(c._pct, 2) + "%") + '</td>' +
-      '<td>' + gapCell(c) + '</td>' +
       '<td class="lb-linescell">' + linesCell(c) + '</td>' +
-      '<td class="lb-rollscell">' + rollsCell(c) + '</td>' +
       '<td class="lb-agecell"><span class="lb-age">' + esc(ageLabel(c.pulledAt) || "—") + '</span></td>' +
       '</tr>';
   }
@@ -746,13 +831,11 @@
     return '<colgroup>' +
       (Favs ? '<col class="lc-star" style="width:30px">' : '') +
       '<col class="lc-rank" style="width:46px">' +
-      '<col class="lc-char">' +
       '<col class="lc-ilvl" style="width:60px">' +
-      '<col class="lc-grade" style="width:66px">' +
+      '<col class="lc-char">' +
+      '<col class="lc-grade" style="width:96px">' +
       '<col class="lc-dmg" style="width:74px">' +
-      '<col class="lc-gap" style="width:62px">' +
-      '<col class="lc-lines" style="width:320px">' +
-      '<col class="lc-rolls" style="width:62px">' +
+      '<col class="lc-lines" style="width:126px">' +
       '<col class="lc-age" style="width:82px">' +
       '</colgroup>';
   }
@@ -761,13 +844,11 @@
     return '<thead><tr>' +
       (Favs ? '<th class="lb-star" aria-label="Favorite"></th>' : '') +
       '<th>Rank</th>' +
-      '<th>Character</th>' +
       '<th><span class="gloss" data-gloss="Item level, as the character page reported it.">iLvl</span></th>' +
-      '<th><span class="gloss" data-gloss="Bracelet grade: Ancient holds up to three granted lines, Relic up to two.">Grade</span></th>' +
+      '<th>Character</th>' +
+      '<th><span class="gloss" data-gloss="The whole bracelet on one 0–100 scale, and its subrank. 0 is an empty bracelet: two 40 combat traits and three lines worth nothing. 100 is the three best distinct effect families at their best roll with both traits at the cap.">Grade</span></th>' +
       '<th><span class="gloss" data-gloss="What the whole bracelet — both combat traits and every effect line — is worth in % damage on the canonical default character.">Damage %</span></th>' +
-      '<th><span class="gloss" data-gloss="Percentage points behind the #1 bracelet on this board.">Gap to #1</span></th>' +
-      '<th><span class="gloss" data-gloss="The bracelet\'s effect lines. A dashed pill is locked; hover any pill for its tier, its roll and what it is worth.">Effect lines</span></th>' +
-      '<th><span class="gloss" data-gloss="Rerolls remaining: free + ticket. A finished bracelet has none.">Rolls</span></th>' +
+      '<th><span class="gloss" data-gloss="One subrank per effect line: that line as a share of the strongest single roll its grade can carry, on the same ladder the Tier List uses. Hover a letter for the full effect, its roll and what it is worth. A dashed letter is locked.">Effects</span></th>' +
       '<th class="lb-agecell"><span class="gloss" data-gloss="When this character&rsquo;s page was last read.">Last pulled</span></th>' +
       '</tr></thead>';
   }
@@ -899,17 +980,13 @@
    * Build the display list from rawChars and paint.
    *
    * Ranking happens BEFORE the name search filters anything, so a searched
-   * character keeps its true overall rank and its true gap to #1.
+   * character keeps its true overall rank.
    */
   function rebuild() {
     var base = rawChars.filter(function (c) { return regions[c.region]; });
     if (classFilter) base = base.filter(function (c) { return c["class"] === classFilter; });
     base.sort(byPctDesc);
-    var top = base.length ? base[0]._pct : null;
-    for (var i = 0; i < base.length; i++) {
-      base[i]._rank = i + 1;
-      base[i]._gap = (i === 0 || top == null || base[i]._pct == null) ? null : (top - base[i]._pct);
-    }
+    for (var i = 0; i < base.length; i++) base[i]._rank = i + 1;
     var q = (searchQuery || "").trim().toLowerCase();
     var list = q
       ? base.filter(function (c) { return (c.name || "").toLowerCase().indexOf(q) !== -1; })
