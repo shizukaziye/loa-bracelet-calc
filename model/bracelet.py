@@ -1083,13 +1083,26 @@ def brute_solve(opts):
 # lostark.bible payload decoder
 # ----------------------------------------------------------------------
 
+# Mirrors TYPE2_INDEX in bracelet.js — see the note there for the evidence
+# behind indices 4, 74 and 151.
 TYPE2_INDEX = {
-    11: {"cat": "basic", "family": "mainStat", "stat": "int"},
+    3: {"cat": "basic", "family": "mainStat", "stat": "str"},
+    4: {"cat": "basic", "family": "mainStat", "stat": "dex"},
+    5: {"cat": "basic", "family": "mainStat", "stat": "int"},
+    6: {"cat": "basic", "family": "vitality"},
+    11: {"cat": "basic", "family": "mainStat"},
     15: {"cat": "trait", "family": "crit"},
     16: {"cat": "trait", "family": "spec"},
+    17: {"cat": "trait", "family": "domination"},
     18: {"cat": "trait", "family": "swiftness"},
+    19: {"cat": "trait", "family": "endurance"},
+    20: {"cat": "trait", "family": "expertise"},
+    27: {"cat": "special", "family": 6},
     50: {"cat": "special", "family": 24, "centi": True},
+    74: {"cat": "special", "family": 31, "centi": True},
     76: {"cat": "special", "family": 32, "centi": True},
+    149: {"cat": "special", "family": 8, "centi": True},
+    151: {"cat": "special", "family": 33},
 }
 GRADE_DIGIT = {1: "high", 2: "mid", 3: "low"}
 
@@ -1115,7 +1128,8 @@ def infer_grade(stats):
             m = TYPE2_INDEX.get(st.get("index"))
             if not m or m["cat"] != "special":
                 continue
-            if tier_from_value(m["family"], st["value"] / 100.0, g):
+            v = st["value"] / 100.0 if m.get("centi") else st["value"]
+            if tier_from_value(m["family"], v, g):
                 hits += 1
         if hits > best_hits:
             best_hits = hits

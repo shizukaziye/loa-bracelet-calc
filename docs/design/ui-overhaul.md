@@ -220,6 +220,22 @@ Two consequences for the stand-in itself:
   already holds, or two junk slots would read as a duplicate roll and the cut flow
   would reject a legal roll.
 
+## Character profile, astrogem-grader style (Shizu, 2026-08-11)
+
+Shizu: "create the calculator like the grader profile on the astrogem calculator."
+Mirror `loastuff/loa-astrogem-calc/grader.js` — signing in should make the whole
+character profile stop being hand-entered.
+
+- Sign in → character list (astrogem's favourites/roster spine) → pick a character →
+  the tool loads THAT character and grades their real bracelet.
+- Auto-fill everything derivable from their page: item level / per-piece honing (or
+  the WP + main-stat override straight from their profile numbers), class, crit rate
+  and crit damage, gem levels, additional-damage pool components. Manual controls stay
+  available and clearly marked as overridden-by-import until the user edits them.
+- Keep a visible "scored on defaults" vs "scored on this character" distinction: the
+  LEADERBOARD always ranks on canonical defaults; the calculator may use the imported
+  profile. Never let an imported profile silently change a leaderboard number.
+
 ## Craft notes
 
 - Segmented controls and toggles are buttons with aria-pressed; sliders are native

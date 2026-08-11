@@ -1400,13 +1400,35 @@
 
   // Verified on live character pages; the rest of the plain-stat indices are
   // still unmapped and come back as unknown passthrough.
+  // lostark.bible's plain-stat lines. Every entry below is confirmed against the
+  // seeded corpus: the decoded value lands exactly on an official tier.
+  //   74  -> 500/500/340 = 5.00/5.00/3.40, family 31's high/high/low
+  //   151 -> 7200, family 33's low
+  //   4   -> 12352, inside the Ancient main-stat band 12161-12800. Which main stat it
+  //          names is unknown and does not matter: all three score identically.
+  // lostark.bible plain-stat lines. Verified against 30 rendered character pages
+  // (the page server-renders the bracelet, so stat names and lock icons are ground
+  // truth). 3/4/5 are the legacy per-stat schema; 11 is the current class-resolved
+  // main-stat line — the SAME physical bracelet reports index 4 in an older loadout
+  // snapshot and index 11 in a newer one, so they are one concept.
   var TYPE2_INDEX = {
-    11: { cat: "basic", family: "mainStat", stat: "int" },
+    3:  { cat: "basic", family: "mainStat", stat: "str" },
+    4:  { cat: "basic", family: "mainStat", stat: "dex" },
+    5:  { cat: "basic", family: "mainStat", stat: "int" },
+    6:  { cat: "basic", family: "vitality" },
+    11: { cat: "basic", family: "mainStat" },
     15: { cat: "trait", family: "crit" },
     16: { cat: "trait", family: "spec" },
+    17: { cat: "trait", family: "domination" },
     18: { cat: "trait", family: "swiftness" },
+    19: { cat: "trait", family: "endurance" },
+    20: { cat: "trait", family: "expertise" },
+    27: { cat: "special", family: 6 },                 // Max HP
     50: { cat: "special", family: 24, centi: true },   // Additional Damage
-    76: { cat: "special", family: 32, centi: true }    // Crit Damage
+    74: { cat: "special", family: 31, centi: true },   // Crit Rate
+    76: { cat: "special", family: 32, centi: true },   // Crit Damage
+    149:{ cat: "special", family: 8,  centi: true },   // Combat resource recovery
+    151:{ cat: "special", family: 33 }                 // Weapon Power
   };
   var GRADE_DIGIT = { 1: "high", 2: "mid", 3: "low" };
 
@@ -1478,7 +1500,7 @@
         if (st.type !== 2) continue;
         var map = TYPE2_INDEX[st.index];
         if (!map || map.cat !== "special") continue;
-        if (tierFromValue(map.family, st.value / 100, grades[g])) hits++;
+        if (tierFromValue(map.family, map.centi ? st.value / 100 : st.value, grades[g])) hits++;
       }
       if (hits > bestHits) { bestHits = hits; best = grades[g]; }
     }
