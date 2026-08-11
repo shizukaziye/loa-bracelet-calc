@@ -17,8 +17,8 @@
  *     low = Rare blue, mid = Epic purple, high = Legendary gold. A Legendary junk
  *     line sitting far below a Rare crit line is the lesson the table teaches.
  *
- * BANDING is the loa-tierlist house style: S >=98 - A >=95 - B >=90 - C >=85 -
- * D >=80 - F <80, as a percentage of the BEST line, with empty bands drawn
+ * BANDING: S >=95 - A >=65 - B >=55 - C >=45 - D >0 - F = no damage, as a
+ * percentage of the BEST line for the current profile, with empty bands drawn
  * explicitly rather than skipped. The best line is the best line FOR THE CURRENT
  * PROFILE, so the bands move as the profile does. That is the feature, and the
  * copy above the table says so.
@@ -56,12 +56,17 @@
 
   // loa-tierlist's own ladder and hues, so a user who knows that site reads this
   // table without being taught anything.
+  // Bands are a % of the best line, but NOT the loa-tierlist ladder: that one is
+  // tuned for raid classes bunched within 20% of each other. Bracelet families run
+  // from 100% down to 37%, and thirteen of them do no damage at all, so the 98/95/90
+  // ladder put every real line in F. Here F means EXACTLY ONE THING — the line is
+  // worth nothing — and the live bands rank the twenty that do something.
   var BANDS = [
-    { key: "S", pct: 98, hue: "#E8CD8A", glow: true },
-    { key: "A", pct: 95, hue: "#E25C55" },
-    { key: "B", pct: 90, hue: "#E29A50" },
-    { key: "C", pct: 85, hue: "#D9C25F" },
-    { key: "D", pct: 80, hue: "#7DB56E" },
+    { key: "S", pct: 95, hue: "#E8CD8A", glow: true },
+    { key: "A", pct: 65, hue: "#E25C55" },
+    { key: "B", pct: 55, hue: "#E29A50" },
+    { key: "C", pct: 45, hue: "#D9C25F" },
+    { key: "D", pct: 0.0001, hue: "#7DB56E" },
     { key: "F", pct: 0, hue: "#7290C7" }
   ];
   function bandOf(pct) {
@@ -325,7 +330,7 @@
       // Empty bands are DRAWN, not skipped — an empty A tier is information.
       if (!body) {
         body = '<div class="tl-empty">nothing in the ' +
-          (b.key === "F" ? "&lt;80%" : "&#8805;" + b.pct + "%") + " band</div>";
+          (b.key === "F" ? "no damage" : b.key === "D" ? "&gt;0%" : "&#8805;" + b.pct + "%") + " band</div>";
       }
       out += '<section class="tl-band">' +
         '<div class="tl-chip' + (b.glow ? " tl-chip-z" : "") + (b.key === "S" ? " tl-chip-s" : "") +
@@ -399,7 +404,7 @@
     kv += '<span class="tp-k">damage</span><span class="tp-v">' + fx(r.dmg, 3) +
       '% <span class="tp-dim">= (e<sup>' + fx(r.d, 3) + "/100</sup> &#8722; 1) &#215; 100</span></span>";
     kv += '<span class="tp-k">band</span><span class="tp-v">' + fx(r.pct, 1) + "% of the best line" +
-      (r.band.key === "F" ? ' <span class="tp-dim">&#183; below the 80% cut</span>'
+      (r.band.key === "F" ? ' <span class="tp-dim">&#183; does no damage for this character</span>'
         : ' <span class="tp-dim">&#183; ' + fx(r.pct - r.band.pct, 1) + "pp above the " + r.band.key + " cut</span>") + "</span>";
     h += '<div class="tp-sec"><div class="tp-sec-h">Worth to your character</div><div class="tp-grid">' + kv + "</div></div>";
 
