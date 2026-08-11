@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bracelet Calculator</title>
+<meta name="description" content="Lost Ark T4 bracelet tools: score any bracelet in % damage, get the exact reroll and lock advice, and see what an unrolled bracelet is worth.">
+<meta name="theme-color" content="#0d1017">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Bracelet Calculator">
+<meta property="og:title" content="Bracelet Calculator — Lost Ark">
+<meta property="og:description" content="Score any T4 bracelet in % damage, get exact keep-or-replace and lock advice, and price an unrolled bracelet.">
+<meta property="og:url" content="https://www.loseii.com/loa-bracelet-calc/">
+<!--
+  App shell for the Lost Ark T4 bracelet tool. PHASE 1: shell only — the panes
+  are empty and no UI module exists yet. The math lives in model/bracelet.js
+  (window.Bracelet), a pure core the UI will read and never mutate.
+
+  Three tabs: "Calculator" (#tab-calculator, first/default), "Leaderboard"
+  (#tab-leaderboard) and "Method" (#tab-method). The tab bar toggles .active on
+  the panes and fires a 'tabselected' event so a pane can act on activation.
+
+  Scripts load in two sets:
+    EAGER (bottom of <body>, in order): data/bracelet-data.js and
+    data/gear-data.js (the official tables), model/bracelet.js (the core), then
+    tip.js. The Calculator module joins this list when it lands.
+    LAZY (the LAZY_TABS map below): heavier per-tab modules load on FIRST
+    activation of their tab.
+
+  Deploy note: bump a file's ?v= whenever you edit it — the loseii edge caches
+  JS for 4h and browsers cache-bust on that query.
+-->
+<link rel="stylesheet" href="styles.css?v=1">
+</head><body>
+<div class="wrap">
+  <div class="appbar">
+    <div>
+      <h1>Bracelet Calculator</h1>
+      <div class="tag">Lost Ark T4 bracelets — % damage scoring, exact reroll advice, and what one is worth.</div>
+    </div>
+  </div>
+
+  <!-- Tab bar -->
+  <div class="tabbar" id="tabbar">
+    <button class="tab active" data-tab="calculator" onclick="selectTab('calculator')">Calculator</button>
+    <button class="tab" data-tab="leaderboard" onclick="selectTab('leaderboard')">Leaderboard</button>
+    <button class="tab" data-tab="method" onclick="selectTab('method')">Method</button>
+  </div>
+
+  <!-- Tab panes -->
+  <section id="tab-calculator" class="tabpane active"></section>
+  <section id="tab-leaderboard" class="tabpane"></section>
+  <section id="tab-method" class="tabpane"></section>
+</div>
+
+<!-- Tab switching: toggle .active on the matching button + pane. -->
+<script>
+"use strict";
+// Heavy, rarely-used modules load on FIRST activation of their tab instead of on
+// every visit. Empty until those modules exist; the loader is already wired so a
+// module only has to be added to the map.
+var LAZY_TABS = {};
+var lazyLoaded = {};
+function loadScriptsSeq(list, done){
+  if (!list.length) { done(); return; }
+  var s = document.createElement('script');
+  s.src = list[0];
+  s.onload = function(){ loadScriptsSeq(list.slice(1), done); };
+  s.onerror = function(){ loadScriptsSeq(list.slice(1), done); }; // skip a failed script; modules degrade gracefully
+  document.body.appendChild(s);
+}
+function ensureTabLoaded(name){
+  if (!LAZY_TABS[name] || lazyLoaded[name]) return;
+  lazyLoaded[name] = true;
+  var pane = document.getElementById('tab-'+name);
+  if (pane && !pane.childNodes.length) pane.innerHTML = '<div style="padding:24px;opacity:.65">Loading…</div>'; // replaced by the module's init
+  loadScriptsSeq(LAZY_TABS[name], function(){
+    // re-announce the activation for anything keyed on the event (the modules just initialized)
+    try { document.dispatchEvent(new CustomEvent('tabselected', { detail: { tab: name } })); } catch (e) {}
+  });
+}
+function selectTab(name){
+  var tabs = document.querySelectorAll('.tab');
+  for (var i=0;i<tabs.length;i++){ tabs[i].classList.toggle('active', tabs[i].dataset.tab===name); }
+  var panes = document.querySelectorAll('.tabpane');
+  for (var j=0;j<panes.length;j++){
+    panes[j].classList.toggle('active', panes[j].id === ('tab-'+name));
+  }
+  ensureTabLoaded(name);
+  // Notify tab modules that lazy-load on activation.
+  try { document.dispatchEvent(new CustomEvent('tabselected', { detail: { tab: name } })); } catch (e) {}
+}
+</script>
+
+<!-- EAGER: the official tables, then the model core, then the shared tooltip.
+     Order matters — model/bracelet.js reads window.BraceletData and
+     window.BraceletGearData at parse time. -->
+<!-- ?v= cache-buster: bump on each deploy so browsers load fresh JS without a hard-refresh -->
+<script src="data/bracelet-data.js?v=1"></script>
+<script src="data/gear-data.js?v=1"></script>
+<script src="model/bracelet.js?v=1"></script>
+<script src="tip.js?v=1"></script>
+<script src="https://www.loseii.com/nav.js" defer></script>
+<script src="https://www.loseii.com/social-bar.js" defer></script>
+</body></html>

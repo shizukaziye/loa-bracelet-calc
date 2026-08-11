@@ -1,0 +1,13 @@
+{
+  "name": "loa-bracelet-calc",
+  "version": "0.1.0",
+  "description": "Lost Ark T4 bracelet calculator: a dependency-free verified model core (JS + Python mirror) that scores bracelets in % damage and solves the reroll decision exactly.",
+  "private": true,
+  "scripts": {
+    "verify": "node verify.js",
+    "verify-py": "python verify.py",
+    "genrefs": "node tools/gen-refs.js",
+    "serve": "npx http-server -p 8080 -c-1 ."
+  },
+  "license": "MIT"
+}

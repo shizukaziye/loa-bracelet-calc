@@ -1,0 +1,2651 @@
+{
+  "meta": {
+    "generated": "2026-08-11T07:01:37.925Z",
+    "modelSig": "bracelet-v1",
+    "floatTolerance": 1e-8,
+    "note": "Captured references for the bracelet core. Regenerate with `node tools/gen-refs.js`. Scoring is % damage in log space (D = 100*ln(multiplier)); the solver's V is the expected final score under optimal play with free rerolls."
+  },
+  "derivation": [
+    {
+      "label": "default 1785 build",
+      "input": {},
+      "out": {
+        "ilvl": 1785,
+        "armorMainStat": 629835,
+        "mainStatRaw": 703826,
+        "weaponPowerRaw": 241367,
+        "mainStatTotal": 767170.34,
+        "weaponPowerTotal": 261883.195
+      }
+    },
+    {
+      "label": "flat AP off",
+      "input": {
+        "flatAP": 0
+      },
+      "out": {
+        "ilvl": 1785,
+        "armorMainStat": 629835,
+        "mainStatRaw": 703826,
+        "weaponPowerRaw": 241367,
+        "mainStatTotal": 767170.34,
+        "weaponPowerTotal": 261883.195
+      }
+    },
+    {
+      "label": "all +21, no karma/ranch",
+      "input": {
+        "pieceLevels": {
+          "weapon": 21,
+          "gloves": 21
+        },
+        "msPct": 0.08,
+        "wpPct": 0.06
+      },
+      "out": {
+        "ilvl": 1780,
+        "armorMainStat": 622163,
+        "mainStatRaw": 696154,
+        "weaponPowerRaw": 218667,
+        "mainStatTotal": 751846.32,
+        "weaponPowerTotal": 231787.02
+      }
+    },
+    {
+      "label": "fresh 1700 build",
+      "input": {
+        "pieceLevels": {
+          "head": 5,
+          "shoulder": 5,
+          "chest": 5,
+          "pants": 5,
+          "gloves": 5,
+          "weapon": 5
+        }
+      },
+      "out": {
+        "ilvl": 1700,
+        "armorMainStat": 404782,
+        "mainStatRaw": 478773,
+        "weaponPowerRaw": 142303,
+        "mainStatTotal": 521862.57,
+        "weaponPowerTotal": 154398.755
+      }
+    }
+  ],
+  "profileScalars": {
+    "addDamagePool": 0.3844,
+    "addDamagePoolMaster": 0.4544,
+    "critFactor": 2.62,
+    "allyCritFactor": 2.62,
+    "attackPower": 208562.202342212,
+    "attackPowerNoFlat": 205862.202342212,
+    "defShredGain2_1": 1.01061142,
+    "basicExpectedRelic": 8909.25,
+    "basicExpectedAncient": 12109.25,
+    "traitExpectedRelic": 64.02,
+    "traitExpectedAncient": 84.02
+  },
+  "listed": {
+    "grantedListedSum": 100.00016,
+    "fixedListedSum": 100,
+    "spot": [
+      {
+        "id": 1,
+        "tier": "low",
+        "granted": 4.2,
+        "fixed": 6
+      },
+      {
+        "id": 10,
+        "tier": "high",
+        "granted": 0.7,
+        "fixed": 1
+      },
+      {
+        "id": 15,
+        "tier": "mid",
+        "granted": 0.25,
+        "fixed": null
+      },
+      {
+        "id": 22,
+        "tier": "high",
+        "granted": 0.08333,
+        "fixed": null
+      },
+      {
+        "id": 33,
+        "tier": "low",
+        "granted": 1.0909,
+        "fixed": null
+      }
+    ],
+    "values": [
+      {
+        "id": 13,
+        "grade": "relic",
+        "tier": "mid",
+        "value": [
+          2,
+          4
+        ]
+      },
+      {
+        "id": 21,
+        "grade": "ancient",
+        "tier": "high",
+        "value": [
+          9000,
+          2400
+        ]
+      },
+      {
+        "id": 32,
+        "grade": "relic",
+        "tier": "high",
+        "value": [
+          8.4
+        ]
+      }
+    ]
+  },
+  "lines": [
+    {
+      "grade": "relic",
+      "family": 1,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 1,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 1,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 2,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 2,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 2,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 3,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 3,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 3,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 4,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 4,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 4,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 5,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 5,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 5,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 6,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 6,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 6,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 7,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 7,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 7,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 8,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 8,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 8,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 9,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 9,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 9,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 10,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 10,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 10,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 11,
+      "tier": "low",
+      "damage": 3.218338436
+    },
+    {
+      "grade": "relic",
+      "family": 11,
+      "tier": "mid",
+      "damage": 3.76149031
+    },
+    {
+      "grade": "relic",
+      "family": 11,
+      "tier": "high",
+      "damage": 4.301707974
+    },
+    {
+      "grade": "relic",
+      "family": 12,
+      "tier": "low",
+      "damage": 3.20392334
+    },
+    {
+      "grade": "relic",
+      "family": 12,
+      "tier": "mid",
+      "damage": 3.742741502
+    },
+    {
+      "grade": "relic",
+      "family": 12,
+      "tier": "high",
+      "damage": 4.278671967
+    },
+    {
+      "grade": "relic",
+      "family": 13,
+      "tier": "low",
+      "damage": 1.663708303
+    },
+    {
+      "grade": "relic",
+      "family": 13,
+      "tier": "mid",
+      "damage": 2.180062996
+    },
+    {
+      "grade": "relic",
+      "family": 13,
+      "tier": "high",
+      "damage": 2.694008513
+    },
+    {
+      "grade": "relic",
+      "family": 14,
+      "tier": "low",
+      "damage": 2.822601732
+    },
+    {
+      "grade": "relic",
+      "family": 14,
+      "tier": "mid",
+      "damage": 3.177993392
+    },
+    {
+      "grade": "relic",
+      "family": 14,
+      "tier": "high",
+      "damage": 3.532126491
+    },
+    {
+      "grade": "relic",
+      "family": 15,
+      "tier": "low",
+      "damage": 2.936841671
+    },
+    {
+      "grade": "relic",
+      "family": 15,
+      "tier": "mid",
+      "damage": 3.416458897
+    },
+    {
+      "grade": "relic",
+      "family": 15,
+      "tier": "high",
+      "damage": 3.893786773
+    },
+    {
+      "grade": "relic",
+      "family": 16,
+      "tier": "low",
+      "damage": 2.241687891
+    },
+    {
+      "grade": "relic",
+      "family": 16,
+      "tier": "mid",
+      "damage": 2.688066278
+    },
+    {
+      "grade": "relic",
+      "family": 16,
+      "tier": "high",
+      "damage": 3.133805312
+    },
+    {
+      "grade": "relic",
+      "family": 17,
+      "tier": "low",
+      "damage": 3.044775704
+    },
+    {
+      "grade": "relic",
+      "family": 17,
+      "tier": "mid",
+      "damage": 3.642762056
+    },
+    {
+      "grade": "relic",
+      "family": 17,
+      "tier": "high",
+      "damage": 4.237193778
+    },
+    {
+      "grade": "relic",
+      "family": 18,
+      "tier": "low",
+      "damage": 1.252128055
+    },
+    {
+      "grade": "relic",
+      "family": 18,
+      "tier": "mid",
+      "damage": 1.607018018
+    },
+    {
+      "grade": "relic",
+      "family": 18,
+      "tier": "high",
+      "damage": 1.960652964
+    },
+    {
+      "grade": "relic",
+      "family": 19,
+      "tier": "low",
+      "damage": 3.044775704
+    },
+    {
+      "grade": "relic",
+      "family": 19,
+      "tier": "mid",
+      "damage": 3.642762056
+    },
+    {
+      "grade": "relic",
+      "family": 19,
+      "tier": "high",
+      "damage": 4.237193778
+    },
+    {
+      "grade": "relic",
+      "family": 20,
+      "tier": "low",
+      "damage": 0.971894135
+    },
+    {
+      "grade": "relic",
+      "family": 20,
+      "tier": "mid",
+      "damage": 1.125647716
+    },
+    {
+      "grade": "relic",
+      "family": 20,
+      "tier": "high",
+      "damage": 1.278926896
+    },
+    {
+      "grade": "relic",
+      "family": 21,
+      "tier": "low",
+      "damage": 1.60189705
+    },
+    {
+      "grade": "relic",
+      "family": 21,
+      "tier": "mid",
+      "damage": 1.817494767
+    },
+    {
+      "grade": "relic",
+      "family": 21,
+      "tier": "high",
+      "damage": 2.032422611
+    },
+    {
+      "grade": "relic",
+      "family": 22,
+      "tier": "low",
+      "damage": 1.309975006
+    },
+    {
+      "grade": "relic",
+      "family": 22,
+      "tier": "mid",
+      "damage": 1.497402507
+    },
+    {
+      "grade": "relic",
+      "family": 22,
+      "tier": "high",
+      "damage": 1.684184115
+    },
+    {
+      "grade": "relic",
+      "family": 23,
+      "tier": "low",
+      "damage": 1.488861249
+    },
+    {
+      "grade": "relic",
+      "family": 23,
+      "tier": "mid",
+      "damage": 1.98026273
+    },
+    {
+      "grade": "relic",
+      "family": 23,
+      "tier": "high",
+      "damage": 2.469261259
+    },
+    {
+      "grade": "relic",
+      "family": 24,
+      "tier": "low",
+      "damage": 1.789724913
+    },
+    {
+      "grade": "relic",
+      "family": 24,
+      "tier": "mid",
+      "damage": 2.143858012
+    },
+    {
+      "grade": "relic",
+      "family": 24,
+      "tier": "high",
+      "damage": 2.496741433
+    },
+    {
+      "grade": "relic",
+      "family": 25,
+      "tier": "low",
+      "damage": 0.995033085
+    },
+    {
+      "grade": "relic",
+      "family": 25,
+      "tier": "mid",
+      "damage": 1.242252
+    },
+    {
+      "grade": "relic",
+      "family": 25,
+      "tier": "high",
+      "damage": 1.488861249
+    },
+    {
+      "grade": "relic",
+      "family": 26,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 26,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 26,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 27,
+      "tier": "low",
+      "damage": 0.697561374
+    },
+    {
+      "grade": "relic",
+      "family": 27,
+      "tier": "mid",
+      "damage": 0.87119406
+    },
+    {
+      "grade": "relic",
+      "family": 27,
+      "tier": "high",
+      "damage": 1.044525786
+    },
+    {
+      "grade": "relic",
+      "family": 28,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 28,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 28,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 29,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 29,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 29,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 30,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 30,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 30,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "family": 31,
+      "tier": "low",
+      "damage": 1.770493399
+    },
+    {
+      "grade": "relic",
+      "family": 31,
+      "tier": "mid",
+      "damage": 2.309013773
+    },
+    {
+      "grade": "relic",
+      "family": 31,
+      "tier": "high",
+      "damage": 2.844649632
+    },
+    {
+      "grade": "relic",
+      "family": 32,
+      "tier": "low",
+      "damage": 1.770493399
+    },
+    {
+      "grade": "relic",
+      "family": 32,
+      "tier": "mid",
+      "damage": 2.309013773
+    },
+    {
+      "grade": "relic",
+      "family": 32,
+      "tier": "high",
+      "damage": 2.844649632
+    },
+    {
+      "grade": "relic",
+      "family": 33,
+      "tier": "low",
+      "damage": 1.271752489
+    },
+    {
+      "grade": "relic",
+      "family": 33,
+      "tier": "mid",
+      "damage": 1.450802555
+    },
+    {
+      "grade": "relic",
+      "family": 33,
+      "tier": "high",
+      "damage": 1.629209616
+    },
+    {
+      "grade": "relic",
+      "cat": "basic",
+      "family": "mainStat",
+      "value": null,
+      "damage": 0.620826389
+    },
+    {
+      "grade": "relic",
+      "cat": "basic",
+      "family": "mainStat",
+      "value": 13888,
+      "damage": 0.964412495
+    },
+    {
+      "grade": "relic",
+      "cat": "basic",
+      "family": "vitality",
+      "value": null,
+      "damage": 0
+    },
+    {
+      "grade": "relic",
+      "cat": "trait",
+      "family": "crit",
+      "value": 100,
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 1,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 1,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 1,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 2,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 2,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 2,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 3,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 3,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 3,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 4,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 4,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 4,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 5,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 5,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 5,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 6,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 6,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 6,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 7,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 7,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 7,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 8,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 8,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 8,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 9,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 9,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 9,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 10,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 10,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 10,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 11,
+      "tier": "low",
+      "damage": 3.76149031
+    },
+    {
+      "grade": "ancient",
+      "family": 11,
+      "tier": "mid",
+      "damage": 4.301707974
+    },
+    {
+      "grade": "ancient",
+      "family": 11,
+      "tier": "high",
+      "damage": 4.839022961
+    },
+    {
+      "grade": "ancient",
+      "family": 12,
+      "tier": "low",
+      "damage": 3.742741502
+    },
+    {
+      "grade": "ancient",
+      "family": 12,
+      "tier": "mid",
+      "damage": 4.278671967
+    },
+    {
+      "grade": "ancient",
+      "family": 12,
+      "tier": "high",
+      "damage": 4.811745522
+    },
+    {
+      "grade": "ancient",
+      "family": 13,
+      "tier": "low",
+      "damage": 2.180062996
+    },
+    {
+      "grade": "ancient",
+      "family": 13,
+      "tier": "mid",
+      "damage": 2.694008513
+    },
+    {
+      "grade": "ancient",
+      "family": 13,
+      "tier": "high",
+      "damage": 3.205568244
+    },
+    {
+      "grade": "ancient",
+      "family": 14,
+      "tier": "low",
+      "damage": 3.177993392
+    },
+    {
+      "grade": "ancient",
+      "family": 14,
+      "tier": "mid",
+      "damage": 3.532126491
+    },
+    {
+      "grade": "ancient",
+      "family": 14,
+      "tier": "high",
+      "damage": 3.885009911
+    },
+    {
+      "grade": "ancient",
+      "family": 15,
+      "tier": "low",
+      "damage": 3.416458897
+    },
+    {
+      "grade": "ancient",
+      "family": 15,
+      "tier": "mid",
+      "damage": 3.893786773
+    },
+    {
+      "grade": "ancient",
+      "family": 15,
+      "tier": "high",
+      "damage": 4.368847049
+    },
+    {
+      "grade": "ancient",
+      "family": 16,
+      "tier": "low",
+      "damage": 2.688066278
+    },
+    {
+      "grade": "ancient",
+      "family": 16,
+      "tier": "mid",
+      "damage": 3.133805312
+    },
+    {
+      "grade": "ancient",
+      "family": 16,
+      "tier": "high",
+      "damage": 3.72713948
+    },
+    {
+      "grade": "ancient",
+      "family": 17,
+      "tier": "low",
+      "damage": 3.642762056
+    },
+    {
+      "grade": "ancient",
+      "family": 17,
+      "tier": "mid",
+      "damage": 4.237193778
+    },
+    {
+      "grade": "ancient",
+      "family": 17,
+      "tier": "high",
+      "damage": 5.024312483
+    },
+    {
+      "grade": "ancient",
+      "family": 18,
+      "tier": "low",
+      "damage": 1.607018018
+    },
+    {
+      "grade": "ancient",
+      "family": 18,
+      "tier": "mid",
+      "damage": 1.960652964
+    },
+    {
+      "grade": "ancient",
+      "family": 18,
+      "tier": "high",
+      "damage": 2.313041739
+    },
+    {
+      "grade": "ancient",
+      "family": 19,
+      "tier": "low",
+      "damage": 3.642762056
+    },
+    {
+      "grade": "ancient",
+      "family": 19,
+      "tier": "mid",
+      "damage": 4.237193778
+    },
+    {
+      "grade": "ancient",
+      "family": 19,
+      "tier": "high",
+      "damage": 4.828112878
+    },
+    {
+      "grade": "ancient",
+      "family": 20,
+      "tier": "low",
+      "damage": 1.125647716
+    },
+    {
+      "grade": "ancient",
+      "family": 20,
+      "tier": "mid",
+      "damage": 1.278926896
+    },
+    {
+      "grade": "ancient",
+      "family": 20,
+      "tier": "high",
+      "damage": 1.431734599
+    },
+    {
+      "grade": "ancient",
+      "family": 21,
+      "tier": "low",
+      "damage": 1.817494767
+    },
+    {
+      "grade": "ancient",
+      "family": 21,
+      "tier": "mid",
+      "damage": 2.032422611
+    },
+    {
+      "grade": "ancient",
+      "family": 21,
+      "tier": "high",
+      "damage": 2.246685228
+    },
+    {
+      "grade": "ancient",
+      "family": 22,
+      "tier": "low",
+      "damage": 1.497402507
+    },
+    {
+      "grade": "ancient",
+      "family": 22,
+      "tier": "mid",
+      "damage": 1.684184115
+    },
+    {
+      "grade": "ancient",
+      "family": 22,
+      "tier": "high",
+      "damage": 1.870324456
+    },
+    {
+      "grade": "ancient",
+      "family": 23,
+      "tier": "low",
+      "damage": 1.98026273
+    },
+    {
+      "grade": "ancient",
+      "family": 23,
+      "tier": "mid",
+      "damage": 2.469261259
+    },
+    {
+      "grade": "ancient",
+      "family": 23,
+      "tier": "high",
+      "damage": 2.955880224
+    },
+    {
+      "grade": "ancient",
+      "family": 24,
+      "tier": "low",
+      "damage": 2.143858012
+    },
+    {
+      "grade": "ancient",
+      "family": 24,
+      "tier": "mid",
+      "damage": 2.496741433
+    },
+    {
+      "grade": "ancient",
+      "family": 24,
+      "tier": "high",
+      "damage": 2.848383964
+    },
+    {
+      "grade": "ancient",
+      "family": 25,
+      "tier": "low",
+      "damage": 1.242252
+    },
+    {
+      "grade": "ancient",
+      "family": 25,
+      "tier": "mid",
+      "damage": 1.488861249
+    },
+    {
+      "grade": "ancient",
+      "family": 25,
+      "tier": "high",
+      "damage": 1.734863833
+    },
+    {
+      "grade": "ancient",
+      "family": 26,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 26,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 26,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 27,
+      "tier": "low",
+      "damage": 0.87119406
+    },
+    {
+      "grade": "ancient",
+      "family": 27,
+      "tier": "mid",
+      "damage": 1.044525786
+    },
+    {
+      "grade": "ancient",
+      "family": 27,
+      "tier": "high",
+      "damage": 1.217557593
+    },
+    {
+      "grade": "ancient",
+      "family": 28,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 28,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 28,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 29,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 29,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 29,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 30,
+      "tier": "low",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 30,
+      "tier": "mid",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 30,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "family": 31,
+      "tier": "low",
+      "damage": 2.309013773
+    },
+    {
+      "grade": "ancient",
+      "family": 31,
+      "tier": "mid",
+      "damage": 2.844649632
+    },
+    {
+      "grade": "ancient",
+      "family": 31,
+      "tier": "high",
+      "damage": 3.377431712
+    },
+    {
+      "grade": "ancient",
+      "family": 32,
+      "tier": "low",
+      "damage": 2.309013773
+    },
+    {
+      "grade": "ancient",
+      "family": 32,
+      "tier": "mid",
+      "damage": 2.844649632
+    },
+    {
+      "grade": "ancient",
+      "family": 32,
+      "tier": "high",
+      "damage": 3.377431712
+    },
+    {
+      "grade": "ancient",
+      "family": 33,
+      "tier": "low",
+      "damage": 1.450802555
+    },
+    {
+      "grade": "ancient",
+      "family": 33,
+      "tier": "mid",
+      "damage": 1.629209616
+    },
+    {
+      "grade": "ancient",
+      "family": 33,
+      "tier": "high",
+      "damage": 1.80697828
+    },
+    {
+      "grade": "ancient",
+      "cat": "basic",
+      "family": "mainStat",
+      "value": null,
+      "damage": 0.841932702
+    },
+    {
+      "grade": "ancient",
+      "cat": "basic",
+      "family": "mainStat",
+      "value": 13888,
+      "damage": 0.964412495
+    },
+    {
+      "grade": "ancient",
+      "cat": "basic",
+      "family": "vitality",
+      "value": null,
+      "damage": 0
+    },
+    {
+      "grade": "ancient",
+      "cat": "trait",
+      "family": "crit",
+      "value": 100,
+      "damage": 0
+    }
+  ],
+  "profileVariants": [
+    {
+      "label": "master on",
+      "profile": {
+        "master": true
+      },
+      "grade": "ancient",
+      "family": 24,
+      "tier": "high",
+      "damage": 2.713134405
+    },
+    {
+      "label": "two skills",
+      "profile": {
+        "skills": [
+          {
+            "share": 0.6,
+            "critRate": 0.75,
+            "critDamage": 2.6
+          },
+          {
+            "share": 0.4,
+            "critRate": 1,
+            "critDamage": 2.9
+          }
+        ]
+      },
+      "grade": "ancient",
+      "family": 31,
+      "tier": "high",
+      "damage": 1.916991611
+    },
+    {
+      "label": "crit already capped",
+      "profile": {
+        "skills": [
+          {
+            "share": 1,
+            "critRate": 1,
+            "critDamage": 2.8
+          }
+        ]
+      },
+      "grade": "ancient",
+      "family": 31,
+      "tier": "high",
+      "damage": 0
+    },
+    {
+      "label": "no flat AP",
+      "profile": {
+        "flatAP": 0
+      },
+      "grade": "ancient",
+      "family": 33,
+      "tier": "high",
+      "damage": 1.830462233
+    },
+    {
+      "label": "front-attack build",
+      "profile": {
+        "frontAttackShare": 0.7,
+        "backAttackShare": 0
+      },
+      "grade": "ancient",
+      "family": 26,
+      "tier": "high",
+      "damage": 2.42046887
+    },
+    {
+      "label": "burst only",
+      "profile": {
+        "cooldownPenaltyWeight": 1
+      },
+      "grade": "ancient",
+      "family": 15,
+      "tier": "high",
+      "damage": 5.354076693
+    },
+    {
+      "label": "sustained only",
+      "profile": {
+        "cooldownPenaltyWeight": 0
+      },
+      "grade": "ancient",
+      "family": 15,
+      "tier": "high",
+      "damage": 3.373813963
+    },
+    {
+      "label": "support stub",
+      "profile": {
+        "role": "support"
+      },
+      "grade": "ancient",
+      "family": 29,
+      "tier": "high",
+      "damage": 2.664193095
+    },
+    {
+      "label": "solo (no allies)",
+      "profile": {
+        "allyDpsCount": 0
+      },
+      "grade": "ancient",
+      "family": 17,
+      "tier": "high",
+      "damage": 1.702973984
+    }
+  ],
+  "pools": [
+    {
+      "label": "empty bracelet",
+      "grade": "ancient",
+      "lines": [],
+      "entries": 88,
+      "pSum": 1,
+      "survivingMass": 100,
+      "excludedMass": 0,
+      "byCategory": {
+        "basic": 0.35,
+        "trait": 0.35,
+        "special": 0.3
+      },
+      "pick": {
+        "basic:mainStat:b0": 0.0175,
+        "basic:vitality": 0.175,
+        "trait:crit": 0.058333333,
+        "special:32:high": 0.000545399,
+        "special:33:low": 0.003272695,
+        "special:4": 0.020999966
+      }
+    },
+    {
+      "label": "two fixed traits (trait cap full)",
+      "grade": "ancient",
+      "lines": [
+        {
+          "cat": "trait",
+          "family": "crit"
+        },
+        {
+          "cat": "trait",
+          "family": "spec"
+        }
+      ],
+      "entries": 82,
+      "pSum": 1,
+      "survivingMass": 65,
+      "excludedMass": 35,
+      "byCategory": {
+        "basic": 0.538461538,
+        "trait": 0,
+        "special": 0.461538462
+      },
+      "pick": {
+        "basic:mainStat:b0": 0.026923077,
+        "basic:vitality": 0.269230769,
+        "trait:crit": null,
+        "special:32:high": 0.000839076,
+        "special:33:low": 0.005034915,
+        "special:4": 0.032307641
+      }
+    },
+    {
+      "label": "traits full + one special",
+      "grade": "ancient",
+      "lines": [
+        {
+          "cat": "trait",
+          "family": "crit"
+        },
+        {
+          "cat": "trait",
+          "family": "spec"
+        },
+        {
+          "cat": "special",
+          "family": 32,
+          "tier": "high"
+        }
+      ],
+      "entries": 79,
+      "pSum": 1,
+      "survivingMass": 64.454540873,
+      "excludedMass": 35.545459127,
+      "byCategory": {
+        "basic": 0.543018374,
+        "trait": 0,
+        "special": 0.456981626
+      },
+      "pick": {
+        "basic:mainStat:b0": 0.027150919,
+        "basic:vitality": 0.271509187,
+        "trait:crit": null,
+        "special:32:high": null,
+        "special:33:low": 0.005077524,
+        "special:4": 0.03258105
+      }
+    },
+    {
+      "label": "basics full",
+      "grade": "relic",
+      "lines": [
+        {
+          "cat": "basic",
+          "family": "mainStat"
+        },
+        {
+          "cat": "basic",
+          "family": "vitality"
+        }
+      ],
+      "entries": 77,
+      "pSum": 1,
+      "survivingMass": 65,
+      "excludedMass": 35,
+      "byCategory": {
+        "basic": 0,
+        "trait": 0.538461538,
+        "special": 0.461538462
+      },
+      "pick": {
+        "basic:mainStat:b0": null,
+        "basic:vitality": null,
+        "trait:crit": 0.08974359,
+        "special:32:high": 0.000839076,
+        "special:33:low": 0.005034915,
+        "special:4": 0.032307641
+      }
+    },
+    {
+      "label": "five specials (special cap full)",
+      "grade": "ancient",
+      "lines": [
+        {
+          "cat": "special",
+          "family": 31,
+          "tier": "high"
+        },
+        {
+          "cat": "special",
+          "family": 32,
+          "tier": "high"
+        },
+        {
+          "cat": "special",
+          "family": 33,
+          "tier": "high"
+        },
+        {
+          "cat": "special",
+          "family": 23,
+          "tier": "high"
+        },
+        {
+          "cat": "special",
+          "family": 24,
+          "tier": "high"
+        }
+      ],
+      "entries": 17,
+      "pSum": 1,
+      "survivingMass": 70,
+      "excludedMass": 30,
+      "byCategory": {
+        "basic": 0.5,
+        "trait": 0.5,
+        "special": 0
+      },
+      "pick": {
+        "basic:mainStat:b0": 0.025,
+        "basic:vitality": 0.25,
+        "trait:crit": 0.083333333,
+        "special:32:high": null,
+        "special:33:low": null,
+        "special:4": null
+      }
+    }
+  ],
+  "decoder": [
+    {
+      "label": "live payload (mechanics doc)",
+      "grade": "ancient",
+      "stats": [
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 101,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 18,
+          "id": 213400023,
+          "value": 81,
+          "fixed": true
+        },
+        {
+          "type": 3,
+          "index": 11051,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 2,
+          "index": 11,
+          "id": 213400023,
+          "value": 13888,
+          "fixed": false
+        },
+        {
+          "type": 2,
+          "index": 76,
+          "id": 213400023,
+          "value": 840,
+          "fixed": false
+        }
+      ],
+      "out": {
+        "grade": "ancient",
+        "lines": [
+          {
+            "cat": "trait",
+            "family": "crit",
+            "tier": null,
+            "value": 101,
+            "fixed": true,
+            "raw": 101,
+            "source": {
+              "type": 2,
+              "index": 15
+            }
+          },
+          {
+            "cat": "trait",
+            "family": "swiftness",
+            "tier": null,
+            "value": 81,
+            "fixed": true,
+            "raw": 81,
+            "source": {
+              "type": 2,
+              "index": 18
+            }
+          },
+          {
+            "cat": "special",
+            "family": 15,
+            "tier": "high",
+            "value": [
+              5.5
+            ],
+            "fixed": false,
+            "raw": 5,
+            "source": {
+              "type": 3,
+              "index": 11051
+            }
+          },
+          {
+            "cat": "basic",
+            "family": "mainStat",
+            "tier": null,
+            "value": 13888,
+            "fixed": false,
+            "raw": 13888,
+            "stat": "int",
+            "source": {
+              "type": 2,
+              "index": 11
+            }
+          },
+          {
+            "cat": "special",
+            "family": 32,
+            "tier": "mid",
+            "value": [
+              8.4
+            ],
+            "fixed": false,
+            "raw": 840,
+            "source": {
+              "type": 2,
+              "index": 76
+            }
+          }
+        ],
+        "unknown": []
+      }
+    },
+    {
+      "label": "type 4 ability + unknown index",
+      "grade": "relic",
+      "stats": [
+        {
+          "type": 4,
+          "index": 605100133,
+          "value": 1,
+          "fixed": false
+        },
+        {
+          "type": 2,
+          "index": 9999,
+          "value": 42,
+          "fixed": false
+        },
+        {
+          "type": 2,
+          "index": 50,
+          "value": 350,
+          "fixed": false
+        }
+      ],
+      "out": {
+        "grade": "relic",
+        "lines": [
+          {
+            "cat": "special",
+            "family": 23,
+            "tier": "low",
+            "value": [
+              1.5
+            ],
+            "fixed": false,
+            "raw": 1,
+            "source": {
+              "type": 4,
+              "index": 605100133
+            }
+          },
+          {
+            "cat": "special",
+            "family": 24,
+            "tier": "high",
+            "value": [
+              3.5
+            ],
+            "fixed": false,
+            "raw": 350,
+            "source": {
+              "type": 2,
+              "index": 50
+            }
+          }
+        ],
+        "unknown": [
+          {
+            "type": 2,
+            "index": 9999,
+            "value": 42,
+            "fixed": false
+          }
+        ]
+      }
+    },
+    {
+      "label": "grade inferred",
+      "grade": null,
+      "stats": [
+        {
+          "type": 2,
+          "index": 76,
+          "value": 1000,
+          "fixed": false
+        }
+      ],
+      "out": {
+        "grade": "ancient",
+        "lines": [
+          {
+            "cat": "special",
+            "family": 32,
+            "tier": "high",
+            "value": [
+              10
+            ],
+            "fixed": false,
+            "raw": 1000,
+            "source": {
+              "type": 2,
+              "index": 76
+            }
+          }
+        ],
+        "unknown": []
+      }
+    }
+  ],
+  "tinyDP": [
+    {
+      "label": "tiny#0",
+      "pool": [
+        {
+          "key": "A",
+          "cat": "special",
+          "family": "t:A",
+          "weight": 20,
+          "damage": 3
+        },
+        {
+          "key": "B",
+          "cat": "special",
+          "family": "t:B",
+          "weight": 30,
+          "damage": 1.5
+        },
+        {
+          "key": "C",
+          "cat": "special",
+          "family": "t:C",
+          "weight": 50,
+          "damage": 0
+        }
+      ],
+      "slots": 2,
+      "rollsLeft": 2,
+      "granted": [],
+      "expectedFinal": 3.615865138,
+      "brute": 3.615865138,
+      "currentScore": 0,
+      "distMean": 3.615865138,
+      "states": 4,
+      "evByRollsLeft": [
+        2.469642857,
+        3.151128827,
+        3.615865138
+      ]
+    },
+    {
+      "label": "tiny#1",
+      "pool": [
+        {
+          "key": "A",
+          "cat": "special",
+          "family": "t:A",
+          "weight": 20,
+          "damage": 3
+        },
+        {
+          "key": "B",
+          "cat": "special",
+          "family": "t:B",
+          "weight": 30,
+          "damage": 1.5
+        },
+        {
+          "key": "C",
+          "cat": "special",
+          "family": "t:C",
+          "weight": 50,
+          "damage": 0
+        }
+      ],
+      "slots": 2,
+      "rollsLeft": 2,
+      "granted": [
+        {
+          "key": "B",
+          "cat": "special",
+          "family": "t:B"
+        },
+        {
+          "key": "C",
+          "cat": "special",
+          "family": "t:C"
+        }
+      ],
+      "expectedFinal": 3.151128827,
+      "brute": 3.151128827,
+      "currentScore": 1.5,
+      "distMean": 3.151128827,
+      "states": 3,
+      "evByRollsLeft": [
+        1.5,
+        2.469642857,
+        3.151128827
+      ]
+    },
+    {
+      "label": "tiny#2",
+      "pool": [
+        {
+          "key": "A",
+          "cat": "special",
+          "family": "t:A",
+          "weight": 20,
+          "damage": 3
+        },
+        {
+          "key": "B",
+          "cat": "special",
+          "family": "t:B",
+          "weight": 30,
+          "damage": 1.5
+        },
+        {
+          "key": "C",
+          "cat": "special",
+          "family": "t:C",
+          "weight": 50,
+          "damage": 0
+        }
+      ],
+      "slots": 2,
+      "rollsLeft": 3,
+      "granted": [
+        {
+          "key": "A",
+          "cat": "special",
+          "family": "t:A"
+        },
+        {
+          "key": "C",
+          "cat": "special",
+          "family": "t:C"
+        }
+      ],
+      "expectedFinal": 4.133789062,
+      "brute": 4.133789063,
+      "currentScore": 3,
+      "distMean": 4.133789063,
+      "states": 3,
+      "evByRollsLeft": [
+        3,
+        3.5625,
+        3.9140625,
+        4.133789062
+      ]
+    },
+    {
+      "label": "tiny#3",
+      "pool": [
+        {
+          "key": "A",
+          "cat": "special",
+          "family": "t:A",
+          "weight": 20,
+          "damage": 3
+        },
+        {
+          "key": "B",
+          "cat": "special",
+          "family": "t:B",
+          "weight": 30,
+          "damage": 1.5
+        },
+        {
+          "key": "C",
+          "cat": "special",
+          "family": "t:C",
+          "weight": 50,
+          "damage": 0
+        }
+      ],
+      "slots": 3,
+      "rollsLeft": 2,
+      "granted": [],
+      "expectedFinal": 4.5,
+      "brute": 4.5,
+      "currentScore": 0,
+      "distMean": 4.5,
+      "states": 2,
+      "evByRollsLeft": [
+        4.5,
+        4.5,
+        4.5
+      ]
+    },
+    {
+      "label": "tiny#4",
+      "pool": [
+        {
+          "key": "A",
+          "cat": "special",
+          "family": "t:A",
+          "weight": 20,
+          "damage": 3
+        },
+        {
+          "key": "B",
+          "cat": "special",
+          "family": "t:B",
+          "weight": 30,
+          "damage": 1.5
+        },
+        {
+          "key": "C",
+          "cat": "special",
+          "family": "t:C",
+          "weight": 50,
+          "damage": 0
+        }
+      ],
+      "slots": 1,
+      "rollsLeft": 4,
+      "granted": [
+        {
+          "key": "B",
+          "cat": "special",
+          "family": "t:B"
+        }
+      ],
+      "expectedFinal": 2.3856,
+      "brute": 2.3856,
+      "currentScore": 1.5,
+      "distMean": 2.3856,
+      "states": 3,
+      "evByRollsLeft": [
+        1.5,
+        1.8,
+        2.04,
+        2.232,
+        2.3856
+      ]
+    },
+    {
+      "label": "tiny#5",
+      "pool": [
+        {
+          "key": "A",
+          "cat": "special",
+          "family": "t:A",
+          "weight": 12,
+          "damage": 4
+        },
+        {
+          "key": "B",
+          "cat": "special",
+          "family": "t:B",
+          "weight": 18,
+          "damage": 2.5
+        },
+        {
+          "key": "D",
+          "cat": "basic",
+          "family": "b:D",
+          "weight": 40,
+          "damage": 1
+        },
+        {
+          "key": "E",
+          "cat": "basic",
+          "family": "b:E",
+          "weight": 30,
+          "damage": 0
+        }
+      ],
+      "slots": 2,
+      "rollsLeft": 2,
+      "granted": [
+        {
+          "key": "E",
+          "cat": "basic",
+          "family": "b:E"
+        },
+        {
+          "key": "B",
+          "cat": "special",
+          "family": "t:B"
+        }
+      ],
+      "expectedFinal": 4.179952409,
+      "brute": 4.179952409,
+      "currentScore": 2.5,
+      "distMean": 4.179952409,
+      "states": 6,
+      "evByRollsLeft": [
+        2.5,
+        3.573170732,
+        4.179952409
+      ]
+    },
+    {
+      "label": "tiny#6",
+      "pool": [
+        {
+          "key": "A",
+          "cat": "special",
+          "family": "t:A",
+          "weight": 12,
+          "damage": 4
+        },
+        {
+          "key": "B",
+          "cat": "special",
+          "family": "t:B",
+          "weight": 18,
+          "damage": 2.5
+        },
+        {
+          "key": "D",
+          "cat": "basic",
+          "family": "b:D",
+          "weight": 40,
+          "damage": 1
+        },
+        {
+          "key": "E",
+          "cat": "basic",
+          "family": "b:E",
+          "weight": 30,
+          "damage": 0
+        }
+      ],
+      "slots": 3,
+      "rollsLeft": 3,
+      "granted": [],
+      "expectedFinal": 6.817691691,
+      "brute": 6.817691691,
+      "currentScore": 0,
+      "distMean": 6.817691691,
+      "states": 5,
+      "evByRollsLeft": [
+        4.750530825,
+        5.738856406,
+        6.391917195,
+        6.817691691
+      ]
+    },
+    {
+      "label": "tiny#7",
+      "pool": [
+        {
+          "key": "A",
+          "cat": "special",
+          "family": "t:A",
+          "weight": 12,
+          "damage": 4
+        },
+        {
+          "key": "B",
+          "cat": "special",
+          "family": "t:B",
+          "weight": 18,
+          "damage": 2.5
+        },
+        {
+          "key": "D",
+          "cat": "basic",
+          "family": "b:D",
+          "weight": 40,
+          "damage": 1
+        },
+        {
+          "key": "E",
+          "cat": "basic",
+          "family": "b:E",
+          "weight": 30,
+          "damage": 0
+        }
+      ],
+      "slots": 2,
+      "rollsLeft": 1,
+      "granted": [
+        {
+          "key": "A",
+          "cat": "special",
+          "family": "t:A"
+        },
+        {
+          "key": "D",
+          "cat": "basic",
+          "family": "b:D"
+        }
+      ],
+      "expectedFinal": 5.306818182,
+      "brute": 5.306818182,
+      "currentScore": 5,
+      "distMean": 5.306818182,
+      "states": 6,
+      "evByRollsLeft": [
+        5,
+        5.306818182
+      ]
+    }
+  ],
+  "solves": [
+    {
+      "label": "unrolled ancient, 2 slots, 7 rolls",
+      "grade": "ancient",
+      "slots": 2,
+      "rollsLeft": 7,
+      "granted": [],
+      "unrolled": true,
+      "currentScore": 0,
+      "expectedFinal": 3.477315473,
+      "distMean": 3.477315473,
+      "valueGold": 104319.464189892,
+      "pImprove": 0.999772399,
+      "quantiles": {
+        "p10": 0.999645859,
+        "p25": 2.232446092,
+        "p50": 3.352623312,
+        "p75": 4.622666562,
+        "p90": 5.871722417
+      },
+      "evByRollsLeft": [
+        0.963379441,
+        1.569780854,
+        2.021307206,
+        2.392427183,
+        2.712754307,
+        2.995823714,
+        3.249045958,
+        3.477315473
+      ],
+      "bestLockMask": null,
+      "maskEVTop": [],
+      "states": 2246,
+      "stateAtoms": 70,
+      "lockMasks": 68
+    },
+    {
+      "label": "unrolled ancient, 3 slots, 7 rolls",
+      "grade": "ancient",
+      "slots": 3,
+      "rollsLeft": 7,
+      "granted": [],
+      "unrolled": true,
+      "currentScore": 0,
+      "expectedFinal": 5.136525867,
+      "distMean": 5.136525867,
+      "valueGold": 154095.776003033,
+      "pImprove": 0.999998915,
+      "quantiles": {
+        "p10": 2.496741433,
+        "p25": 3.469123979,
+        "p50": 5.014692288,
+        "p75": 6.603926448,
+        "p90": 7.984998276
+      },
+      "evByRollsLeft": [
+        1.473250311,
+        2.335264007,
+        2.993099908,
+        3.542603823,
+        4.016990229,
+        4.433732644,
+        4.804197627,
+        5.136525867
+      ],
+      "bestLockMask": null,
+      "maskEVTop": [],
+      "states": 45908,
+      "stateAtoms": 70,
+      "lockMasks": 2177
+    },
+    {
+      "label": "unrolled relic, 2 slots, 7 rolls",
+      "grade": "relic",
+      "slots": 2,
+      "rollsLeft": 7,
+      "granted": [],
+      "unrolled": true,
+      "currentScore": 0,
+      "expectedFinal": 2.871585745,
+      "distMean": 2.871585745,
+      "valueGold": 86147.572363988,
+      "pImprove": 0.999772399,
+      "quantiles": {
+        "p10": 0.779241954,
+        "p25": 1.78521243,
+        "p50": 2.70293061,
+        "p75": 3.839682717,
+        "p90": 4.952737062
+      },
+      "evByRollsLeft": [
+        0.764724225,
+        1.262570989,
+        1.640146539,
+        1.952875856,
+        2.223556102,
+        2.46309882,
+        2.677711212,
+        2.871585745
+      ],
+      "bestLockMask": null,
+      "maskEVTop": [],
+      "states": 2246,
+      "stateAtoms": 70,
+      "lockMasks": 68
+    },
+    {
+      "label": "mid-roll ancient 3 slots, 4 left",
+      "grade": "ancient",
+      "slots": 3,
+      "rollsLeft": 4,
+      "granted": [
+        {
+          "cat": "special",
+          "family": 32,
+          "tier": "high"
+        },
+        {
+          "cat": "special",
+          "family": 23,
+          "tier": "low"
+        },
+        {
+          "cat": "basic",
+          "family": "mainStat",
+          "value": 13888
+        }
+      ],
+      "unrolled": false,
+      "currentScore": 6.31333768,
+      "expectedFinal": 6.796552935,
+      "distMean": 6.796552935,
+      "valueGold": 203896.588039611,
+      "pImprove": 0.393060333,
+      "quantiles": {
+        "p10": 6.31333768,
+        "p25": 6.31333768,
+        "p50": 6.31333768,
+        "p75": 6.808496997,
+        "p90": 8.491499754
+      },
+      "evByRollsLeft": [
+        6.31333768,
+        6.441971812,
+        6.565144749,
+        6.683225768,
+        6.796552935
+      ],
+      "bestLockMask": {
+        "lockedKeys": [
+          "special:23:low",
+          "special:32:high"
+        ],
+        "ev": 6.796552935
+      },
+      "maskEVTop": [
+        {
+          "lockedKeys": [
+            "special:23:low",
+            "special:32:high"
+          ],
+          "ev": 6.796552935
+        },
+        {
+          "lockedKeys": [
+            "special:32:high"
+          ],
+          "ev": 6.794059488
+        },
+        {
+          "lockedKeys": [
+            "basic:mainStat:b6",
+            "special:32:high"
+          ],
+          "ev": 6.763384571
+        }
+      ],
+      "states": 45907,
+      "stateAtoms": 70,
+      "lockMasks": 2177
+    },
+    {
+      "label": "near-final ancient 2 slots, 1 left",
+      "grade": "ancient",
+      "slots": 2,
+      "rollsLeft": 1,
+      "granted": [
+        {
+          "cat": "special",
+          "family": 32,
+          "tier": "high"
+        },
+        {
+          "cat": "special",
+          "family": 12,
+          "tier": "high"
+        }
+      ],
+      "unrolled": false,
+      "currentScore": 8.189177234,
+      "expectedFinal": 8.197700242,
+      "distMean": 8.197700242,
+      "valueGold": 245931.007263446,
+      "pImprove": 0.017374397,
+      "quantiles": {
+        "p10": 8.189177234,
+        "p25": 8.189177234,
+        "p50": 8.189177234,
+        "p75": 8.189177234,
+        "p90": 8.189177234
+      },
+      "evByRollsLeft": [
+        8.189177234,
+        8.197700242
+      ],
+      "bestLockMask": {
+        "lockedKeys": [
+          "special:12:high"
+        ],
+        "ev": 8.197700242
+      },
+      "maskEVTop": [
+        {
+          "lockedKeys": [
+            "special:12:high"
+          ],
+          "ev": 8.197700242
+        },
+        {
+          "lockedKeys": [
+            "special:32:high"
+          ],
+          "ev": 8.189276606
+        },
+        {
+          "lockedKeys": [],
+          "ev": 8.189211806
+        }
+      ],
+      "states": 2245,
+      "stateAtoms": 70,
+      "lockMasks": 68
+    }
+  ],
+  "adviseSetup": {
+    "grade": "ancient",
+    "slots": 2,
+    "rollsLeft": 3,
+    "fixedLines": [
+      {
+        "cat": "trait",
+        "family": "crit",
+        "value": 110
+      },
+      {
+        "cat": "trait",
+        "family": "spec",
+        "value": 100
+      }
+    ],
+    "grantedLines": [
+      {
+        "cat": "special",
+        "family": 32,
+        "tier": "high"
+      },
+      {
+        "cat": "special",
+        "family": 23,
+        "tier": "low"
+      }
+    ],
+    "goldPer1Pct": 30000
+  },
+  "advise": [
+    {
+      "label": "clear upgrade",
+      "current": [
+        {
+          "cat": "special",
+          "family": 32,
+          "tier": "high"
+        },
+        {
+          "cat": "special",
+          "family": 23,
+          "tier": "low"
+        }
+      ],
+      "rolled": [
+        {
+          "cat": "special",
+          "family": 12,
+          "tier": "high"
+        },
+        {
+          "cat": "special",
+          "family": 31,
+          "tier": "high"
+        }
+      ],
+      "rollsLeft": 2,
+      "verdict": "replace",
+      "vKeep": 5.473204604,
+      "vNew": 8.206138344,
+      "scoreKeep": 5.357694441,
+      "scoreNew": 8.189177234
+    },
+    {
+      "label": "clear downgrade",
+      "current": [
+        {
+          "cat": "special",
+          "family": 32,
+          "tier": "high"
+        },
+        {
+          "cat": "special",
+          "family": 23,
+          "tier": "low"
+        }
+      ],
+      "rolled": [
+        {
+          "cat": "special",
+          "family": 4
+        },
+        {
+          "cat": "basic",
+          "family": "vitality"
+        }
+      ],
+      "rollsLeft": 2,
+      "verdict": "keep",
+      "vKeep": 5.473204604,
+      "vNew": 1.569780854,
+      "scoreKeep": 5.357694441,
+      "scoreNew": 0
+    },
+    {
+      "label": "last roll",
+      "current": [
+        {
+          "cat": "special",
+          "family": 32,
+          "tier": "high"
+        },
+        {
+          "cat": "special",
+          "family": 23,
+          "tier": "low"
+        }
+      ],
+      "rolled": [
+        {
+          "cat": "special",
+          "family": 12,
+          "tier": "mid"
+        },
+        {
+          "cat": "special",
+          "family": 23,
+          "tier": "high"
+        }
+      ],
+      "rollsLeft": 0,
+      "verdict": "replace",
+      "vKeep": 5.357694441,
+      "vNew": 7.234552191,
+      "scoreKeep": 5.357694441,
+      "scoreNew": 7.234552191
+    }
+  ]
+}
