@@ -1,0 +1,1354 @@
+{
+  "_note": "Seed data for the Phase 4 bracelet leaderboard. SOURCE: public / 公開 lostark.bible CHARACTER pages (https://lostark.bible/character/NA/<name>), read once each on 2026-08-11 with a browser User-Agent, sequentially, ~3s apart. Raid-statistics endpoints were NOT touched. The data is therefore self-reported: it is whatever the owner's roster last synced to lostark.bible, not a verified snapshot. SCORING: model/bracelet.js on the CANONICAL DEFAULT profile, normalizeProfile({}) — no per-player knobs. damagePct = whole bracelet (two combat traits + granted lines). linesPct = granted/fixed effect lines only, which is the figure comparable to lostark.bible's own 'Bracelet Effects +X%' and to the 7-9% good / 10%+ near-final benchmark. goldAt1_5M = damagePct x 1,500,000 gold per 1% damage, baseline 0. Three type:2 indices (4, 74, 151) are NOT yet in model TYPE2_INDEX and were decoded with a local extension map; see notes[] per entry.",
+  "_scoredAt": "2026-08-11T09:58:49.351Z",
+  "_model": {
+    "version": "0.1.0",
+    "signature": "bracelet-v1",
+    "profile": "normalizeProfile({})"
+  },
+  "_goldPer1Pct": 1500000,
+  "_sortedBy": "damagePct desc",
+  "entries": [
+    {
+      "name": "White",
+      "region": "NA",
+      "class": "Arcanist",
+      "itemLevel": 1772,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "swiftness",
+          "value": 115,
+          "fixed": true
+        },
+        {
+          "trait": "crit",
+          "value": 83,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "critRateOnCrit",
+          "familyId": 11,
+          "label": "Crit Rate +A%; on crit, damage +1.5%",
+          "tier": "high",
+          "value": [
+            5
+          ],
+          "fixed": false,
+          "damage": 4.839022960793766,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "critDamage",
+          "familyId": 32,
+          "label": "Crit Damage +X%",
+          "tier": "low",
+          "value": [
+            6.8
+          ],
+          "fixed": false,
+          "damage": 2.3090137728660034,
+          "familyLetter": "B"
+        },
+        {
+          "cat": "special",
+          "family": "nonDirectional",
+          "familyId": 27,
+          "label": "Non-directional skill damage +X% (not Awakening)",
+          "tier": "mid",
+          "value": [
+            3
+          ],
+          "fixed": false,
+          "damage": 2.955880224154443,
+          "familyLetter": "B"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "damage": 14.997844431191528,
+      "damagePct": 16.180919886166055,
+      "linesDamage": 10.103916957814214,
+      "linesPct": 10.631997500145673,
+      "goldAt1_5M": 24271379.829249084,
+      "benchmark": "near-final",
+      "biblePct": 10.07,
+      "notes": [],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 18,
+          "id": 213400023,
+          "value": 115,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 83,
+          "fixed": true
+        },
+        {
+          "type": 3,
+          "index": 11011,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 2,
+          "index": 76,
+          "id": 213400023,
+          "value": 680,
+          "fixed": false
+        },
+        {
+          "type": 4,
+          "index": 605100172,
+          "id": 213400023,
+          "value": 0,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T09:58:49.351Z"
+    },
+    {
+      "name": "July",
+      "region": "NA",
+      "class": "Souleater",
+      "itemLevel": 1784,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "swiftness",
+          "value": 113,
+          "fixed": true
+        },
+        {
+          "trait": "crit",
+          "value": 85,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "damage",
+          "familyId": 23,
+          "label": "Damage to enemies +X%",
+          "tier": "low",
+          "value": [
+            2
+          ],
+          "fixed": false,
+          "damage": 1.980262729617973,
+          "familyLetter": "B"
+        },
+        {
+          "cat": "special",
+          "family": "critDmgOnCrit",
+          "familyId": 12,
+          "label": "Crit Damage +A%; on crit, damage +1.5%",
+          "tier": "mid",
+          "value": [
+            8.4
+          ],
+          "fixed": false,
+          "damage": 4.278671967170241,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "cdUpDmgUp",
+          "familyId": 15,
+          "label": "Skill cooldown +2% but damage +A%",
+          "tier": "low",
+          "value": [
+            4.5
+          ],
+          "fixed": false,
+          "damage": 3.811716328958588,
+          "familyLetter": "S"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "damage": 14.962727955965487,
+      "damagePct": 16.140128404901244,
+      "linesDamage": 10.070651025746802,
+      "linesPct": 10.595200855725139,
+      "goldAt1_5M": 24210192.607351866,
+      "benchmark": "near-final",
+      "biblePct": 9.79,
+      "notes": [],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 18,
+          "id": 213400023,
+          "value": 113,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 85,
+          "fixed": true
+        },
+        {
+          "type": 4,
+          "index": 605100133,
+          "id": 213400023,
+          "value": 0,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11022,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11053,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T09:58:49.351Z"
+    },
+    {
+      "name": "Paroxysmal",
+      "region": "NA",
+      "class": "Gunslinger",
+      "itemLevel": 1795,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "spec",
+          "value": 85,
+          "fixed": true
+        },
+        {
+          "trait": "crit",
+          "value": 119,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "critDamage",
+          "familyId": 32,
+          "label": "Crit Damage +X%",
+          "tier": "mid",
+          "value": [
+            8.4
+          ],
+          "fixed": false,
+          "damage": 2.844649631691937,
+          "familyLetter": "B"
+        },
+        {
+          "cat": "special",
+          "family": "nonDirectional",
+          "familyId": 27,
+          "label": "Non-directional skill damage +X% (not Awakening)",
+          "tier": "mid",
+          "value": [
+            3
+          ],
+          "fixed": false,
+          "damage": 2.955880224154443,
+          "familyLetter": "B"
+        },
+        {
+          "cat": "special",
+          "family": "critRate",
+          "familyId": 31,
+          "label": "Crit Rate +X%",
+          "tier": "high",
+          "value": [
+            5
+          ],
+          "fixed": false,
+          "damage": 3.377431711860405,
+          "familyLetter": "B"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "damage": 14.1850519584317,
+      "damagePct": 15.24043737766474,
+      "linesDamage": 9.177961567706785,
+      "linesPct": 9.61232270846688,
+      "goldAt1_5M": 22860656.06649711,
+      "benchmark": "good",
+      "biblePct": 9.59,
+      "notes": [
+        "type:2 index 74 decoded by local extension map (not in model TYPE2_INDEX)"
+      ],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 16,
+          "id": 213400023,
+          "value": 85,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 119,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 76,
+          "id": 213400023,
+          "value": 840,
+          "fixed": false
+        },
+        {
+          "type": 4,
+          "index": 605100172,
+          "id": 213400023,
+          "value": 0,
+          "fixed": false
+        },
+        {
+          "type": 2,
+          "index": 74,
+          "id": 213400023,
+          "value": 500,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T09:58:49.351Z"
+    },
+    {
+      "name": "Kyulo",
+      "region": "NA",
+      "class": "Deathblade",
+      "itemLevel": 1771,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "spec",
+          "value": 93,
+          "fixed": true
+        },
+        {
+          "trait": "crit",
+          "value": 85,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "critRateOnCrit",
+          "familyId": 11,
+          "label": "Crit Rate +A%; on crit, damage +1.5%",
+          "tier": "low",
+          "value": [
+            3.4
+          ],
+          "fixed": false,
+          "damage": 3.7614903097401466,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "addDmgDemon",
+          "familyId": 14,
+          "label": "Additional Damage +A%; Demon/Archdemon damage +B%",
+          "tier": "mid",
+          "value": [
+            3,
+            2.5
+          ],
+          "fixed": false,
+          "damage": 2.1438580122189874,
+          "familyLetter": "C"
+        },
+        {
+          "cat": "special",
+          "family": "critRate",
+          "familyId": 31,
+          "label": "Crit Rate +X%",
+          "tier": "high",
+          "value": [
+            5
+          ],
+          "fixed": false,
+          "damage": 3.377431711860405,
+          "familyLetter": "B"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "damage": 13.674856964038224,
+      "damagePct": 14.653983735320498,
+      "linesDamage": 9.282780033819538,
+      "linesPct": 9.727276899885617,
+      "goldAt1_5M": 21980975.602980748,
+      "benchmark": "good",
+      "biblePct": 11.41,
+      "notes": [
+        "type:2 index 74 decoded by local extension map (not in model TYPE2_INDEX)"
+      ],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 16,
+          "id": 213400023,
+          "value": 93,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 85,
+          "fixed": true
+        },
+        {
+          "type": 3,
+          "index": 11013,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11042,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 2,
+          "index": 74,
+          "id": 213400023,
+          "value": 500,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T09:58:49.351Z"
+    },
+    {
+      "name": "Subsz",
+      "region": "NA",
+      "class": "Guardianknight",
+      "itemLevel": 1775,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "spec",
+          "value": 118,
+          "fixed": true
+        },
+        {
+          "trait": "crit",
+          "value": 72,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "damage",
+          "familyId": 23,
+          "label": "Damage to enemies +X%",
+          "tier": "low",
+          "value": [
+            2
+          ],
+          "fixed": false,
+          "damage": 1.980262729617973,
+          "familyLetter": "B"
+        },
+        {
+          "cat": "special",
+          "family": "dmgStagger",
+          "familyId": 13,
+          "label": "Damage +A%; damage to Staggered +B%",
+          "tier": "low",
+          "value": [
+            2,
+            4
+          ],
+          "fixed": false,
+          "damage": 2.3794648565717265,
+          "familyLetter": "B"
+        },
+        {
+          "cat": "special",
+          "family": "critRateOnCrit",
+          "familyId": 11,
+          "label": "Crit Rate +A%; on crit, damage +1.5%",
+          "tier": "mid",
+          "value": [
+            4.2
+          ],
+          "fixed": false,
+          "damage": 4.30170797401326,
+          "familyLetter": "S"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "damage": 13.36512581240903,
+      "damagePct": 14.299414020996991,
+      "linesDamage": 8.661435560202959,
+      "linesPct": 9.04760626345038,
+      "goldAt1_5M": 21449121.031495485,
+      "benchmark": "good",
+      "biblePct": 9.05,
+      "notes": [],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 16,
+          "id": 213400023,
+          "value": 118,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 72,
+          "fixed": true
+        },
+        {
+          "type": 4,
+          "index": 605100133,
+          "id": 213400023,
+          "value": 0,
+          "fixed": false
+        },
+        {
+          "type": 4,
+          "index": 605100033,
+          "id": 213400023,
+          "value": 0,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11012,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T09:58:49.351Z"
+    },
+    {
+      "name": "Teal",
+      "region": "NA",
+      "class": "Wildsoul",
+      "itemLevel": 1776,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "crit",
+          "value": 95,
+          "fixed": true
+        },
+        {
+          "trait": "spec",
+          "value": 67,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "dmgStagger",
+          "familyId": 13,
+          "label": "Damage +A%; damage to Staggered +B%",
+          "tier": "mid",
+          "value": [
+            2.5,
+            4.5
+          ],
+          "fixed": false,
+          "damage": 2.918251786322338,
+          "familyLetter": "B"
+        },
+        {
+          "cat": "special",
+          "family": "cdUpDmgUp",
+          "familyId": 15,
+          "label": "Skill cooldown +2% but damage +A%",
+          "tier": "low",
+          "value": [
+            4.5
+          ],
+          "fixed": false,
+          "damage": 3.811716328958588,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "critRate",
+          "familyId": 31,
+          "label": "Crit Rate +X%",
+          "tier": "low",
+          "value": [
+            3.4
+          ],
+          "fixed": false,
+          "damage": 2.3090137728660034,
+          "familyLetter": "B"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "damage": 13.021458959785392,
+      "damagePct": 13.907279027208052,
+      "linesDamage": 9.038981888146928,
+      "linesPct": 9.460089664610427,
+      "goldAt1_5M": 20860918.54081208,
+      "benchmark": "good",
+      "biblePct": 9.57,
+      "notes": [
+        "type:2 index 74 decoded by local extension map (not in model TYPE2_INDEX)"
+      ],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 95,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 16,
+          "id": 213400023,
+          "value": 67,
+          "fixed": true
+        },
+        {
+          "type": 4,
+          "index": 605100032,
+          "id": 213400023,
+          "value": 0,
+          "fixed": false
+        },
+        {
+          "type": 2,
+          "index": 74,
+          "id": 213400023,
+          "value": 340,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11053,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T09:58:49.351Z"
+    },
+    {
+      "name": "Subszy",
+      "region": "NA",
+      "class": "Wildsoul",
+      "itemLevel": 1755,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "spec",
+          "value": 110,
+          "fixed": true
+        },
+        {
+          "trait": "crit",
+          "value": 79,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "addDmgDemon",
+          "familyId": 14,
+          "label": "Additional Damage +A%; Demon/Archdemon damage +B%",
+          "tier": "high",
+          "value": [
+            3.5,
+            2.5
+          ],
+          "fixed": false,
+          "damage": 2.496741432969326,
+          "familyLetter": "C"
+        },
+        {
+          "cat": "special",
+          "family": "wpStackHit",
+          "familyId": 20,
+          "label": "On-hit per sec for 10s: Weapon Power +A, atk/move speed +1% (max 6 stacks)",
+          "tier": "low",
+          "value": [
+            1160
+          ],
+          "fixed": false,
+          "damage": 1.4031189339755805,
+          "familyLetter": "C"
+        },
+        {
+          "cat": "special",
+          "family": "critRateOnCrit",
+          "familyId": 11,
+          "label": "Crit Rate +A%; on crit, damage +1.5%",
+          "tier": "mid",
+          "value": [
+            4.2
+          ],
+          "fixed": false,
+          "damage": 4.30170797401326,
+          "familyLetter": "S"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "damage": 12.874127293682992,
+      "damagePct": 13.739581101613885,
+      "linesDamage": 8.201568340958167,
+      "linesPct": 8.547283361109258,
+      "goldAt1_5M": 20609371.652420826,
+      "benchmark": "good",
+      "biblePct": 10.72,
+      "notes": [],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 16,
+          "id": 213400023,
+          "value": 110,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 79,
+          "fixed": true
+        },
+        {
+          "type": 3,
+          "index": 11041,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 4,
+          "index": 605100103,
+          "id": 213400023,
+          "value": 0,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11012,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T09:58:49.351Z"
+    },
+    {
+      "name": "Gettingcards",
+      "region": "NA",
+      "class": "Arcanist",
+      "itemLevel": 1789,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "crit",
+          "value": 99,
+          "fixed": true
+        },
+        {
+          "trait": "swiftness",
+          "value": 74,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "nonDirectional",
+          "familyId": 27,
+          "label": "Non-directional skill damage +X% (not Awakening)",
+          "tier": "low",
+          "value": [
+            2.5
+          ],
+          "fixed": false,
+          "damage": 2.4692612590371414,
+          "familyLetter": "B"
+        },
+        {
+          "cat": "special",
+          "family": "critRateOnCrit",
+          "familyId": 11,
+          "label": "Crit Rate +A%; on crit, damage +1.5%",
+          "tier": "low",
+          "value": [
+            3.4
+          ],
+          "fixed": false,
+          "damage": 3.7614903097401466,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "addDmgDemon",
+          "familyId": 14,
+          "label": "Additional Damage +A%; Demon/Archdemon damage +B%",
+          "tier": "mid",
+          "value": [
+            3,
+            2.5
+          ],
+          "fixed": false,
+          "damage": 2.1438580122189874,
+          "familyLetter": "C"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "damage": 12.628085124031761,
+      "damagePct": 13.46007775756708,
+      "linesDamage": 8.374609580996275,
+      "linesPct": 8.735277533078524,
+      "goldAt1_5M": 20190116.63635062,
+      "benchmark": "good",
+      "biblePct": 10.33,
+      "notes": [],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 99,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 18,
+          "id": 213400023,
+          "value": 74,
+          "fixed": true
+        },
+        {
+          "type": 4,
+          "index": 605100173,
+          "id": 213400023,
+          "value": 0,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11013,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11042,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T09:58:49.351Z"
+    },
+    {
+      "name": "Shizukaziye",
+      "region": "NA",
+      "class": "Reaper",
+      "itemLevel": 1780,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "spec",
+          "value": 67,
+          "fixed": true
+        },
+        {
+          "trait": "crit",
+          "value": 84,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "critRateOnCrit",
+          "familyId": 11,
+          "label": "Crit Rate +A%; on crit, damage +1.5%",
+          "tier": "low",
+          "value": [
+            3.4
+          ],
+          "fixed": false,
+          "damage": 3.7614903097401466,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "critDamage",
+          "familyId": 32,
+          "label": "Crit Damage +X%",
+          "tier": "mid",
+          "value": [
+            8.4
+          ],
+          "fixed": false,
+          "damage": 2.844649631691937,
+          "familyLetter": "B"
+        },
+        {
+          "cat": "special",
+          "family": "addDmgDemon",
+          "familyId": 14,
+          "label": "Additional Damage +A%; Demon/Archdemon damage +B%",
+          "tier": "mid",
+          "value": [
+            3,
+            2.5
+          ],
+          "fixed": false,
+          "damage": 2.1438580122189874,
+          "familyLetter": "C"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "damage": 12.468003053411795,
+      "damagePct": 13.278593816147666,
+      "linesDamage": 8.749997953651071,
+      "linesPct": 9.14422421082348,
+      "goldAt1_5M": 19917890.724221498,
+      "benchmark": "good",
+      "biblePct": 10.65,
+      "notes": [],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 16,
+          "id": 213400023,
+          "value": 67,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 84,
+          "fixed": true
+        },
+        {
+          "type": 3,
+          "index": 11013,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 2,
+          "index": 76,
+          "id": 213400023,
+          "value": 840,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11042,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T09:58:49.351Z"
+    },
+    {
+      "name": "Noa",
+      "region": "NA",
+      "class": "Souleater",
+      "itemLevel": 1774,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "spec",
+          "value": 68,
+          "fixed": true
+        },
+        {
+          "trait": "crit",
+          "value": 92,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "critDmgOnCrit",
+          "familyId": 12,
+          "label": "Crit Damage +A%; on crit, damage +1.5%",
+          "tier": "low",
+          "value": [
+            6.8
+          ],
+          "fixed": false,
+          "damage": 3.7427415021645127,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "special",
+          "family": "addDmgDemon",
+          "familyId": 14,
+          "label": "Additional Damage +A%; Demon/Archdemon damage +B%",
+          "tier": "low",
+          "value": [
+            2.5,
+            2.5
+          ],
+          "fixed": false,
+          "damage": 1.7897249131732949,
+          "familyLetter": "C"
+        },
+        {
+          "cat": "special",
+          "family": "dmgStagger",
+          "familyId": 13,
+          "label": "Damage +A%; damage to Staggered +B%",
+          "tier": "low",
+          "value": [
+            2,
+            4
+          ],
+          "fixed": false,
+          "damage": 2.3794648565717265,
+          "familyLetter": "B"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "damage": 11.847348963503315,
+      "damagePct": 12.577702894647548,
+      "linesDamage": 7.911931271909534,
+      "linesPct": 8.23334505137774,
+      "goldAt1_5M": 18866554.341971323,
+      "benchmark": "good",
+      "biblePct": 10.12,
+      "notes": [],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 16,
+          "id": 213400023,
+          "value": 68,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 92,
+          "fixed": true
+        },
+        {
+          "type": 3,
+          "index": 11023,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11043,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        },
+        {
+          "type": 4,
+          "index": 605100033,
+          "id": 213400023,
+          "value": 0,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T09:58:49.351Z"
+    },
+    {
+      "name": "Kayamix",
+      "region": "NA",
+      "class": "Souleater",
+      "itemLevel": 1755,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "spec",
+          "value": 78,
+          "fixed": true
+        },
+        {
+          "trait": "crit",
+          "value": 104,
+          "fixed": false
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "damage",
+          "familyId": 23,
+          "label": "Damage to enemies +X%",
+          "tier": "mid",
+          "value": [
+            2.5
+          ],
+          "fixed": false,
+          "damage": 2.4692612590371414,
+          "familyLetter": "B"
+        },
+        {
+          "cat": "special",
+          "family": "critRateOnCrit",
+          "familyId": 11,
+          "label": "Crit Rate +A%; on crit, damage +1.5%",
+          "tier": "low",
+          "value": [
+            3.4
+          ],
+          "fixed": false,
+          "damage": 3.7614903097401466,
+          "familyLetter": "S"
+        },
+        {
+          "cat": "basic",
+          "family": "mainStat",
+          "familyId": null,
+          "label": "Str / Dex / Int",
+          "tier": null,
+          "value": 12352,
+          "fixed": true,
+          "damage": 0.8586655982140537,
+          "familyLetter": "D"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 0
+      },
+      "damage": 11.562761348367701,
+      "damagePct": 12.257776146680488,
+      "linesDamage": 7.089417166991342,
+      "linesPct": 7.346761657165857,
+      "goldAt1_5M": 18386664.220020734,
+      "benchmark": "good",
+      "biblePct": 6.09,
+      "notes": [
+        "type:2 index 4 decoded by local extension map (not in model TYPE2_INDEX)",
+        "a combat trait sits in a GRANTED slot; scored at its rolled value anyway"
+      ],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 4,
+          "id": 213400023,
+          "value": 12352,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 16,
+          "id": 213400023,
+          "value": 78,
+          "fixed": true
+        },
+        {
+          "type": 4,
+          "index": 605100132,
+          "id": 213400023,
+          "value": 0,
+          "fixed": false
+        },
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 104,
+          "fixed": false
+        },
+        {
+          "type": 3,
+          "index": 11013,
+          "id": 213400023,
+          "value": 5,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T09:58:49.351Z"
+    },
+    {
+      "name": "Theschmeatdragon",
+      "region": "NA",
+      "class": "Berserker",
+      "itemLevel": 1750,
+      "grade": "ancient",
+      "traits": [
+        {
+          "trait": "swiftness",
+          "value": 75,
+          "fixed": true
+        },
+        {
+          "trait": "crit",
+          "value": 99,
+          "fixed": true
+        }
+      ],
+      "lines": [
+        {
+          "cat": "special",
+          "family": "dmgStagger",
+          "familyId": 13,
+          "label": "Damage +A%; damage to Staggered +B%",
+          "tier": "low",
+          "value": [
+            2,
+            4
+          ],
+          "fixed": true,
+          "damage": 2.3794648565717265,
+          "familyLetter": "B"
+        },
+        {
+          "cat": "special",
+          "family": "damage",
+          "familyId": 23,
+          "label": "Damage to enemies +X%",
+          "tier": "low",
+          "value": [
+            2
+          ],
+          "fixed": false,
+          "damage": 1.980262729617973,
+          "familyLetter": "B"
+        },
+        {
+          "cat": "special",
+          "family": "weaponPower",
+          "familyId": 33,
+          "label": "Weapon Power +X",
+          "tier": "low",
+          "value": [
+            7200
+          ],
+          "fixed": true,
+          "damage": 1.4508025550893766,
+          "familyLetter": "C"
+        }
+      ],
+      "rerollsLeft": {
+        "base": 4,
+        "ticket": 3
+      },
+      "damage": 10.08900568431456,
+      "damagePct": 10.615502090288697,
+      "linesDamage": 5.8105301412790755,
+      "linesPct": 5.9826591071962865,
+      "goldAt1_5M": 15923253.135433044,
+      "benchmark": "work to do",
+      "biblePct": 6.51,
+      "notes": [
+        "type:2 index 151 decoded by local extension map (not in model TYPE2_INDEX)",
+        "4 lines flagged fixed:true — the table allows 1-2",
+        "1 granted lines — outside the ancient table",
+        "GRADE AMBIGUOUS: no decisive value; defaulting to ancient"
+      ],
+      "rawStats": [
+        {
+          "type": 2,
+          "index": 18,
+          "id": 213400023,
+          "value": 75,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 15,
+          "id": 213400023,
+          "value": 99,
+          "fixed": true
+        },
+        {
+          "type": 4,
+          "index": 605100033,
+          "id": 213400023,
+          "value": 0,
+          "fixed": true
+        },
+        {
+          "type": 2,
+          "index": 151,
+          "id": 213400023,
+          "value": 7200,
+          "fixed": true
+        },
+        {
+          "type": 4,
+          "index": 605100133,
+          "id": 213400023,
+          "value": 0,
+          "fixed": false
+        }
+      ],
+      "scoredAt": "2026-08-11T09:58:49.351Z"
+    }
+  ]
+}

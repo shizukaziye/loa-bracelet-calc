@@ -6,6 +6,7 @@
   "scripts": {
     "verify": "node verify.js",
     "verify-py": "python verify.py",
+    "test-worker": "node tools/test-worker.mjs",
     "genrefs": "node tools/gen-refs.js",
     "serve": "npx http-server -p 8080 -c-1 ."
   },

@@ -1,0 +1,124 @@
+# wrangler.toml — "bracelet-bible", the Worker behind the bracelet calculator's
+# lostark.bible import (worker/bracelet.js).
+#
+#   Deploy:  cd worker && wrangler deploy
+#   Local:   cd worker && wrangler dev
+#
+# After deploying, paste the printed https URL into bible-import.js (WORKER_URL).
+# Full step-by-step, including the namespace ids below: ../docs/deploy-worker.md
+#
+# THE ONE FOOTGUN: a CLI `wrangler deploy` REPLACES THE WHOLE BINDING SET. Every
+# KV namespace, cron and rate limit this Worker uses must be declared HERE. A
+# namespace bound only in the Cloudflare dashboard is silently dropped on the
+# next deploy — that has already happened once on the astrogem Worker (2026-07).
+
+name = "bracelet-bible"
+main = "bracelet.js"
+compatibility_date = "2026-06-01"
+
+# worker/bracelet.js imports ../model/bracelet.js, which in turn pulls
+# ../data/bracelet-data.js and ../data/gear-data.js. Wrangler's esbuild bundles
+# all three, so the Worker and the browser run the SAME model file — there is no
+# copy to keep in sync and no drift to verify. If `wrangler deploy` ever stops
+# resolving those relative requires, that is the thing to fix; do NOT paste a
+# copy of the model into worker/.
+
+# SECRETS — never set here, this file is public. Set each with:
+#     wrangler secret put <NAME>
+#
+#   BIBLE_TOKEN   The Bearer token lostark.bible's owners issued for this Worker.
+#                 Character pages 401 without a token. Live lookups prefer the
+#                 CALLER'S OWN OAuth token (so every upstream request is
+#                 attributable to a consenting human); this is the fallback and
+#                 the credential the cron drain uses, since the cron has no human.
+#   ADMIN_TOKEN   The admin credential for /admin/*, sent as the X-Admin-Token
+#                 request header. Fail-closed: while unset, nobody is admin.
+#                 Header only — never a URL, so it cannot leak via logs or Referer.
+
+# CHARS — one character record per key ("c:<REGION>:<name lowercased>"), holding
+# the raw lostark.bible bracelet payload plus its score at the CANONICAL DEFAULT
+# profile. Also carries the per-user roster cache (rk:<sha256 of the token>, 5
+# min — the token itself is never stored), the fetch queue (q:), the not-found
+# markers (nf:), and the leaderboard's dirty markers (lb:dirty:). The Worker
+# degrades gracefully without this binding: lookups still work, nothing is cached.
+[[kv_namespaces]]
+binding = "CHARS"
+id = "PUT_CHARS_NAMESPACE_ID_HERE"
+
+# OAUTH — reserved for server-side sign-in sessions, if the client-side PKCE flow
+# is ever swapped for the Worker-side one (the astrogem Worker has that path
+# built but unadopted). Nothing writes to it today; it is declared now so adding
+# it later is not a redeploy that drops the other bindings.
+#
+# MUST live in its OWN namespace, never in CHARS: the leaderboard rebuild does a
+# prefix-less list() over CHARS, and a session key there would be read as a
+# character record.
+[[kv_namespaces]]
+binding = "OAUTH"
+id = "PUT_OAUTH_NAMESPACE_ID_HERE"
+
+# Cron: drain the queued page fetches, a few per minute, spaced ~3s apart. Only
+# POST /import overflow ever queues anything — a live /character lookup fetches
+# inline. The leaderboard snapshot rebuild will ride this same tick (dirty-gated,
+# throttled to ~30 min in code) when it is built.
+[triggers]
+crons = ["* * * * *"]
+
+# ---- Edge rate limits ----------------------------------------------------
+# Keyed in code. `period` must be 10 or 60 seconds. A blocked hit touches no KV
+# and makes no upstream request, which is the point: the cheap gate runs first.
+
+# Absolute backstop on EVERY request, per IP.
+[[ratelimits]]
+name = "HARD_CAP"
+namespace_id = "2000"
+[ratelimits.simple]
+limit = 60
+period = 60
+
+# Per-USER character lookup throttle — keyed by a hash of the caller's OAuth
+# token, not the IP, so one person on two networks is still one person. ~1 fresh
+# character per 5s. Cached lookups never reach it.
+[[ratelimits]]
+name = "LOOKUP_THROTTLE"
+namespace_id = "2002"
+[ratelimits.simple]
+limit = 2
+period = 10
+
+# Leaderboard pulls (open to everyone, per IP): 3 a minute, against spam-refresh.
+[[ratelimits]]
+name = "LB_THROTTLE"
+namespace_id = "2003"
+[ratelimits.simple]
+limit = 3
+period = 60
+
+# GLOBAL overload gate: ONE shared counter across all requests (fixed key in
+# code, not per-IP). When it trips the Worker degrades — new upstream work pauses
+# for EVERYONE equally, with no bypass — while cached reads keep working. period
+# maxes at 60s, so this is a rolling per-minute proxy that auto-recovers.
+[[ratelimits]]
+name = "GLOBAL_GATE"
+namespace_id = "2004"
+[ratelimits.simple]
+limit = 1000
+period = 60
+
+# Site-wide cap on POST /import: ~10 a minute across all users, matching the
+# drain rate so the queue can never grow faster than the cron empties it.
+[[ratelimits]]
+name = "IMPORT_GATE"
+namespace_id = "2005"
+[ratelimits.simple]
+limit = 10
+period = 60
+
+# Logs — handy while validating the bracelet parser against real pages.
+[observability]
+enabled = true
+
+# ---- CORS ----
+# The Worker hardcodes an exact-match Origin allowlist (ALLOW_ORIGINS in
+# bracelet.js): the loseii origins, the GitHub Pages origin, and a localhost
+# regex. To serve a new frontend origin, add it there — never "*".

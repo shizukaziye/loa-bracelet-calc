@@ -1,10 +1,22 @@
 # Fallback: reading a bracelet when `/api/oauth/rosters` has none
 
-**Status: designed, not built.** Build it only after the probe in
-`docs/research/oauth-rosters-shape.md` confirms the roster endpoint really is an
-index. If rosters turns out to carry the bracelet, none of this is needed —
-`bible-import.js` already decodes it in the browser and this document gets
-deleted.
+**Status: BUILT (first pass, 2026-08-11), not deployed.** `worker/bracelet.js` +
+`worker/wrangler.toml` implement everything below, plus the consent gate and the
+canonical-default scorer. Deploy steps: `docs/deploy-worker.md`. Local checks:
+`node tools/test-worker.mjs`.
+
+Three things came out different from the sketch below, all deliberate:
+
+- The route is `GET /character?name=&region=` (`/bracelet` still works as an
+  alias), and it also STORES a scored record, because the leaderboard needs one.
+- The Worker scores every stored bracelet at the CANONICAL DEFAULT profile and
+  returns it as `defaultScore`. The calculator scores the same bracelet on the
+  user's own settings. Two numbers, both shown, never mixed.
+- `POST /import` (bulk) and `POST /forget` (a user removes their own characters)
+  were added; the leaderboard snapshot (`?list=1`) is stubbed at 501 pending the
+  architecture doc.
+
+The rest of this document is the original design and still describes the shape.
 
 ## The rule that shapes everything
 

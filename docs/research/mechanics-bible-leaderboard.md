@@ -55,6 +55,13 @@ Decode rules (verified on 4 characters):
   Damage (centi-%) · 76 Crit Damage (centi-%). UNMAPPED: Str, Dex, Vitality, Domination,
   Endurance, Expertise, remaining plain-effect indices — map opportunistically from live
   payloads and keep an `unknown` passthrough.
+- **MEASURED GAP (2026-08-11, `node tools/test-worker.mjs` over the 12 seeded characters):**
+  indices **74**, **4** and **151** appear in the wild and `TYPE2_INDEX` maps none of them,
+  so 5 of the 12 score low — index 74 alone costs about **4 percentage points** on three
+  characters. The seed file decoded them with a local extension map that never shipped.
+  Astrogem's accessory table reads 74 as Crit Rate % and 151 as flat Weapon Attack Power;
+  4 is unidentified. Mapping these three (in `model/bracelet.js` AND the Python mirror,
+  with a refs regeneration) is the highest-value single fix in this area.
 - Family numbering matches maxroll's 1–33 and `official-probabilities.md`.
 
 The astrogem worker (`loastuff/loa-astrogem-calc/worker/astrogem-bible.js`) already

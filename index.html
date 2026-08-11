@@ -107,6 +107,11 @@ function selectTab(name){
 <script src="model/bracelet.js?v=3"></script>
 <script src="tip.js?v=1"></script>
 <script src="app.js?v=9"></script>
+<!-- lostark.bible import. AFTER app.js: bible-import.js mounts into the Bracelet
+     panel app.js has just built, and hands what it decodes to
+     window.BraceletApp.applyImport. Both degrade to nothing if the site is down. -->
+<script src="bible-oauth.js?v=1"></script>
+<script src="bible-import.js?v=2"></script>
 <script src="https://www.loseii.com/nav.js" defer></script>
 <script src="https://www.loseii.com/social-bar.js" defer></script>
 </body></html>

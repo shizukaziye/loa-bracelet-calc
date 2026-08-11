@@ -1,0 +1,6 @@
+{
+  "//": "Marks worker/*.js as ES modules so `node --test`-style harnesses (tools/test-worker.mjs) can import worker/bracelet.js directly, the same way wrangler's bundler does. The model it imports (../model/bracelet.js) stays CommonJS and is picked up through Node's default-import interop — exactly what esbuild does at deploy time, so the test runs the deployed code path rather than a copy.",
+  "name": "bracelet-bible-worker",
+  "private": true,
+  "type": "module"
+}

@@ -11,6 +11,7 @@
  *   window.BibleOAuth      bible-oauth.js — PKCE sign-in, GET /api/oauth/rosters
  *   window.Bracelet        model/bracelet.js — decodeBibleBracelet(stats)
  *   window.BraceletApp     app.js — applyImport(patch), the one hook into the UI
+ *   WORKER_URL             worker/bracelet.js — the bracelet fallback fetch
  * The raid statistics endpoints are never touched: the site owner banned that,
  * and everything here reads the signed-in user's OWN roster through OAuth.
  *
@@ -22,12 +23,24 @@
  *   - a character is any object with a string `name` plus a class or item level;
  *   - a bracelet is any object carrying a `stats` array whose entries have the
  *     numeric type/index/value triple the decoder eats.
- * If the endpoint turns out to carry no bracelet at all — the likely outcome,
- * since it is described as a roster index — the click lands on the "no bracelet
- * came back" message and the Worker fallback in
- * docs/design/bible-import-fallback.md is what gets built next.
  * `BraceletImport.dumpShape()` in the console prints the real key paths, and
  * docs/research/oauth-rosters-shape.md is where the answer gets written down.
+ *
+ * WHERE THE BRACELET COMES FROM. Two sources, tried in order:
+ *   1. the roster payload itself, if it turns out to carry the bracelet;
+ *   2. OUR OWN Worker (worker/bracelet.js), which fetches the character PAGE
+ *      server-side — the browser cannot, there is no CORS on the page routes.
+ * The Worker re-checks ownership with the same token before it fetches anything:
+ * it calls /api/oauth/rosters itself and refuses any name that is not on the
+ * caller's own roster. So the click is gated twice, on purpose. Design:
+ * docs/design/bible-import-fallback.md; deploy: docs/deploy-worker.md.
+ *
+ * TWO SCORES, AND THEY DIFFER. The Worker answers with `defaultScore` — the
+ * bracelet's damage on the CANONICAL DEFAULT profile, which is the only number
+ * the leaderboard ever ranks on. The calculator below scores the same bracelet
+ * on whatever character settings the user has entered. Both are reported, and
+ * the note under the list says which is which; an imported profile must never
+ * be allowed to move a leaderboard number.
  */
 (function (root) {
   "use strict";
@@ -36,6 +49,16 @@
   var B = root.Bracelet;
   var DATA = root.BraceletData;
   if (!OA || !B || !DATA) return;               // a dependency failed to load; leave the panel alone
+
+  /**
+   * The deployed bracelet-bible Worker (worker/bracelet.js). EMPTY until Shizu
+   * deploys it and pastes the printed URL here — see docs/deploy-worker.md.
+   *
+   * Empty is a supported state, not a bug: signing in and listing characters
+   * still works, and a click lands on a message that says the page fetch is not
+   * wired up yet rather than on a broken request.
+   */
+  var WORKER_URL = "";
 
   // One silent re-auth per page load. A dead token sends the user straight back
   // through /oauth/authorize, which auto-approves while the grant lives — but if
@@ -143,6 +166,32 @@
       if (typeof v === "string" && /^[\d.,]+$/.test(v)) return parseFloat(v.replace(/,/g, ""));
     }
     return null;
+  }
+
+  /**
+   * /api/oauth/rosters names classes with the game's internal codes
+   * ("devil_hunter_female"), not the English name a player recognises. Confirmed
+   * 2026-08-11 by joining the live payload against the character pages —
+   * docs/research/oauth-rosters-shape.md has the table and the working.
+   *
+   * The Worker keeps its own copy (ROSTER_CLASS in worker/bracelet.js) for the
+   * board. Two copies of a nine-row lookup is a fair price for not inventing a
+   * shared data file that the model tables would then have to live beside; if it
+   * ever grows past this, give it one home in data/.
+   *
+   * An unknown code is title-cased, never dropped: "Devil Hunter Male" on screen
+   * is a bug report, a blank is a shrug.
+   */
+  var CLASS_NAME = {
+    arcana: "Arcanist", berserker: "Berserker", blade: "Deathblade",
+    devil_hunter_female: "Gunslinger", dragon_knight: "Guardianknight",
+    alchemist: "Wildsoul", reaper: "Reaper", soul_eater: "Souleater", bard: "Bard"
+  };
+  function classLabel(code) {
+    if (!code) return "";
+    var k = String(code).toLowerCase();
+    if (CLASS_NAME[k]) return CLASS_NAME[k];
+    return k.split("_").map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1); }).join(" ");
   }
 
   var CLASS_KEYS = ["class", "className", "characterClassName", "job", "jobName", "classId"];
@@ -388,8 +437,12 @@
       h += '<div class="bi-chars">';
       for (var i = 0; i < state.chars.length; i++) {
         var c = state.chars[i];
-        var sub = [c.cls, c.ilvl !== null ? nf(c.ilvl) : "", c.region].filter(Boolean).join(" · ");
-        h += '<button type="button" class="bi-char' + (state.picked === c.name ? " on" : "") + '" data-idx="' + i + '">' +
+        var sub = [classLabel(c.cls), c.ilvl !== null ? nf(c.ilvl) : "", c.region].filter(Boolean).join(" · ");
+        // While a fetch is in flight the whole list goes inert: the Worker paces
+        // itself anyway, and a second click would only earn a rate-limit message.
+        if (state.busy && state.picked === c.name) sub = "reading…";
+        h += '<button type="button" class="bi-char' + (state.picked === c.name ? " on" : "") + '"' +
+          (state.busy ? " disabled" : "") + ' data-idx="' + i + '">' +
           esc(c.name) + (sub ? "<small>" + esc(sub) + "</small>" : "") + "</button>";
       }
       h += "</div>";
@@ -403,7 +456,7 @@
     bind();
   }
 
-  /** Four failures, four different sentences — never one shrug for all of them. */
+  /** Every failure gets its own sentence — never one shrug for all of them. */
   function msgHtml() {
     if (state.error) {
       var e = state.error, t;
@@ -411,10 +464,28 @@
         t = "Your lostark.bible pass ran out. Sending you back to sign in — it should come straight back without asking anything.";
       } else if (e.kind === "reauth-failed") {
         t = "Signing back in did not take. Use the button above to start the sign-in again.";
+      } else if (e.kind === "noworker") {
+        t = "The roster endpoint is an index, not a full loadout, and the character-page fetch that fills the gap " +
+          "has not been deployed for this build yet. Fill the slots by hand for now — see docs/deploy-worker.md.";
+      } else if (e.kind === "notyours") {
+        // The Worker refused because the name is not on the caller's own roster.
+        // Almost always a hidden character or an unlinked roster, so say that.
+        t = "lostark.bible would not confirm that " + esc(e.who || e.detail || "that character") +
+          " is on your roster, so nothing was fetched. Only characters your own account shows can be read here — " +
+          "check the character is not hidden on lostark.bible, and that its roster is linked.";
+      } else if (e.kind === "nopage") {
+        t = "lostark.bible has no character page for " + esc(e.who || "that character") + " yet. " +
+          "Visit the character on lostark.bible once so their profile syncs, then try again.";
+      } else if (e.kind === "slowdown") {
+        t = "That is a few characters in quick succession — give it a few seconds and click again. " +
+          "The limit exists so this tool stays a welcome guest on lostark.bible.";
+      } else if (e.kind === "worker") {
+        t = "The import service could not be reached" + (e.detail ? " (" + esc(e.detail) + ")" : "") +
+          ". Your bracelet is fine — try again in a minute, or fill the slots by hand.";
       } else if (e.kind === "nobracelet") {
-        t = "We can see " + esc(e.detail || "that character") + ", but no bracelet came back with it. " +
-          "The roster endpoint is an index, not a full loadout — reading the bracelet needs the character-page fetch " +
-          "that is not built yet (docs/design/bible-import-fallback.md). Fill the slots by hand for now.";
+        t = "We can see " + esc(e.who || e.detail || "that character") + ", but there is no bracelet on them. " +
+          "If they are wearing one, it may not have synced to lostark.bible yet — open the character there once, " +
+          "then try again.";
       } else if (e.kind === "undecodable") {
         t = "A bracelet came back for " + esc(e.detail || "that character") + ", but none of its lines decoded. " +
           "That usually means a new stat index — worth reporting with the payload from BraceletImport.dumpShape().";
@@ -493,12 +564,118 @@
     });
   }
 
+  // ------------------------------------------------------------------
+  // the Worker: character PAGE fetch, server-side, behind the consent gate
+  // ------------------------------------------------------------------
+
+  /**
+   * lostark.bible calls EU Central "CE". A roster payload might say anything —
+   * "EU", a server name, or nothing at all — so map what we recognise and return
+   * "" for the rest rather than guessing a region and fetching a stranger's page.
+   */
+  function bibleRegion(r) {
+    var s = String(r || "").trim().toUpperCase();
+    if (!s) return "";
+    if (s === "NA" || s === "NAE" || s === "NAW" || s === "US" || s === "NORTH AMERICA") return "NA";
+    if (s === "CE" || s === "EU" || s === "EUC" || s === "EUROPE" ||
+        s === "CENTRAL EUROPE" || s === "EU CENTRAL") return "CE";
+    return "";
+  }
+
+  /**
+   * GET <worker>/character?name=&region= with the caller's own bearer token.
+   * Resolves to the parsed JSON, or rejects with { kind, detail } already shaped
+   * for msgHtml().
+   *
+   * The token goes to OUR OWN Worker and nowhere else. The Worker uses it twice:
+   * once to re-check the roster (so it never fetches a page for a character the
+   * caller does not own), and once as the credential on the page fetch itself,
+   * so the request to lostark.bible is attributable to a consenting human.
+   */
+  function workerFetch(name, region) {
+    var tok = OA.accessToken();
+    if (!tok) return Promise.reject({ kind: "expired" });
+    var url = WORKER_URL.replace(/\/+$/, "") + "/character?name=" + encodeURIComponent(name) +
+      "&region=" + encodeURIComponent(region);
+    return fetch(url, { headers: { Authorization: "Bearer " + tok } }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (r.ok) return j;
+        throw { status: r.status, kind: workerErrorKind(r.status, j.error), detail: j.message || j.error || ("HTTP " + r.status), error: j.error };
+      });
+    }, function () {
+      throw { kind: "worker", detail: "the import service did not answer" };
+    });
+  }
+
+  /** Worker error codes -> the message kinds msgHtml() knows how to word. */
+  function workerErrorKind(status, code) {
+    if (code === "not_yours") return "notyours";
+    if (code === "no_bracelet") return "nobracelet";
+    if (code === "no_such_character") return "nopage";
+    if (code === "slow_down" || status === 429) return "slowdown";
+    if (code === "not_signed_in" || code === "bad_token" || status === 401) return "expired";
+    return "worker";
+  }
+
+  /**
+   * Ask the Worker for one character's bracelet.
+   *
+   * Region handling: rosters may not name one. When it is unknown we try NA and,
+   * if the page simply is not there, CE — two requests at worst, only for a
+   * character we already know the caller owns. Anything else propagates.
+   */
+  function workerBracelet(c) {
+    var known = bibleRegion(c.region);
+    var order = known ? [known] : ["NA", "CE"];
+    function attempt(i) {
+      return workerFetch(c.name, order[i]).catch(function (e) {
+        var retryable = (e.kind === "nopage" || e.kind === "notyours");
+        if (i + 1 < order.length && retryable) return attempt(i + 1);
+        throw e;
+      });
+    }
+    return attempt(0);
+  }
+
+  /**
+   * Click a character. Two sources for the bracelet, in order: the roster payload
+   * itself (free, if it ever carries one), then the Worker's page fetch.
+   */
   function pick(c) {
     if (!c) return;
     state.error = null; state.note = null; state.picked = c.name;
-    var data = findBracelet(c.node);
-    if (!data) { state.error = { kind: "nobracelet", detail: c.name }; render(); return; }
 
+    var inline = findBracelet(c.node);
+    if (inline) { applyBracelet(c, inline, null); return; }
+
+    if (!WORKER_URL) {
+      // The honest version of "not built yet": the roster is an index, and the
+      // page fetch that would fill the gap has no address to call.
+      state.error = { kind: "noworker", detail: c.name };
+      render();
+      return;
+    }
+
+    state.busy = true;
+    render();
+    workerBracelet(c).then(function (data) {
+      state.busy = false;
+      if (!data || !data.bracelet || !data.bracelet.stats || !data.bracelet.stats.length) {
+        state.error = { kind: "nobracelet", detail: c.name };
+        render();
+        return;
+      }
+      applyBracelet(c, data.bracelet, data);
+    }).catch(function (e) {
+      state.busy = false;
+      state.error = { kind: (e && e.kind) || "worker", detail: (e && e.detail) || c.name, who: c.name };
+      render();
+      if (e && e.kind === "expired") OA.login();
+    });
+  }
+
+  /** Decode one bracelet payload and hand it to the calculator. */
+  function applyBracelet(c, data, meta) {
     var built;
     try { built = buildPatch(data); }
     catch (e) { state.error = { kind: "undecodable", detail: c.name }; render(); return; }
@@ -519,9 +696,28 @@
     app.applyImport(built.patch);
 
     var n = built.patch.rows.length;
-    state.note = "Loaded " + c.name + " — " + (built.patch.grade === "relic" ? "Relic" : "Ancient") + ", " +
-      n + " granted slot" + (n === 1 ? "" : "s") + "." +
-      (built.warn.length ? " Note: " + built.warn.join("; ") + "." : "");
+    var note = "Loaded " + c.name + " — " + (built.patch.grade === "relic" ? "Relic" : "Ancient") + ", " +
+      n + " granted slot" + (n === 1 ? "" : "s") + ".";
+    // The two scores, side by side. The Worker's figure is the bracelet on the
+    // CANONICAL DEFAULT profile — the only one the leaderboard ever uses. The
+    // panel's own figure, just below, is this bracelet on YOUR settings. Saying
+    // both is how a user learns why their rank is not their calculator number.
+    if (meta && meta.defaultScore && typeof meta.defaultScore.pct === "number") {
+      note += " On default settings it is worth +" + meta.defaultScore.pct.toFixed(2) +
+        "% damage — that is the figure the leaderboard ranks on; the panel below scores it on YOUR character.";
+      if (meta.defaultScore.unmapped && meta.defaultScore.unmapped.length) {
+        built.warn.push(meta.defaultScore.unmapped.length + " line" +
+          (meta.defaultScore.unmapped.length > 1 ? "s use stat indices" : " uses a stat index") +
+          " the model does not map yet, so " +
+          (meta.defaultScore.unmapped.length > 1 ? "they score" : "it scores") + " zero");
+      }
+    }
+    if (meta && meta.stale) {
+      built.warn.push("lostark.bible could not be reached, so this is a copy from about " +
+        (meta.staleHours || 0) + "h ago");
+    }
+    if (built.warn.length) note += " Note: " + built.warn.join("; ") + ".";
+    state.note = note;
     render();
   }
 
@@ -598,7 +794,12 @@
     findBracelet: findBracelet,
     buildPatch: buildPatch,
     reload: function () { loadRosters(true); },
-    raw: function () { return state.raw; }
+    raw: function () { return state.raw; },
+    // Console handles for checking a fresh deploy without clicking:
+    //   BraceletImport.workerUrl()
+    //   BraceletImport.fetchCharacter("Paroxysmal", "NA").then(console.log)
+    workerUrl: function () { return WORKER_URL; },
+    fetchCharacter: function (name, region) { return workerFetch(name, bibleRegion(region) || "NA"); }
   };
 
   if (document.readyState === "loading") {
