@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Bracelet Admin — queue and drain</title>
+<!--
+  admin.html — the private operator view for worker/bracelet.js. Standalone: its
+  own styles, its own script, no nav, NOT linked from the app. Nothing on this
+  page is secret by being unlisted; the Worker's X-Admin-Token check is the gate.
+
+  THE TOKEN RULE (ARCHITECTURE §3.7, learned from astrogem's gate.js incident: a
+  hash shipped to every browser gated nothing).
+    - typed at load, held in sessionStorage ONLY — gone when the tab closes
+    - never in this file, never in a URL, never in a query param
+    - sent as the X-Admin-Token HEADER and nothing else
+    - "Sign out" clears it; a 401 or 403 clears it and returns to the sign-in box
+
+  EVERY MUTATION IS A POST. A GET with side effects is a drive-by: one <img> tag
+  on any page could freeze the queue. Every destructive button also asks twice —
+  the first click arms it, the second one fires.
+
+  WHAT IT READS — one call, GET /admin/metrics, feeding four panels:
+    Queue    depth + the waiting list (region · name · waited), capped at 500
+    Drain    mode (run/off/probe), rate per minute, last run, month's budget
+    Log      the rolling 1-hour drain log: cached/dropped/failed, stop, duration
+    Health   last upstream pull, last snapshot build, is the probe token armed
+             (a BOOLEAN — a token is never rendered here)
+
+  The Worker does not answer all of this yet. Each panel reads the §3.7 shape
+  first and the flat shape the Worker returns today second; when the field is
+  missing the panel says which route or field it needs instead of drawing a lie.
+  worker/feedback-and-admin.md lists exactly what is owed.
+
+  NETWORK RULE, ABSOLUTE: this page talks to the bracelet Worker and to its own
+  origin (data/leaderboard-seed.json for the seed POST). Nothing else.
+-->
+<style>
+  :root{
+    --bg:#0d1017;--panel:#161a24;--panel2:#1b2030;--border:#2a3142;--text:#e7e9ee;
+    --dim:#97a0b4;--accent:#66c7ff;--high:#ffb86b;--good:#6ee7a8;--bad:#ff7f7f;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);color-scheme:dark}
+  body{font:14px/1.5 -apple-system,BlinkMacSystemFont,"Inter","Segoe UI",Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1040px;margin:0 auto;padding:22px 14px 70px}
+  h1{font-size:21px;margin:0 0 3px;letter-spacing:-.02em}
+  .sub{color:var(--dim);font-size:13px;margin:0 0 18px}
+  h2{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--accent);
+     margin:0;padding:12px 14px;border-bottom:1px solid var(--border);font-weight:700}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-top:12px}
+  .pad{padding:12px 14px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  input,select{background:var(--panel2);color:var(--text);border:1px solid var(--border);
+    border-radius:6px;padding:8px 10px;font:inherit;font-size:13px;max-width:100%}
+  input:focus,select:focus{outline:1px solid var(--accent)}
+  #tok{flex:1 1 240px;min-width:0}
+  button{background:var(--accent);color:#06121f;border:none;border-radius:7px;padding:8px 15px;
+    font:inherit;font-size:13px;font-weight:700;cursor:pointer}
+  button:hover:not(:disabled){filter:brightness(1.08)}
+  button:disabled{opacity:.42;cursor:not-allowed}
+  button.ghost{background:var(--panel2);color:var(--text);border:1px solid var(--border)}
+  button.ghost:hover:not(:disabled){border-color:var(--accent)}
+  button.armed{background:var(--bad);color:#1a0606}
+  button.on{background:var(--accent);color:#06121f}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:10px}
+  .card{background:var(--panel2);border:1px solid var(--border);border-radius:9px;padding:11px 13px}
+  .card .k{color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:.06em}
+  .card .v{font-size:22px;font-weight:800;margin-top:3px;font-variant-numeric:tabular-nums;
+    overflow-wrap:anywhere}
+  .card .v small{font-size:11px;color:var(--dim);font-weight:600}
+  .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+  th,td{padding:6px 14px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap}
+  th{color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+  tr:last-child td{border-bottom:none}
+  .muted{color:var(--dim)}.good{color:var(--good)}.warn{color:var(--high)}.bad{color:var(--bad)}
+  .miss{margin:0;color:var(--dim);font-size:12.5px;line-height:1.6}
+  .miss code{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:12px;color:var(--high)}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--good);
+    margin-right:6px;vertical-align:middle}
+  .dot.stale{background:var(--high)}.dot.off{background:var(--bad)}
+  .hide{display:none}
+  .note{color:var(--dim);font-size:12px;margin:8px 0 0;line-height:1.6}
+  .banner{background:var(--panel2);border:1px solid var(--border);border-left:3px solid var(--high);
+    border-radius:8px;padding:10px 13px;font-size:13px;line-height:1.6;margin-top:12px}
+  .ctl{border-top:1px solid var(--border);padding:12px 14px}
+  .ctl:first-child{border-top:none}
+  .ctl .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);
+    margin-bottom:7px;font-weight:700}
+  .out{font-size:12.5px;margin-top:7px;min-height:17px;color:var(--dim);overflow-wrap:anywhere}
+  @media (max-width:700px){
+    .wrap{padding:16px 10px 60px}
+    th,td{padding:5px 9px}
+    button{padding:8px 12px}
+  }
+</style>
+</head><body>
+<div class="wrap">
+  <h1>Bracelet Admin</h1>
+  <p class="sub">Queue, drain and health for the bracelet Worker. <span id="status"></span></p>
+
+  <!-- Sign-in. The only thing on screen until a token is typed. -->
+  <div id="auth">
+    <div class="panel">
+      <h2>Admin token</h2>
+      <div class="pad">
+        <div class="row">
+          <input id="tok" type="password" placeholder="The ADMIN_TOKEN Worker secret" autocomplete="off" spellcheck="false">
+          <button id="connect">Sign in</button>
+        </div>
+        <p class="note">Held in this tab's <code>sessionStorage</code> and sent only as the
+          <code>X-Admin-Token</code> header — never in the page, never in a URL. Closing the tab forgets it.
+          Nothing on this page calls the Worker until a token is entered.</p>
+        <p class="out" id="autherr"></p>
+      </div>
+    </div>
+  </div>
+
+  <div id="app" class="hide">
+    <div id="banner"></div>
+
+    <div class="panel">
+      <h2 id="q-head">Queue</h2>
+      <div class="pad"><div class="cards" id="cards"></div></div>
+      <div id="q-body" class="scroll" style="max-height:52vh;overflow-y:auto"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Drain</h2>
+      <div class="pad" id="d-body"></div>
+    </div>
+
+    <div class="panel">
+      <h2 id="l-head">Drain log — last hour</h2>
+      <div id="l-body" class="scroll" style="max-height:40vh;overflow-y:auto"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Health</h2>
+      <div class="pad" id="h-body"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Controls</h2>
+
+      <div class="ctl">
+        <div class="lbl">Drain mode and rate</div>
+        <div class="row">
+          <button class="ghost" id="m-run">Run</button>
+          <button class="ghost" id="m-off">Off</button>
+          <button class="ghost" id="m-probe">Probe</button>
+          <span style="flex:1 1 8px"></span>
+          <input id="rate" type="number" min="1" max="20" step="1" style="width:76px" placeholder="rate">
+          <span class="muted">/ min</span>
+          <button class="ghost" id="rate-set">Set rate</button>
+        </div>
+        <p class="note">Run = draining · Off = frozen, no upstream requests · Probe = paused until a single
+          test request succeeds. Rate is clamped to 1–20 per minute (the ≥3s floor).</p>
+        <p class="out" id="o-control"></p>
+      </div>
+
+      <div class="ctl">
+        <div class="lbl">Dequeue</div>
+        <div class="row">
+          <input id="dq-match" type="text" placeholder="key substring, e.g. eu:" style="flex:1 1 200px">
+          <button class="ghost" id="dq-match-go">Dequeue matching</button>
+          <button class="ghost" id="dq-all-go">Dequeue everything</button>
+        </div>
+        <p class="note">Evicts by key <b>substring</b>, deliberately: some queued names are mojibake and their
+          key cannot be rebuilt from a clean string. The order snapshot is deleted afterwards.</p>
+        <p class="out" id="o-dequeue"></p>
+      </div>
+
+      <div class="ctl">
+        <div class="lbl">Seed the board</div>
+        <div class="row">
+          <button class="ghost" id="seed-go">Load data/leaderboard-seed.json</button>
+        </div>
+        <p class="note">Reads the seed file from this origin and POSTs it. Every entry is re-scored by the
+          Worker from its raw stats, so the response reports each entry's delta against the file.</p>
+        <p class="out" id="o-seed"></p>
+      </div>
+
+      <div class="ctl">
+        <div class="lbl">Rescore</div>
+        <div class="row">
+          <button class="ghost" id="rescore-go">Bump parse version</button>
+        </div>
+        <p class="note">Marks stored rows for client rescoring. Cheap — the Worker keeps the raw stats, so
+          nothing is refetched.</p>
+        <p class="out" id="o-rescore"></p>
+      </div>
+
+      <div class="ctl">
+        <div class="lbl">Delete a character (takedown)</div>
+        <div class="row">
+          <select id="del-region">
+            <option value="NA">NA</option><option value="EU">EU</option>
+            <option value="KR">KR</option><option value="SA">SA</option>
+          </select>
+          <input id="del-name" type="text" placeholder="character name" style="flex:1 1 180px">
+          <button class="ghost" id="del-go">Delete</button>
+        </div>
+        <p class="out" id="o-delete"></p>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:14px">
+      <button class="ghost" id="refresh">Refresh now</button>
+      <button class="ghost" id="signout">Sign out</button>
+      <span class="muted" style="font-size:12px">Auto-refreshes every 5s.</span>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* The deployed bracelet Worker. EMPTY until it is deployed and the printed URL
+     is pasted here — kept in sync BY HAND with bible-import.js, leaderboard.js
+     and feedback.js. Empty is a supported state: the page still asks for a token
+     and every panel says plainly that there is nothing to talk to. */
+  var WORKER_URL = "";
+
+  var TOKKEY = "bc_admin_token";      // sessionStorage ONLY — never localStorage, never a cookie
+  var POLL_MS = 5000;
+  var QUEUE_ROWS = 500;               // hard cap on rendered waiting-list rows
+  var CONFIRM_MS = 6000;              // an armed destructive button disarms itself
+
+  var timer = null, lastOk = 0, lastErr = "", curMode = "", curRate = null;
+
+  function $(id) { return document.getElementById(id); }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+  function num(n) { return (n == null ? 0 : n).toLocaleString("en-US"); }
+  function token() { try { return sessionStorage.getItem(TOKKEY) || ""; } catch (e) { return ""; } }
+
+  function fmtAgo(ms) {
+    if (!ms) return "never";
+    var s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+    if (s < 60) return s + "s ago";
+    var m = Math.round(s / 60); if (m < 60) return m + "m ago";
+    var h = Math.round(m / 60); if (h < 48) return h + "h ago";
+    return Math.round(h / 24) + "d ago";
+  }
+  function fmtWait(s) {
+    if (s == null) return "—";
+    if (s < 60) return s + "s";
+    var m = Math.floor(s / 60); if (m < 60) return m + "m";
+    var h = Math.floor(m / 60); if (h < 48) return h + "h " + (m % 60) + "m";
+    return Math.floor(h / 24) + "d";
+  }
+  function fmtTime(ms) { try { return new Date(ms).toLocaleTimeString(); } catch (e) { return "—"; } }
+  function card(k, v) { return '<div class="card"><div class="k">' + k + '</div><div class="v">' + v + "</div></div>"; }
+  function missing(html) { return '<p class="miss">' + html + "</p>"; }
+
+  // ---- the one place a request is made -------------------------------------
+  /**
+   * Every call carries the token in the HEADER and nowhere else. No token means
+   * no request is even attempted. A 401 or 403 drops the token and returns to
+   * the sign-in box — a bad token must not sit in storage retrying forever.
+   * `code` on the rejection lets a panel say WHY it has nothing to draw.
+   */
+  function api(path, opts) {
+    opts = opts || {};
+    var t = token();
+    if (!t) return Promise.reject(mkErr("no_token", "Not signed in."));
+    if (!WORKER_URL) return Promise.reject(mkErr("no_worker",
+      "No Worker URL is set in admin.html (WORKER_URL is empty) — nothing is deployed to talk to yet."));
+    var headers = { "X-Admin-Token": t };
+    if (opts.body != null) headers["Content-Type"] = "application/json";
+    return fetch(WORKER_URL.replace(/\/+$/, "") + path, {
+      method: opts.method || "GET",
+      headers: headers,
+      body: opts.body != null ? JSON.stringify(opts.body) : undefined
+    }).then(function (r) {
+      if (r.status === 401 || r.status === 403) { signOut("That token was refused (" + r.status + ")."); throw mkErr("forbidden", "Token refused."); }
+      return r.text().then(function (txt) {
+        var j = null; try { j = JSON.parse(txt); } catch (e) {}
+        if (r.status === 404 || r.status === 501) {
+          throw mkErr("no_route", "The Worker does not answer " + path.split("?")[0] + " yet (" + r.status + ").");
+        }
+        if (!r.ok) throw mkErr("http_" + r.status, (j && (j.message || j.error)) || ("The Worker answered " + r.status + "."));
+        return j || {};
+      });
+    }, function (e) {
+      if (e && e.code) throw e;
+      throw mkErr("network", "Could not reach the Worker.");
+    });
+  }
+  function mkErr(code, msg) { var e = new Error(msg); e.code = code; return e; }
+
+  // ---- status line ----------------------------------------------------------
+  function setStatus() {
+    var el = $("status"); if (!el) return;
+    if (!token()) { el.textContent = ""; return; }
+    if (lastErr) { el.innerHTML = '<span class="dot off"></span>' + esc(lastErr); return; }
+    if (!lastOk) { el.innerHTML = '<span class="dot stale"></span>waiting for the first read…'; return; }
+    var stale = (Date.now() - lastOk) > POLL_MS * 4;
+    var drain = curMode
+      ? " · drain <b class=\"" + (curMode === "run" ? "good" : curMode === "off" ? "bad" : "warn") + "\">" +
+        esc(curMode.toUpperCase()) + (curMode === "run" && curRate != null ? " " + curRate + "/min" : "") + "</b>"
+      : "";
+    el.innerHTML = '<span class="dot' + (stale ? " stale" : "") + '"></span>live' + drain + " · read " + fmtAgo(lastOk);
+  }
+
+  // ---- panels ---------------------------------------------------------------
+  /**
+   * The Worker answers a FLAT shape today (queued / lastWrite / snapshotBuiltAt /
+   * hasBibleToken). §3.7 asks for nested queue/drain/drainLog/health blocks. Read
+   * the nested one first and fall back, so this page needs no edit on the day the
+   * Worker grows the fields.
+   */
+  function pick(o, path, alt) {
+    var cur = o, parts = path.split(".");
+    for (var i = 0; i < parts.length; i++) {
+      if (cur == null || typeof cur !== "object" || !(parts[i] in cur)) { cur = undefined; break; }
+      cur = cur[parts[i]];
+    }
+    return cur !== undefined ? cur : alt;
+  }
+
+  function renderCards(j) {
+    var depth = pick(j, "queue.total", j.queued);
+    var chars = pick(j, "characters", null);
+    var dirty = pick(j, "dirty", null);
+    var sig = pick(j, "modelSig", null);
+    var html = card("Queued", depth == null ? '<span class="muted">—</span>' : num(depth));
+    if (chars != null) html += card("Characters", num(chars));
+    if (dirty != null) html += card("Dirty", num(dirty));
+    if (sig != null) html += card("Model", '<span style="font-size:13px">' + esc(sig) + "</span>");
+    $("cards").innerHTML = html;
+  }
+
+  function renderQueue(j) {
+    renderCards(j);
+    var depth = pick(j, "queue.total", j.queued);
+    var list = pick(j, "queue.list", null);
+    $("q-head").textContent = "Queue" + (depth != null ? " — " + num(depth) + " waiting" : "");
+    if (!list) {
+      $("q-body").innerHTML = '<div class="pad">' + missing(
+        depth != null
+          ? "Depth only. The waiting list needs <code>queue.list[]</code> — <code>{region, name, ts}</code> per entry — from <code>GET /admin/metrics</code>."
+          : "This panel needs <code>queue.total</code> and <code>queue.list[]</code> from <code>GET /admin/metrics</code>."
+      ) + "</div>";
+      return;
+    }
+    if (!list.length) {
+      $("q-body").innerHTML = '<div class="pad"><p class="miss good">Queue is empty — all caught up.</p></div>';
+      return;
+    }
+    var shown = list.slice(0, QUEUE_ROWS);
+    var now = Date.now();
+    var rows = shown.map(function (x, i) {
+      // A front-sentinel requeue carries ts=1 to jump the line. Ageing that from
+      // the epoch prints a 57-year wait; it is not a wait at all.
+      var wait;
+      if (x.waitedS != null) wait = fmtWait(x.waitedS);
+      else if (x.ts == null || x.ts <= 1) wait = "—";
+      else wait = fmtWait(Math.max(0, Math.round((now - x.ts) / 1000)));
+      return "<tr><td class=\"muted\">" + (i + 1) + "</td><td>" + esc(x.region || "?") +
+        "</td><td>" + esc(x.name || "?") + '</td><td class="muted">' + wait + "</td></tr>";
+    }).join("");
+    $("q-body").innerHTML =
+      "<table><thead><tr><th>#</th><th>Region</th><th>Character</th><th>Waited</th></tr></thead><tbody>" +
+      rows + "</tbody></table>" +
+      (list.length > QUEUE_ROWS
+        ? '<p class="miss" style="padding:9px 14px">Showing the first ' + QUEUE_ROWS + " of " + num(list.length) + ".</p>"
+        : "");
+  }
+
+  function renderDrain(j) {
+    var d = pick(j, "drain", null);
+    if (!d) {
+      curMode = ""; curRate = null;
+      $("d-body").innerHTML = missing(
+        "This panel needs a <code>drain</code> block from <code>GET /admin/metrics</code>: " +
+        "<code>{mode:\"run|off|probe\", perMin, lastRun, budgetUsed, budgetCap}</code>. " +
+        "The controls below still work the moment <code>POST /admin/control</code> exists.");
+      return;
+    }
+    var mode = d.mode || (j.paused ? "off" : "run");
+    var rate = d.perMin != null ? d.perMin : d.rate;
+    curMode = mode; curRate = rate;
+    var modeCls = mode === "run" ? "good" : (mode === "off" ? "bad" : "warn");
+    var used = d.budgetUsed != null ? d.budgetUsed : pick(j, "usage.count", null);
+    var capB = d.budgetCap != null ? d.budgetCap : pick(j, "usage.budget", null);
+    var pct = (used != null && capB) ? Math.round((used / capB) * 100) : null;
+    var budgetCls = pct == null ? "muted" : (pct >= 90 ? "bad" : pct >= 70 ? "warn" : "good");
+    $("d-body").innerHTML = '<div class="cards">' +
+      card("Mode", '<span class="' + modeCls + '">' + esc(String(mode).toUpperCase()) + "</span>") +
+      card("Rate", rate != null ? num(rate) + " <small>/min</small>" : '<span class="muted">—</span>') +
+      card("Last run", '<span style="font-size:15px">' + esc(fmtAgo(d.lastRun || d.lastRunMs)) + "</span>") +
+      card("Month's budget", used == null ? '<span class="muted">—</span>'
+        : '<span class="' + budgetCls + '">' + num(used) + "</span>" + (capB ? " <small>/ " + num(capB) + "</small>" : "")) +
+      "</div>";
+    // Reflect live values into the controls, without stealing what is being typed.
+    ["run", "off", "probe"].forEach(function (m) {
+      var b = $("m-" + m); if (b) b.classList.toggle("on", m === mode);
+    });
+    if (rate != null && document.activeElement !== $("rate")) $("rate").value = rate;
+  }
+
+  function renderLog(j) {
+    var log = pick(j, "drainLog", null);
+    if (!log) {
+      $("l-head").textContent = "Drain log — last hour";
+      $("l-body").innerHTML = '<div class="pad">' + missing(
+        "This panel needs <code>drainLog[]</code> from <code>GET /admin/metrics</code>: per run " +
+        "<code>{t, cached[], dropped[], failed[], stop, ms}</code> over a rolling hour. " +
+        "Do-nothing runs are deliberately not logged — liveness shows in queue depth.") + "</div>";
+      return;
+    }
+    var runs = 0, cac = 0, fai = 0, dro = 0;
+    log.forEach(function (r) {
+      runs++; cac += (r.cached || []).length; fai += (r.failed || []).length; dro += (r.dropped || []).length;
+    });
+    $("l-head").textContent = "Drain log — last hour · " + runs + " runs · " + cac + " cached · " +
+      fai + " failed · " + dro + " dropped";
+    if (!runs) {
+      $("l-body").innerHTML = '<div class="pad"><p class="miss">No drains logged in the last hour. ' +
+        "A run that did nothing is not logged, so an empty log with an empty queue is the healthy case.</p></div>";
+      return;
+    }
+    var rows = log.slice().reverse().map(function (r) {
+      var c = (r.cached || []).length, f = (r.failed || []).length, d = (r.dropped || []).length;
+      var stopCls = (r.stop === "blocked" || r.stop === "paused") ? "bad"
+        : (r.stop === "budget" || r.stop === "time" || r.stop === "probe") ? "warn"
+        : (r.stop === "resumed") ? "good" : "muted";
+      var names = (r.cached || []).map(function (x) { var p = String(x).split(":"); return p[1] || x; }).join(", ");
+      return "<tr><td class=\"muted\">" + esc(fmtTime(r.t)) + "</td>" +
+        '<td class="' + (c ? "good" : "muted") + '">' + c + "</td>" +
+        '<td class="' + (f ? "bad" : "muted") + '">' + f + "</td>" +
+        '<td class="muted">' + d + "</td>" +
+        '<td class="' + stopCls + '">' + esc(r.stop || "ok") + "</td>" +
+        '<td class="muted">' + (r.ms != null ? (r.ms / 1000).toFixed(1) + "s" : "—") + "</td>" +
+        '<td class="muted" style="max-width:220px;overflow:hidden;text-overflow:ellipsis" title="' + esc(names) + '">' +
+        esc(names || "—") + "</td></tr>";
+    }).join("");
+    $("l-body").innerHTML =
+      "<table><thead><tr><th>Time</th><th>Cached</th><th>Failed</th><th>Dropped</th>" +
+      "<th>Stop</th><th>Took</th><th>Names</th></tr></thead><tbody>" + rows + "</tbody></table>";
+  }
+
+  function renderHealth(j) {
+    var pull = pick(j, "health.lastPull", j.lastWrite);
+    var snap = pick(j, "health.lastSnapshot", j.snapshotBuiltAt);
+    // BOOLEAN ONLY. The token itself is never returned and never rendered.
+    var armed = pick(j, "health.probeArmed", pick(j, "hasProbeToken", j.hasBibleToken));
+    var pullCls = !pull ? "bad" : (Date.now() - pull < 9e5 ? "good" : "warn");
+    var html = '<div class="cards">' +
+      card("Last upstream pull", '<span class="' + pullCls + '" style="font-size:15px">' + esc(fmtAgo(pull)) + "</span>") +
+      card("Last snapshot build", '<span style="font-size:15px">' + esc(fmtAgo(snap)) + "</span>") +
+      card("Probe token", armed == null ? '<span class="muted">—</span>'
+        : (armed ? '<span class="good">Armed</span>' : '<span class="bad">Missing</span>')) +
+      "</div>";
+    var gaps = [];
+    if (pull === undefined || pull === null) gaps.push("<code>health.lastPull</code>");
+    if (snap === undefined || snap === null) gaps.push("<code>health.lastSnapshot</code>");
+    if (armed == null) gaps.push("<code>health.probeArmed</code>");
+    if (gaps.length) html += missing("Still owed by <code>GET /admin/metrics</code>: " + gaps.join(", ") + ".");
+    if (j.snapshot) html += '<p class="miss" style="margin-top:8px">' + esc(j.snapshot) + "</p>";
+    $("h-body").innerHTML = html;
+  }
+
+  /** One /admin/metrics failure must not blank four panels — each says its own why. */
+  function renderAll(j) { renderQueue(j); renderDrain(j); renderLog(j); renderHealth(j); }
+  function degradeAll(msg) {
+    curMode = ""; curRate = null;
+    renderCards({});
+    var m = missing(esc(msg));
+    $("q-head").textContent = "Queue";
+    $("q-body").innerHTML = '<div class="pad">' + m + "</div>";
+    $("d-body").innerHTML = m;
+    $("l-head").textContent = "Drain log — last hour";
+    $("l-body").innerHTML = '<div class="pad">' + m + "</div>";
+    $("h-body").innerHTML = m;
+  }
+
+  function banner(msg, kind) {
+    $("banner").innerHTML = msg ? '<div class="banner"><b class="' + (kind || "warn") + '">' + esc(msg) + "</b></div>" : "";
+  }
+
+  // ---- poll -----------------------------------------------------------------
+  function poll() {
+    if (!token()) { showAuth(); return; }
+    api("/admin/metrics").then(function (j) {
+      lastOk = Date.now(); lastErr = "";
+      banner("");
+      renderAll(j || {});
+      setStatus();
+    }, function (e) {
+      if (e.code === "forbidden" || e.code === "no_token") return;   // signOut already handled it
+      // The status line stays short — the banner and the panels carry the sentence.
+      lastErr = e.code === "no_worker" ? "no Worker configured"
+        : e.code === "no_route" ? "/admin/metrics is not answered"
+        : "the last read failed";
+      banner(e.message || "The Worker did not answer.", e.code === "no_worker" ? "warn" : "bad");
+      degradeAll(e.code === "no_worker"
+        ? "No Worker is deployed yet, so there is nothing to read. Paste the deployed URL into WORKER_URL in admin.html."
+        : (e.code === "no_route"
+          ? "GET /admin/metrics is not answered by this Worker yet."
+          : "The last read of GET /admin/metrics failed: " + e.message));
+      setStatus();
+    });
+  }
+
+  // ---- controls -------------------------------------------------------------
+  function out(id, msg, cls) {
+    var el = $(id); if (!el) return;
+    el.className = "out " + (cls || "muted");
+    el.textContent = msg;
+  }
+  /**
+   * Two-step confirm on every destructive control: the first click arms the
+   * button and renames it, the second fires. It disarms itself after a few
+   * seconds so a stray click cannot sit there loaded.
+   */
+  function confirmable(btn, label, run) {
+    var armedTimer = null;
+    function disarm() {
+      btn.classList.remove("armed"); btn.textContent = label;
+      if (armedTimer) { clearTimeout(armedTimer); armedTimer = null; }
+    }
+    btn.addEventListener("click", function () {
+      if (btn.classList.contains("armed")) { disarm(); run(); return; }
+      btn.classList.add("armed"); btn.textContent = "Confirm: " + label;
+      armedTimer = setTimeout(disarm, CONFIRM_MS);
+    });
+    return disarm;
+  }
+  /** Every mutation is a POST. `outId` gets the answer, degraded or not. */
+  function post(path, body, outId, okMsg) {
+    out(outId, "Working…", "muted");
+    api(path, { method: "POST", body: body || {} }).then(function (j) {
+      out(outId, okMsg(j || {}), "good");
+      poll();
+    }, function (e) {
+      if (e.code === "forbidden") return;
+      out(outId, e.message || "Failed.", e.code === "no_route" || e.code === "no_worker" ? "warn" : "bad");
+    });
+  }
+
+  function wireControls() {
+    ["run", "off", "probe"].forEach(function (m) {
+      var b = $("m-" + m);
+      if (m === "run") {
+        b.addEventListener("click", function () { setMode("run"); });
+      } else {
+        confirmable(b, b.textContent, function () { setMode(m); });   // stopping the drain is destructive enough to ask twice
+      }
+    });
+    function setMode(m) {
+      post("/admin/control", { mode: m }, "o-control", function (j) {
+        var c = j.config || j;
+        return "Mode is now " + (c.mode || m) + (c.drainPerMin != null ? " · " + c.drainPerMin + "/min" : "") + ".";
+      });
+    }
+    $("rate-set").addEventListener("click", function () {
+      var v = parseInt($("rate").value, 10);
+      if (!(v >= 1 && v <= 20)) { out("o-control", "Rate must be a whole number from 1 to 20.", "bad"); return; }
+      post("/admin/control", { rate: v }, "o-control", function (j) {
+        var c = j.config || j;
+        return "Rate is now " + (c.drainPerMin != null ? c.drainPerMin : v) + "/min.";
+      });
+    });
+    $("rate").addEventListener("keydown", function (e) { if (e.key === "Enter") $("rate-set").click(); });
+
+    confirmable($("dq-match-go"), "Dequeue matching", function () {
+      var m = $("dq-match").value.trim();
+      if (!m) { out("o-dequeue", "Type the key substring to evict first.", "bad"); return; }
+      post("/admin/dequeue", { match: m }, "o-dequeue", function (j) {
+        return "Removed " + num(j.removed != null ? j.removed : 0) + " matching “" + m + "”.";
+      });
+    });
+    confirmable($("dq-all-go"), "Dequeue everything", function () {
+      post("/admin/dequeue", { all: true }, "o-dequeue", function (j) {
+        return "Queue cleared — " + num(j.removed != null ? j.removed : 0) + " removed.";
+      });
+    });
+
+    confirmable($("seed-go"), "Load data/leaderboard-seed.json", function () {
+      // The token check comes FIRST. Even a same-origin read is work nobody
+      // signed in has asked for; no token, no request of any kind.
+      if (!token()) { out("o-seed", "Not signed in.", "bad"); return; }
+      out("o-seed", "Reading the seed file…", "muted");
+      fetch("data/leaderboard-seed.json", { cache: "no-store" }).then(function (r) {
+        if (!r.ok) throw new Error("The seed file did not load (" + r.status + ").");
+        return r.json();
+      }).then(function (seed) {
+        var n = (seed && seed.entries && seed.entries.length) || 0;
+        out("o-seed", "Posting " + n + " entries…", "muted");
+        post("/admin/seed", seed, "o-seed", function (j) {
+          return "Stored " + num(j.stored != null ? j.stored : 0) + " of " + n + " entries.";
+        });
+      }).catch(function (e) { out("o-seed", e.message || "Could not read the seed file.", "bad"); });
+    });
+
+    confirmable($("rescore-go"), "Bump parse version", function () {
+      post("/admin/rescore", {}, "o-rescore", function (j) {
+        return "Parse version is now " + (j.parseVersion != null ? j.parseVersion : "bumped") + ".";
+      });
+    });
+
+    confirmable($("del-go"), "Delete", function () {
+      var name = $("del-name").value.trim(), region = $("del-region").value;
+      if (!name) { out("o-delete", "Type the character name first.", "bad"); return; }
+      // Body carries the pair per §3.7; the query string repeats it because the
+      // Worker's current handler reads the params. Neither is a secret — the
+      // token is a header and stays one.
+      post("/admin/delete?region=" + encodeURIComponent(region) + "&name=" + encodeURIComponent(name),
+        { region: region, name: name }, "o-delete", function (j) {
+          return "Deleted " + (j.deleted || (region + ":" + name)) + ".";
+        });
+    });
+  }
+
+  // ---- sign in / out --------------------------------------------------------
+  function showAuth() {
+    $("auth").classList.remove("hide");
+    $("app").classList.add("hide");
+    if (timer) { clearInterval(timer); timer = null; }
+    lastOk = 0; setStatus();
+  }
+  function showApp() {
+    $("auth").classList.add("hide");
+    $("app").classList.remove("hide");
+    if (!WORKER_URL) {
+      banner("No Worker URL is set in admin.html — every panel below is empty on purpose.", "warn");
+    }
+    poll();
+    if (timer) clearInterval(timer);
+    timer = setInterval(poll, POLL_MS);
+  }
+  function signOut(why) {
+    try { sessionStorage.removeItem(TOKKEY); } catch (e) {}
+    lastErr = ""; curMode = ""; curRate = null;
+    showAuth();
+    if (why) { $("autherr").className = "out bad"; $("autherr").textContent = why; }
+  }
+
+  $("connect").addEventListener("click", function () {
+    var t = $("tok").value.trim();
+    if (!t) { $("autherr").className = "out bad"; $("autherr").textContent = "Paste the admin token first."; return; }
+    try { sessionStorage.setItem(TOKKEY, t); } catch (e) {
+      $("autherr").className = "out bad";
+      $("autherr").textContent = "This browser refused sessionStorage, so the token cannot be held for the tab.";
+      return;
+    }
+    $("tok").value = "";                       // do not leave it sitting in the DOM
+    $("autherr").textContent = "";
+    showApp();
+  });
+  $("tok").addEventListener("keydown", function (e) { if (e.key === "Enter") $("connect").click(); });
+  $("refresh").addEventListener("click", poll);
+  $("signout").addEventListener("click", function () { signOut(""); });
+
+  wireControls();
+  setInterval(setStatus, 1000);
+  if (token()) showApp(); else showAuth();
+})();
+</script>
+</body></html>
