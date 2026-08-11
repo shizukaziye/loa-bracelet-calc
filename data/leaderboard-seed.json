@@ -1,6 +1,6 @@
 {
-  "_note": "Seed data for the Phase 4 bracelet leaderboard. 59 characters, read in two batches (30 + 29). SOURCE: public lostark.bible CHARACTER pages (https://lostark.bible/character/{NA|CE}/<name>), read once each with a browser User-Agent, strictly sequentially, at least 3s apart. Raid-statistics endpoints were NOT touched. The data is self-reported: it is whatever the owner's roster last synced to lostark.bible, not a verified snapshot. LOADOUTS: a character page carries one loadout per bible tab — most_recent_raid ('Raid Loadout'), most_recent_chaos_dungeon ('Current Loadout (Chaos Dungeon)') and, for some characters, raid_merged ('Estimated Raid Loadout'). The list is treated as OPEN. EACH loadout has its own items[] and therefore its own bracelet, so a character can wear a different bracelet in each. Every loadout that has one is decoded and scored here, in loadouts[]. chosenLoadout indexes the one the board ranks: the HIGHEST linesPct, ties going to the loadout bible draws, then raid > est. raid > chaos, then newest. The top-level grade/lines/rawStats/damagePct/linesPct mirror that chosen loadout. RENDERED LOADOUT: the page's own bracelet tooltip draws the loadout with the newest lastUpdated — on all 59 pages read, without exception — which is NOT always the raid one. Reading the rendered DOM alone therefore hands you the chaos-dungeon bracelet whenever a character ran chaos after their last raid. renderedLoadout indexes it; its decode is validated line by line against bible's own words (bibleLines) — all 59 pages validate clean — and biblePct / biblePctDelta compare against THAT loadout, since bible's 'Bracelet Effects +X%' describes it too. SCORING: model/bracelet.js on the CANONICAL DEFAULT profile, normalizeProfile({}) — no per-player knobs. damagePct = whole bracelet: traitDamage(traits) for the combat-trait lines PLUS setDamage(lines) for the effect lines. setDamage returns 0 for a trait line, so the trait term is not optional. linesPct = effect lines only, the figure comparable to lostark.bible's own 'Bracelet Effects +X%' (biblePct) and to the 7-9% good / 10%+ near-final benchmark. goldAt1_5M = damagePct x 1,500,000 gold per 1% damage, baseline 0. ROLLS: numRerolls / numTicketRerolls in the payload are the counts USED, not left — 4 and 3 mean a fully-rolled bracelet. rollsRemaining = 4-base / 3-ticket, and matches bible's rendered 'N+M rolls remaining' on every page that prints it. rerollsLeft keeps its historical name and its historical value (the used counts) so the Worker's /admin/seed reader keeps mapping it onto numRerolls unchanged. KNOWN GAP: linesPct runs above biblePct across the board, and BELOW it for bracelets carrying family 14 (Additional Damage / Demon-Archdemon). The default profile sets demonShare=0, so the model gives that clause nothing while bible appears to value it at full uptime. DECODE: every type:2 index on all 59 pages is in the model's TYPE2_INDEX. The type:3 / type:4 index formula the model implements covers only the damage families 11-33 (internal n = 1-23); the ten utility families 1-10 sit in a second block at internal n = 26-35, i.e. family = n - 25. Three samples pin it — n=26 family 1 Atk./Move Speed high (+6%), n=34 family 9 movement-skill cooldown mid (-10%), n=35 family 10 on-hit immunity low — and the first two are confirmed word for word against bible's rendered tooltip. Those lines are decoded here by a local override; all three families score 0 damage, so no score depends on it.",
-  "_scoredAt": "2026-08-11T21:26:03.658Z",
+  "_note": "Seed data for the Phase 4 bracelet leaderboard. 59 characters, ALL re-read in one pass into .corpus/ and re-scored together, so every entry comes from the same fetch and the same model build. SOURCE: lostark.bible CHARACTER pages (https://lostark.bible/character/{NA|CE}/<name>), fetched WITH THE AUTHORIZATION TOKEN — the whole corpus is authenticated, not anonymous — read once each, strictly sequentially. Raid-statistics endpoints were NOT touched. The data is self-reported: it is whatever the owner's roster last synced to lostark.bible, not a verified snapshot. LOADOUTS: a character page carries one loadout per bible tab — most_recent_raid ('Raid Loadout'), most_recent_chaos_dungeon ('Current Loadout (Chaos Dungeon)') and, for some characters, raid_merged ('Estimated Raid Loadout'). The list is treated as OPEN. EACH loadout has its own items[] and therefore its own bracelet, so a character can wear a different bracelet in each. Every loadout that has one is decoded and scored here, in loadouts[]. chosenLoadout indexes the one the board ranks: the HIGHEST linesPct, ties going to the loadout bible draws, then raid > est. raid > chaos, then newest. The top-level grade/lines/rawStats/damagePct/linesPct mirror that chosen loadout. RENDERED LOADOUT: the page's own bracelet tooltip draws the loadout with the newest lastUpdated — on all 59 pages read, without exception — which is NOT always the raid one. Reading the rendered DOM alone therefore hands you the chaos-dungeon bracelet whenever a character ran chaos after their last raid. renderedLoadout indexes it; its decode is validated line by line against bible's own words (bibleLines) — all 59 pages validate clean, every line, every number — and biblePct / biblePctDelta compare against THAT loadout, since bible's 'Bracelet Effects +X%' describes it too. SCORING: model/bracelet.js on the CANONICAL DEFAULT profile, normalizeProfile({}) — no per-player knobs. damagePct = whole bracelet: traitDamage(traits) for the combat-trait lines PLUS setDamage(lines) for the effect lines. setDamage returns 0 for a trait line, so the trait term is not optional. linesPct = effect lines only, the figure comparable to lostark.bible's own 'Bracelet Effects +X%' (biblePct) and to the 7-9% good / 10%+ near-final benchmark. goldAt1_5M = damagePct x 1,500,000 gold per 1% damage, baseline 0. ROLLS: numRerolls / numTicketRerolls in the payload are the counts USED, not left — 4 and 3 mean a fully-rolled bracelet. rollsRemaining = 4-base / 3-ticket, and matches bible's rendered 'N+M rolls remaining' on every page that prints it. rerollsLeft keeps its historical name and its historical value (the used counts) so the Worker's /admin/seed reader keeps mapping it onto numRerolls unchanged. KNOWN GAP: linesPct runs above biblePct across the board, and the 15 bracelets carrying family 14 (Additional Damage / Demon-Archdemon) sit about 2.3pp lower than the rest because the default profile sets demonShare=0 while bible appears to value that clause at full uptime. The residual offset that remains once family 14 is set aside is measured and dissected in docs/research/scoring-gap.md. DECODE: every type:2 index on all 59 pages is in the model's TYPE2_INDEX, and every type:3 / type:4 index decodes — the model now covers both blocks: the damage families 11-33 (internal n = 1-23) and the ten utility families 1-10, which sit at internal n = 26-35, i.e. family = n - 25. Nothing on any of the 59 pages needs a local override any more.",
+  "_scoredAt": "2026-08-11T21:45:43.349Z",
   "_model": {
     "version": "0.1.0",
     "signature": "bracelet-v1",
@@ -155,122 +155,6 @@
       "bibleComparesLoadout": "most_recent_raid",
       "loadouts": [
         {
-          "classification": "most_recent_raid",
-          "label": "Raid",
-          "itemLevel": 1800.0001,
-          "lastUpdated": 1786370968000,
-          "isRendered": true,
-          "validatedAgainstBible": true,
-          "grade": "ancient",
-          "traits": [
-            {
-              "trait": "swiftness",
-              "value": 95,
-              "fixed": true
-            },
-            {
-              "trait": "crit",
-              "value": 116,
-              "fixed": true
-            }
-          ],
-          "lines": [
-            {
-              "cat": "special",
-              "family": "critDmgOnCrit",
-              "familyId": 12,
-              "label": "Crit Damage +A%; on crit, damage +1.5%",
-              "tier": "mid",
-              "value": [
-                8.4
-              ],
-              "fixed": true,
-              "damage": 4.278671967170241,
-              "familyLetter": "S"
-            },
-            {
-              "cat": "special",
-              "family": "cdUpDmgUp",
-              "familyId": 15,
-              "label": "Skill cooldown +2% but damage +A%",
-              "tier": "high",
-              "value": [
-                5.5
-              ],
-              "fixed": true,
-              "damage": 4.764104480084147,
-              "familyLetter": "S"
-            },
-            {
-              "cat": "special",
-              "family": "critRateOnCrit",
-              "familyId": 11,
-              "label": "Crit Rate +A%; on crit, damage +1.5%",
-              "tier": "low",
-              "value": [
-                3.4
-              ],
-              "fixed": false,
-              "damage": 3.7614903097401466,
-              "familyLetter": "S"
-            }
-          ],
-          "rerollsUsed": {
-            "base": 4,
-            "ticket": 3
-          },
-          "rollsRemaining": {
-            "base": 0,
-            "ticket": 0
-          },
-          "damage": 17.989710791056027,
-          "damagePct": 19.709418526292733,
-          "linesDamage": 12.804266756994535,
-          "linesPct": 13.660149768637385,
-          "goldAt1_5M": 29564127.7894391,
-          "benchmark": "near-final",
-          "notes": [
-            "4 of 5 lines are locked (fixed:true = bible's lock icon). Players can lock granted lines, so the drop's fixed/granted split cannot be read off this payload."
-          ],
-          "rawStats": [
-            {
-              "type": 2,
-              "index": 18,
-              "id": 213400023,
-              "value": 95,
-              "fixed": true
-            },
-            {
-              "type": 2,
-              "index": 15,
-              "id": 213400023,
-              "value": 116,
-              "fixed": true
-            },
-            {
-              "type": 3,
-              "index": 11022,
-              "id": 213400023,
-              "value": 5,
-              "fixed": true
-            },
-            {
-              "type": 3,
-              "index": 11051,
-              "id": 213400023,
-              "value": 5,
-              "fixed": true
-            },
-            {
-              "type": 3,
-              "index": 11013,
-              "id": 213400023,
-              "value": 5,
-              "fixed": false
-            }
-          ]
-        },
-        {
           "classification": "most_recent_chaos_dungeon",
           "label": "Chaos",
           "itemLevel": 1800.0001,
@@ -385,12 +269,128 @@
               "fixed": false
             }
           ]
+        },
+        {
+          "classification": "most_recent_raid",
+          "label": "Raid",
+          "itemLevel": 1800.0001,
+          "lastUpdated": 1786465788000,
+          "isRendered": true,
+          "validatedAgainstBible": true,
+          "grade": "ancient",
+          "traits": [
+            {
+              "trait": "swiftness",
+              "value": 95,
+              "fixed": true
+            },
+            {
+              "trait": "crit",
+              "value": 116,
+              "fixed": true
+            }
+          ],
+          "lines": [
+            {
+              "cat": "special",
+              "family": "critDmgOnCrit",
+              "familyId": 12,
+              "label": "Crit Damage +A%; on crit, damage +1.5%",
+              "tier": "mid",
+              "value": [
+                8.4
+              ],
+              "fixed": true,
+              "damage": 4.278671967170241,
+              "familyLetter": "S"
+            },
+            {
+              "cat": "special",
+              "family": "cdUpDmgUp",
+              "familyId": 15,
+              "label": "Skill cooldown +2% but damage +A%",
+              "tier": "high",
+              "value": [
+                5.5
+              ],
+              "fixed": true,
+              "damage": 4.764104480084147,
+              "familyLetter": "S"
+            },
+            {
+              "cat": "special",
+              "family": "critRateOnCrit",
+              "familyId": 11,
+              "label": "Crit Rate +A%; on crit, damage +1.5%",
+              "tier": "low",
+              "value": [
+                3.4
+              ],
+              "fixed": false,
+              "damage": 3.7614903097401466,
+              "familyLetter": "S"
+            }
+          ],
+          "rerollsUsed": {
+            "base": 4,
+            "ticket": 3
+          },
+          "rollsRemaining": {
+            "base": 0,
+            "ticket": 0
+          },
+          "damage": 17.989710791056027,
+          "damagePct": 19.709418526292733,
+          "linesDamage": 12.804266756994535,
+          "linesPct": 13.660149768637385,
+          "goldAt1_5M": 29564127.7894391,
+          "benchmark": "near-final",
+          "notes": [
+            "4 of 5 lines are locked (fixed:true = bible's lock icon). Players can lock granted lines, so the drop's fixed/granted split cannot be read off this payload."
+          ],
+          "rawStats": [
+            {
+              "type": 2,
+              "index": 18,
+              "id": 213400023,
+              "value": 95,
+              "fixed": true
+            },
+            {
+              "type": 2,
+              "index": 15,
+              "id": 213400023,
+              "value": 116,
+              "fixed": true
+            },
+            {
+              "type": 3,
+              "index": 11022,
+              "id": 213400023,
+              "value": 5,
+              "fixed": true
+            },
+            {
+              "type": 3,
+              "index": 11051,
+              "id": 213400023,
+              "value": 5,
+              "fixed": true
+            },
+            {
+              "type": 3,
+              "index": 11013,
+              "id": 213400023,
+              "value": 5,
+              "fixed": false
+            }
+          ]
         }
       ],
-      "chosenLoadout": 0,
-      "renderedLoadout": 0,
+      "chosenLoadout": 1,
+      "renderedLoadout": 1,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Bydsalvation",
@@ -761,7 +761,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": true,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Shazion",
@@ -901,120 +901,6 @@
       "bibleComparesLoadout": "most_recent_chaos_dungeon",
       "loadouts": [
         {
-          "classification": "most_recent_chaos_dungeon",
-          "label": "Chaos",
-          "itemLevel": 1784.1661,
-          "lastUpdated": 1785982901000,
-          "isRendered": true,
-          "validatedAgainstBible": true,
-          "grade": "ancient",
-          "traits": [
-            {
-              "trait": "crit",
-              "value": 82,
-              "fixed": true
-            },
-            {
-              "trait": "spec",
-              "value": 119,
-              "fixed": true
-            }
-          ],
-          "lines": [
-            {
-              "cat": "special",
-              "family": "critRateOnCrit",
-              "familyId": 11,
-              "label": "Crit Rate +A%; on crit, damage +1.5%",
-              "tier": "high",
-              "value": [
-                5
-              ],
-              "fixed": false,
-              "damage": 4.839022960793766,
-              "familyLetter": "S"
-            },
-            {
-              "cat": "special",
-              "family": "cdUpDmgUp",
-              "familyId": 15,
-              "label": "Skill cooldown +2% but damage +A%",
-              "tier": "high",
-              "value": [
-                5.5
-              ],
-              "fixed": false,
-              "damage": 4.764104480084147,
-              "familyLetter": "S"
-            },
-            {
-              "cat": "special",
-              "family": "wpStackHit",
-              "familyId": 20,
-              "label": "On-hit per sec for 10s: Weapon Power +A, atk/move speed +1% (max 6 stacks)",
-              "tier": "low",
-              "value": [
-                1160
-              ],
-              "fixed": false,
-              "damage": 2.001326101730326,
-              "familyLetter": "B"
-            }
-          ],
-          "rerollsUsed": {
-            "base": 4,
-            "ticket": 3
-          },
-          "rollsRemaining": {
-            "base": 0,
-            "ticket": 0
-          },
-          "damage": 16.574297590884996,
-          "damagePct": 18.02697049865749,
-          "linesDamage": 11.604453542608239,
-          "linesPct": 12.304588634660284,
-          "goldAt1_5M": 27040455.747986235,
-          "benchmark": "near-final",
-          "notes": [],
-          "rawStats": [
-            {
-              "type": 2,
-              "index": 15,
-              "id": 213400023,
-              "value": 82,
-              "fixed": true
-            },
-            {
-              "type": 2,
-              "index": 16,
-              "id": 213400023,
-              "value": 119,
-              "fixed": true
-            },
-            {
-              "type": 3,
-              "index": 11011,
-              "id": 213400023,
-              "value": 5,
-              "fixed": false
-            },
-            {
-              "type": 3,
-              "index": 11051,
-              "id": 213400023,
-              "value": 5,
-              "fixed": false
-            },
-            {
-              "type": 4,
-              "index": 605100103,
-              "id": 213400023,
-              "value": 0,
-              "fixed": false
-            }
-          ]
-        },
-        {
           "classification": "most_recent_raid",
           "label": "Raid",
           "itemLevel": 1784.1661,
@@ -1127,12 +1013,126 @@
               "fixed": false
             }
           ]
+        },
+        {
+          "classification": "most_recent_chaos_dungeon",
+          "label": "Chaos",
+          "itemLevel": 1784.1661,
+          "lastUpdated": 1786472532000,
+          "isRendered": true,
+          "validatedAgainstBible": true,
+          "grade": "ancient",
+          "traits": [
+            {
+              "trait": "crit",
+              "value": 82,
+              "fixed": true
+            },
+            {
+              "trait": "spec",
+              "value": 119,
+              "fixed": true
+            }
+          ],
+          "lines": [
+            {
+              "cat": "special",
+              "family": "critRateOnCrit",
+              "familyId": 11,
+              "label": "Crit Rate +A%; on crit, damage +1.5%",
+              "tier": "high",
+              "value": [
+                5
+              ],
+              "fixed": false,
+              "damage": 4.839022960793766,
+              "familyLetter": "S"
+            },
+            {
+              "cat": "special",
+              "family": "cdUpDmgUp",
+              "familyId": 15,
+              "label": "Skill cooldown +2% but damage +A%",
+              "tier": "high",
+              "value": [
+                5.5
+              ],
+              "fixed": false,
+              "damage": 4.764104480084147,
+              "familyLetter": "S"
+            },
+            {
+              "cat": "special",
+              "family": "wpStackHit",
+              "familyId": 20,
+              "label": "On-hit per sec for 10s: Weapon Power +A, atk/move speed +1% (max 6 stacks)",
+              "tier": "low",
+              "value": [
+                1160
+              ],
+              "fixed": false,
+              "damage": 2.001326101730326,
+              "familyLetter": "B"
+            }
+          ],
+          "rerollsUsed": {
+            "base": 4,
+            "ticket": 3
+          },
+          "rollsRemaining": {
+            "base": 0,
+            "ticket": 0
+          },
+          "damage": 16.574297590884996,
+          "damagePct": 18.02697049865749,
+          "linesDamage": 11.604453542608239,
+          "linesPct": 12.304588634660284,
+          "goldAt1_5M": 27040455.747986235,
+          "benchmark": "near-final",
+          "notes": [],
+          "rawStats": [
+            {
+              "type": 2,
+              "index": 15,
+              "id": 213400023,
+              "value": 82,
+              "fixed": true
+            },
+            {
+              "type": 2,
+              "index": 16,
+              "id": 213400023,
+              "value": 119,
+              "fixed": true
+            },
+            {
+              "type": 3,
+              "index": 11011,
+              "id": 213400023,
+              "value": 5,
+              "fixed": false
+            },
+            {
+              "type": 3,
+              "index": 11051,
+              "id": 213400023,
+              "value": 5,
+              "fixed": false
+            },
+            {
+              "type": 4,
+              "index": 605100103,
+              "id": 213400023,
+              "value": 0,
+              "fixed": false
+            }
+          ]
         }
       ],
-      "chosenLoadout": 0,
-      "renderedLoadout": 0,
+      "chosenLoadout": 1,
+      "renderedLoadout": 1,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Chamchis",
@@ -1505,7 +1505,7 @@
       "chosenLoadout": 1,
       "renderedLoadout": 1,
       "loadoutsDiffer": true,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Shotgunsun",
@@ -1876,7 +1876,7 @@
       "chosenLoadout": 1,
       "renderedLoadout": 1,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Asura",
@@ -2247,7 +2247,7 @@
       "chosenLoadout": 1,
       "renderedLoadout": 0,
       "loadoutsDiffer": true,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Tellerluck",
@@ -2618,7 +2618,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Nenya",
@@ -2989,7 +2989,7 @@
       "chosenLoadout": 1,
       "renderedLoadout": 1,
       "loadoutsDiffer": true,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Omg",
@@ -3246,7 +3246,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Astoryu",
@@ -3618,7 +3618,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": true,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Astó",
@@ -3879,7 +3879,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "White",
@@ -4250,7 +4250,7 @@
       "chosenLoadout": 1,
       "renderedLoadout": 1,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "July",
@@ -4621,7 +4621,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Niiiskuneiti",
@@ -4992,7 +4992,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Nekotathanos",
@@ -5363,7 +5363,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Venoms",
@@ -5478,155 +5478,39 @@
       "notes": [
         "4 of 5 lines are locked (fixed:true = bible's lock icon). Players can lock granted lines, so the drop's fixed/granted split cannot be read off this payload."
       ],
-      "biblePct": 7.06,
-      "biblePctDelta": 0.3479027795582956,
+      "biblePct": 10.53,
+      "biblePctDelta": 0.3098794252642758,
       "bibleLines": [
         {
           "locked": true,
-          "text": "Crit +114"
+          "text": "Swiftness +66"
         },
         {
           "locked": true,
-          "text": "Swiftness +73"
+          "text": "Crit +115"
         },
         {
           "locked": true,
-          "text": "Crit Rate +4.2%. Crit Hit Damage +1.5%."
+          "text": "Additional Damage +3.5%"
         },
         {
           "locked": true,
-          "text": "Combat Resource Natural Recovery +8%"
+          "text": "Crit Rate +5%. Crit Hit Damage +1.5%."
         },
         {
           "locked": false,
-          "text": "Crit Rate +4.2%"
+          "text": "Non-directional Skill Damage +3%. Awakening Skills do not apply."
         }
       ],
-      "bibleComparesLoadout": "most_recent_chaos_dungeon",
+      "bibleComparesLoadout": "most_recent_raid",
       "loadouts": [
         {
           "classification": "most_recent_raid",
           "label": "Raid",
           "itemLevel": 1791.6661,
-          "lastUpdated": 1786337374000,
-          "isRendered": false,
-          "validatedAgainstBible": false,
-          "grade": "ancient",
-          "traits": [
-            {
-              "trait": "swiftness",
-              "value": 66,
-              "fixed": true
-            },
-            {
-              "trait": "crit",
-              "value": 115,
-              "fixed": true
-            }
-          ],
-          "lines": [
-            {
-              "cat": "special",
-              "family": "addDamage",
-              "familyId": 24,
-              "label": "Additional Damage +X%",
-              "tier": "mid",
-              "value": [
-                3.5
-              ],
-              "fixed": true,
-              "damage": 2.496741432969326,
-              "familyLetter": "B"
-            },
-            {
-              "cat": "special",
-              "family": "critRateOnCrit",
-              "familyId": 11,
-              "label": "Crit Rate +A%; on crit, damage +1.5%",
-              "tier": "high",
-              "value": [
-                5
-              ],
-              "fixed": true,
-              "damage": 4.839022960793766,
-              "familyLetter": "S"
-            },
-            {
-              "cat": "special",
-              "family": "nonDirectional",
-              "familyId": 27,
-              "label": "Non-directional skill damage +X% (not Awakening)",
-              "tier": "mid",
-              "value": [
-                3
-              ],
-              "fixed": false,
-              "damage": 2.955880224154443,
-              "familyLetter": "B"
-            }
-          ],
-          "rerollsUsed": {
-            "base": 4,
-            "ticket": 3
-          },
-          "rollsRemaining": {
-            "base": 0,
-            "ticket": 0
-          },
-          "damage": 14.728195121436938,
-          "damagePct": 15.868060838326414,
-          "linesDamage": 10.291644617917536,
-          "linesPct": 10.839879425264275,
-          "goldAt1_5M": 23802091.25748962,
-          "benchmark": "near-final",
-          "notes": [
-            "4 of 5 lines are locked (fixed:true = bible's lock icon). Players can lock granted lines, so the drop's fixed/granted split cannot be read off this payload."
-          ],
-          "rawStats": [
-            {
-              "type": 2,
-              "index": 18,
-              "id": 213400023,
-              "value": 66,
-              "fixed": true
-            },
-            {
-              "type": 2,
-              "index": 15,
-              "id": 213400023,
-              "value": 115,
-              "fixed": true
-            },
-            {
-              "type": 2,
-              "index": 50,
-              "id": 213400023,
-              "value": 350,
-              "fixed": true
-            },
-            {
-              "type": 3,
-              "index": 11011,
-              "id": 213400023,
-              "value": 5,
-              "fixed": true
-            },
-            {
-              "type": 4,
-              "index": 605100172,
-              "id": 213400023,
-              "value": 0,
-              "fixed": false
-            }
-          ]
-        },
-        {
-          "classification": "raid_merged",
-          "label": "Est. Raid",
-          "itemLevel": 1791.6661,
-          "lastUpdated": 1786337374000,
-          "isRendered": false,
-          "validatedAgainstBible": false,
+          "lastUpdated": 1786479493000,
+          "isRendered": true,
+          "validatedAgainstBible": true,
           "grade": "ancient",
           "traits": [
             {
@@ -5741,8 +5625,8 @@
           "label": "Chaos",
           "itemLevel": 1791.6661,
           "lastUpdated": 1786422780000,
-          "isRendered": true,
-          "validatedAgainstBible": true,
+          "isRendered": false,
+          "validatedAgainstBible": false,
           "grade": "ancient",
           "traits": [
             {
@@ -5851,12 +5735,128 @@
               "fixed": false
             }
           ]
+        },
+        {
+          "classification": "raid_merged",
+          "label": "Est. Raid",
+          "itemLevel": 1791.6661,
+          "lastUpdated": 1786479493000,
+          "isRendered": false,
+          "validatedAgainstBible": false,
+          "grade": "ancient",
+          "traits": [
+            {
+              "trait": "swiftness",
+              "value": 66,
+              "fixed": true
+            },
+            {
+              "trait": "crit",
+              "value": 115,
+              "fixed": true
+            }
+          ],
+          "lines": [
+            {
+              "cat": "special",
+              "family": "addDamage",
+              "familyId": 24,
+              "label": "Additional Damage +X%",
+              "tier": "mid",
+              "value": [
+                3.5
+              ],
+              "fixed": true,
+              "damage": 2.496741432969326,
+              "familyLetter": "B"
+            },
+            {
+              "cat": "special",
+              "family": "critRateOnCrit",
+              "familyId": 11,
+              "label": "Crit Rate +A%; on crit, damage +1.5%",
+              "tier": "high",
+              "value": [
+                5
+              ],
+              "fixed": true,
+              "damage": 4.839022960793766,
+              "familyLetter": "S"
+            },
+            {
+              "cat": "special",
+              "family": "nonDirectional",
+              "familyId": 27,
+              "label": "Non-directional skill damage +X% (not Awakening)",
+              "tier": "mid",
+              "value": [
+                3
+              ],
+              "fixed": false,
+              "damage": 2.955880224154443,
+              "familyLetter": "B"
+            }
+          ],
+          "rerollsUsed": {
+            "base": 4,
+            "ticket": 3
+          },
+          "rollsRemaining": {
+            "base": 0,
+            "ticket": 0
+          },
+          "damage": 14.728195121436938,
+          "damagePct": 15.868060838326414,
+          "linesDamage": 10.291644617917536,
+          "linesPct": 10.839879425264275,
+          "goldAt1_5M": 23802091.25748962,
+          "benchmark": "near-final",
+          "notes": [
+            "4 of 5 lines are locked (fixed:true = bible's lock icon). Players can lock granted lines, so the drop's fixed/granted split cannot be read off this payload."
+          ],
+          "rawStats": [
+            {
+              "type": 2,
+              "index": 18,
+              "id": 213400023,
+              "value": 66,
+              "fixed": true
+            },
+            {
+              "type": 2,
+              "index": 15,
+              "id": 213400023,
+              "value": 115,
+              "fixed": true
+            },
+            {
+              "type": 2,
+              "index": 50,
+              "id": 213400023,
+              "value": 350,
+              "fixed": true
+            },
+            {
+              "type": 3,
+              "index": 11011,
+              "id": 213400023,
+              "value": 5,
+              "fixed": true
+            },
+            {
+              "type": 4,
+              "index": 605100172,
+              "id": 213400023,
+              "value": 0,
+              "fixed": false
+            }
+          ]
         }
       ],
       "chosenLoadout": 0,
-      "renderedLoadout": 2,
+      "renderedLoadout": 0,
       "loadoutsDiffer": true,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Legendarymember",
@@ -6344,7 +6344,7 @@
       "chosenLoadout": 1,
       "renderedLoadout": 1,
       "loadoutsDiffer": true,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Ty",
@@ -6721,7 +6721,7 @@
       "chosenLoadout": 1,
       "renderedLoadout": 1,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Hamoi",
@@ -7098,7 +7098,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Tîeria",
@@ -7473,7 +7473,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": true,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Trious",
@@ -7845,7 +7845,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 1,
       "loadoutsDiffer": true,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Subsz",
@@ -8221,7 +8221,7 @@
       "chosenLoadout": 1,
       "renderedLoadout": 0,
       "loadoutsDiffer": true,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Burusera",
@@ -8480,7 +8480,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Paroxysmal",
@@ -8851,7 +8851,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Lightcana",
@@ -9222,7 +9222,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Heero",
@@ -9599,7 +9599,7 @@
       "chosenLoadout": 1,
       "renderedLoadout": 1,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Linkuriboh",
@@ -9856,7 +9856,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Lúo",
@@ -10373,7 +10373,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Fine",
@@ -10748,7 +10748,7 @@
       "chosenLoadout": 1,
       "renderedLoadout": 1,
       "loadoutsDiffer": true,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Tokadamia",
@@ -10889,6 +10889,121 @@
       "bibleComparesLoadout": "most_recent_raid",
       "loadouts": [
         {
+          "classification": "most_recent_raid",
+          "label": "Raid",
+          "itemLevel": 1783.3331,
+          "lastUpdated": 1786443550000,
+          "isRendered": true,
+          "validatedAgainstBible": true,
+          "grade": "ancient",
+          "traits": [
+            {
+              "trait": "swiftness",
+              "value": 111,
+              "fixed": true
+            },
+            {
+              "trait": "spec",
+              "value": 119,
+              "fixed": true
+            }
+          ],
+          "lines": [
+            {
+              "cat": "special",
+              "family": "wpStackHit",
+              "familyId": 20,
+              "label": "On-hit per sec for 10s: Weapon Power +A, atk/move speed +1% (max 6 stacks)",
+              "tier": "mid",
+              "value": [
+                1320
+              ],
+              "fixed": false,
+              "damage": 2.191786589739836,
+              "familyLetter": "B"
+            },
+            {
+              "cat": "special",
+              "family": "critDmgOnCrit",
+              "familyId": 12,
+              "label": "Crit Damage +A%; on crit, damage +1.5%",
+              "tier": "low",
+              "value": [
+                6.8
+              ],
+              "fixed": false,
+              "damage": 3.7427415021645127,
+              "familyLetter": "S"
+            },
+            {
+              "cat": "special",
+              "family": "wpHpHigh",
+              "familyId": 21,
+              "label": "Weapon Power +A; while HP≥50%, on-hit Weapon Power +B for 5s",
+              "tier": "mid",
+              "value": [
+                8100,
+                2200
+              ],
+              "fixed": false,
+              "damage": 2.0770226914433434,
+              "familyLetter": "C"
+            }
+          ],
+          "rerollsUsed": {
+            "base": 4,
+            "ticket": 3
+          },
+          "rollsRemaining": {
+            "base": 0,
+            "ticket": 0
+          },
+          "damage": 13.761550783347692,
+          "damagePct": 14.753424751190236,
+          "linesDamage": 8.011550783347692,
+          "linesPct": 8.34122030440978,
+          "goldAt1_5M": 22130137.126785353,
+          "benchmark": "good",
+          "notes": [],
+          "rawStats": [
+            {
+              "type": 2,
+              "index": 18,
+              "id": 213400023,
+              "value": 111,
+              "fixed": true
+            },
+            {
+              "type": 2,
+              "index": 16,
+              "id": 213400023,
+              "value": 119,
+              "fixed": true
+            },
+            {
+              "type": 4,
+              "index": 605100102,
+              "id": 213400023,
+              "value": 0,
+              "fixed": false
+            },
+            {
+              "type": 3,
+              "index": 11023,
+              "id": 213400023,
+              "value": 5,
+              "fixed": false
+            },
+            {
+              "type": 3,
+              "index": 11112,
+              "id": 213400023,
+              "value": 5,
+              "fixed": false
+            }
+          ]
+        },
+        {
           "classification": "most_recent_chaos_dungeon",
           "label": "Chaos",
           "itemLevel": 1783.3331,
@@ -11002,127 +11117,12 @@
               "fixed": false
             }
           ]
-        },
-        {
-          "classification": "most_recent_raid",
-          "label": "Raid",
-          "itemLevel": 1783.3331,
-          "lastUpdated": 1786422324000,
-          "isRendered": true,
-          "validatedAgainstBible": true,
-          "grade": "ancient",
-          "traits": [
-            {
-              "trait": "swiftness",
-              "value": 111,
-              "fixed": true
-            },
-            {
-              "trait": "spec",
-              "value": 119,
-              "fixed": true
-            }
-          ],
-          "lines": [
-            {
-              "cat": "special",
-              "family": "wpStackHit",
-              "familyId": 20,
-              "label": "On-hit per sec for 10s: Weapon Power +A, atk/move speed +1% (max 6 stacks)",
-              "tier": "mid",
-              "value": [
-                1320
-              ],
-              "fixed": false,
-              "damage": 2.191786589739836,
-              "familyLetter": "B"
-            },
-            {
-              "cat": "special",
-              "family": "critDmgOnCrit",
-              "familyId": 12,
-              "label": "Crit Damage +A%; on crit, damage +1.5%",
-              "tier": "low",
-              "value": [
-                6.8
-              ],
-              "fixed": false,
-              "damage": 3.7427415021645127,
-              "familyLetter": "S"
-            },
-            {
-              "cat": "special",
-              "family": "wpHpHigh",
-              "familyId": 21,
-              "label": "Weapon Power +A; while HP≥50%, on-hit Weapon Power +B for 5s",
-              "tier": "mid",
-              "value": [
-                8100,
-                2200
-              ],
-              "fixed": false,
-              "damage": 2.0770226914433434,
-              "familyLetter": "C"
-            }
-          ],
-          "rerollsUsed": {
-            "base": 4,
-            "ticket": 3
-          },
-          "rollsRemaining": {
-            "base": 0,
-            "ticket": 0
-          },
-          "damage": 13.761550783347692,
-          "damagePct": 14.753424751190236,
-          "linesDamage": 8.011550783347692,
-          "linesPct": 8.34122030440978,
-          "goldAt1_5M": 22130137.126785353,
-          "benchmark": "good",
-          "notes": [],
-          "rawStats": [
-            {
-              "type": 2,
-              "index": 18,
-              "id": 213400023,
-              "value": 111,
-              "fixed": true
-            },
-            {
-              "type": 2,
-              "index": 16,
-              "id": 213400023,
-              "value": 119,
-              "fixed": true
-            },
-            {
-              "type": 4,
-              "index": 605100102,
-              "id": 213400023,
-              "value": 0,
-              "fixed": false
-            },
-            {
-              "type": 3,
-              "index": 11023,
-              "id": 213400023,
-              "value": 5,
-              "fixed": false
-            },
-            {
-              "type": 3,
-              "index": 11112,
-              "id": 213400023,
-              "value": 5,
-              "fixed": false
-            }
-          ]
         }
       ],
-      "chosenLoadout": 1,
-      "renderedLoadout": 1,
+      "chosenLoadout": 0,
+      "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Kyulo",
@@ -11495,7 +11495,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": true,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Rahibeast",
@@ -11866,7 +11866,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": true,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Ktapeach",
@@ -12240,7 +12240,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Jurassiq",
@@ -12477,7 +12477,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Blitzfang",
@@ -12851,7 +12851,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Subszy",
@@ -13225,7 +13225,7 @@
       "chosenLoadout": 1,
       "renderedLoadout": 1,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Rngdiff",
@@ -13478,7 +13478,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Bean",
@@ -13591,39 +13591,267 @@
         }
       ],
       "notes": [],
-      "biblePct": 7.43,
-      "biblePctDelta": 1.5213935521835076,
+      "biblePct": 9.26,
+      "biblePctDelta": 0.4205983778625697,
       "bibleLines": [
         {
           "locked": true,
-          "text": "Crit +101"
+          "text": "Crit +81"
         },
         {
           "locked": true,
-          "text": "Swiftness +81"
+          "text": "Swiftness +83"
         },
         {
           "locked": false,
-          "text": "Skill cooldown +2%. Outgoing Damage +5.5%."
+          "text": "Non-directional Skill Damage +2.5%. Awakening Skills do not apply."
         },
         {
           "locked": false,
-          "text": "Intelligence +13888"
+          "text": "Outgoing Damage +2.5%."
         },
         {
           "locked": false,
-          "text": "Crit Damage +8.4%"
+          "text": "Crit Rate +4.2%. Crit Hit Damage +1.5%."
         }
       ],
-      "bibleComparesLoadout": "most_recent_chaos_dungeon",
+      "bibleComparesLoadout": "raid_merged",
       "loadouts": [
+        {
+          "classification": "raid_merged",
+          "label": "Est. Raid",
+          "itemLevel": 1768.3331,
+          "lastUpdated": 1786479669000,
+          "isRendered": true,
+          "validatedAgainstBible": true,
+          "grade": "ancient",
+          "traits": [
+            {
+              "trait": "crit",
+              "value": 81,
+              "fixed": true
+            },
+            {
+              "trait": "swiftness",
+              "value": 83,
+              "fixed": true
+            }
+          ],
+          "lines": [
+            {
+              "cat": "special",
+              "family": "nonDirectional",
+              "familyId": 27,
+              "label": "Non-directional skill damage +X% (not Awakening)",
+              "tier": "low",
+              "value": [
+                2.5
+              ],
+              "fixed": false,
+              "damage": 2.4692612590371414,
+              "familyLetter": "B"
+            },
+            {
+              "cat": "special",
+              "family": "damage",
+              "familyId": 23,
+              "label": "Damage to enemies +X%",
+              "tier": "mid",
+              "value": [
+                2.5
+              ],
+              "fixed": false,
+              "damage": 2.4692612590371414,
+              "familyLetter": "B"
+            },
+            {
+              "cat": "special",
+              "family": "critRateOnCrit",
+              "familyId": 11,
+              "label": "Crit Rate +A%; on crit, damage +1.5%",
+              "tier": "mid",
+              "value": [
+                4.2
+              ],
+              "fixed": false,
+              "damage": 4.30170797401326,
+              "familyLetter": "S"
+            }
+          ],
+          "rerollsUsed": {
+            "base": 4,
+            "ticket": 3
+          },
+          "rollsRemaining": {
+            "base": 0,
+            "ticket": 0
+          },
+          "damage": 13.285985313752867,
+          "damagePct": 14.208992679449416,
+          "linesDamage": 9.240230492087543,
+          "linesPct": 9.68059837786257,
+          "goldAt1_5M": 21313489.019174125,
+          "benchmark": "good",
+          "notes": [],
+          "rawStats": [
+            {
+              "type": 2,
+              "index": 15,
+              "id": 213400023,
+              "value": 81,
+              "fixed": true
+            },
+            {
+              "type": 2,
+              "index": 18,
+              "id": 213400023,
+              "value": 83,
+              "fixed": true
+            },
+            {
+              "type": 4,
+              "index": 605100173,
+              "id": 213400023,
+              "value": 0,
+              "fixed": false
+            },
+            {
+              "type": 4,
+              "index": 605100132,
+              "id": 213400023,
+              "value": 0,
+              "fixed": false
+            },
+            {
+              "type": 3,
+              "index": 11012,
+              "id": 213400023,
+              "value": 5,
+              "fixed": false
+            }
+          ]
+        },
+        {
+          "classification": "most_recent_raid",
+          "label": "Raid",
+          "itemLevel": 1768.3331,
+          "lastUpdated": 1786479669000,
+          "isRendered": false,
+          "validatedAgainstBible": false,
+          "grade": "ancient",
+          "traits": [
+            {
+              "trait": "crit",
+              "value": 81,
+              "fixed": true
+            },
+            {
+              "trait": "swiftness",
+              "value": 83,
+              "fixed": true
+            }
+          ],
+          "lines": [
+            {
+              "cat": "special",
+              "family": "nonDirectional",
+              "familyId": 27,
+              "label": "Non-directional skill damage +X% (not Awakening)",
+              "tier": "low",
+              "value": [
+                2.5
+              ],
+              "fixed": false,
+              "damage": 2.4692612590371414,
+              "familyLetter": "B"
+            },
+            {
+              "cat": "special",
+              "family": "damage",
+              "familyId": 23,
+              "label": "Damage to enemies +X%",
+              "tier": "mid",
+              "value": [
+                2.5
+              ],
+              "fixed": false,
+              "damage": 2.4692612590371414,
+              "familyLetter": "B"
+            },
+            {
+              "cat": "special",
+              "family": "critRateOnCrit",
+              "familyId": 11,
+              "label": "Crit Rate +A%; on crit, damage +1.5%",
+              "tier": "mid",
+              "value": [
+                4.2
+              ],
+              "fixed": false,
+              "damage": 4.30170797401326,
+              "familyLetter": "S"
+            }
+          ],
+          "rerollsUsed": {
+            "base": 4,
+            "ticket": 3
+          },
+          "rollsRemaining": {
+            "base": 0,
+            "ticket": 0
+          },
+          "damage": 13.285985313752867,
+          "damagePct": 14.208992679449416,
+          "linesDamage": 9.240230492087543,
+          "linesPct": 9.68059837786257,
+          "goldAt1_5M": 21313489.019174125,
+          "benchmark": "good",
+          "notes": [],
+          "rawStats": [
+            {
+              "type": 2,
+              "index": 15,
+              "id": 213400023,
+              "value": 81,
+              "fixed": true
+            },
+            {
+              "type": 2,
+              "index": 18,
+              "id": 213400023,
+              "value": 83,
+              "fixed": true
+            },
+            {
+              "type": 4,
+              "index": 605100173,
+              "id": 213400023,
+              "value": 0,
+              "fixed": false
+            },
+            {
+              "type": 4,
+              "index": 605100132,
+              "id": 213400023,
+              "value": 0,
+              "fixed": false
+            },
+            {
+              "type": 3,
+              "index": 11012,
+              "id": 213400023,
+              "value": 5,
+              "fixed": false
+            }
+          ]
+        },
         {
           "classification": "most_recent_chaos_dungeon",
           "label": "Chaos",
           "itemLevel": 1768.3331,
           "lastUpdated": 1786422955000,
-          "isRendered": true,
-          "validatedAgainstBible": true,
+          "isRendered": false,
+          "validatedAgainstBible": false,
           "grade": "ancient",
           "traits": [
             {
@@ -13728,240 +13956,12 @@
               "fixed": false
             }
           ]
-        },
-        {
-          "classification": "most_recent_raid",
-          "label": "Raid",
-          "itemLevel": 1768.3331,
-          "lastUpdated": 1786337550000,
-          "isRendered": false,
-          "validatedAgainstBible": false,
-          "grade": "ancient",
-          "traits": [
-            {
-              "trait": "crit",
-              "value": 81,
-              "fixed": true
-            },
-            {
-              "trait": "swiftness",
-              "value": 83,
-              "fixed": true
-            }
-          ],
-          "lines": [
-            {
-              "cat": "special",
-              "family": "nonDirectional",
-              "familyId": 27,
-              "label": "Non-directional skill damage +X% (not Awakening)",
-              "tier": "low",
-              "value": [
-                2.5
-              ],
-              "fixed": false,
-              "damage": 2.4692612590371414,
-              "familyLetter": "B"
-            },
-            {
-              "cat": "special",
-              "family": "damage",
-              "familyId": 23,
-              "label": "Damage to enemies +X%",
-              "tier": "mid",
-              "value": [
-                2.5
-              ],
-              "fixed": false,
-              "damage": 2.4692612590371414,
-              "familyLetter": "B"
-            },
-            {
-              "cat": "special",
-              "family": "critRateOnCrit",
-              "familyId": 11,
-              "label": "Crit Rate +A%; on crit, damage +1.5%",
-              "tier": "mid",
-              "value": [
-                4.2
-              ],
-              "fixed": false,
-              "damage": 4.30170797401326,
-              "familyLetter": "S"
-            }
-          ],
-          "rerollsUsed": {
-            "base": 4,
-            "ticket": 3
-          },
-          "rollsRemaining": {
-            "base": 0,
-            "ticket": 0
-          },
-          "damage": 13.285985313752867,
-          "damagePct": 14.208992679449416,
-          "linesDamage": 9.240230492087543,
-          "linesPct": 9.68059837786257,
-          "goldAt1_5M": 21313489.019174125,
-          "benchmark": "good",
-          "notes": [],
-          "rawStats": [
-            {
-              "type": 2,
-              "index": 15,
-              "id": 213400023,
-              "value": 81,
-              "fixed": true
-            },
-            {
-              "type": 2,
-              "index": 18,
-              "id": 213400023,
-              "value": 83,
-              "fixed": true
-            },
-            {
-              "type": 4,
-              "index": 605100173,
-              "id": 213400023,
-              "value": 0,
-              "fixed": false
-            },
-            {
-              "type": 4,
-              "index": 605100132,
-              "id": 213400023,
-              "value": 0,
-              "fixed": false
-            },
-            {
-              "type": 3,
-              "index": 11012,
-              "id": 213400023,
-              "value": 5,
-              "fixed": false
-            }
-          ]
-        },
-        {
-          "classification": "raid_merged",
-          "label": "Est. Raid",
-          "itemLevel": 1768.3331,
-          "lastUpdated": 1786337550000,
-          "isRendered": false,
-          "validatedAgainstBible": false,
-          "grade": "ancient",
-          "traits": [
-            {
-              "trait": "crit",
-              "value": 81,
-              "fixed": true
-            },
-            {
-              "trait": "swiftness",
-              "value": 83,
-              "fixed": true
-            }
-          ],
-          "lines": [
-            {
-              "cat": "special",
-              "family": "nonDirectional",
-              "familyId": 27,
-              "label": "Non-directional skill damage +X% (not Awakening)",
-              "tier": "low",
-              "value": [
-                2.5
-              ],
-              "fixed": false,
-              "damage": 2.4692612590371414,
-              "familyLetter": "B"
-            },
-            {
-              "cat": "special",
-              "family": "damage",
-              "familyId": 23,
-              "label": "Damage to enemies +X%",
-              "tier": "mid",
-              "value": [
-                2.5
-              ],
-              "fixed": false,
-              "damage": 2.4692612590371414,
-              "familyLetter": "B"
-            },
-            {
-              "cat": "special",
-              "family": "critRateOnCrit",
-              "familyId": 11,
-              "label": "Crit Rate +A%; on crit, damage +1.5%",
-              "tier": "mid",
-              "value": [
-                4.2
-              ],
-              "fixed": false,
-              "damage": 4.30170797401326,
-              "familyLetter": "S"
-            }
-          ],
-          "rerollsUsed": {
-            "base": 4,
-            "ticket": 3
-          },
-          "rollsRemaining": {
-            "base": 0,
-            "ticket": 0
-          },
-          "damage": 13.285985313752867,
-          "damagePct": 14.208992679449416,
-          "linesDamage": 9.240230492087543,
-          "linesPct": 9.68059837786257,
-          "goldAt1_5M": 21313489.019174125,
-          "benchmark": "good",
-          "notes": [],
-          "rawStats": [
-            {
-              "type": 2,
-              "index": 15,
-              "id": 213400023,
-              "value": 81,
-              "fixed": true
-            },
-            {
-              "type": 2,
-              "index": 18,
-              "id": 213400023,
-              "value": 83,
-              "fixed": true
-            },
-            {
-              "type": 4,
-              "index": 605100173,
-              "id": 213400023,
-              "value": 0,
-              "fixed": false
-            },
-            {
-              "type": 4,
-              "index": 605100132,
-              "id": 213400023,
-              "value": 0,
-              "fixed": false
-            },
-            {
-              "type": 3,
-              "index": 11012,
-              "id": 213400023,
-              "value": 5,
-              "fixed": false
-            }
-          ]
         }
       ],
-      "chosenLoadout": 1,
+      "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": true,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Mvping",
@@ -14218,7 +14218,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Semirhage",
@@ -14589,7 +14589,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Pouf",
@@ -15066,7 +15066,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Teal",
@@ -15440,13 +15440,13 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Blitzkuro",
       "region": "NA",
       "class": "Scrapper",
-      "itemLevel": 1780,
+      "itemLevel": 1782,
       "grade": "ancient",
       "traits": [
         {
@@ -15461,6 +15461,19 @@
         }
       ],
       "lines": [
+        {
+          "cat": "special",
+          "family": "atkMoveSpeed",
+          "familyId": 1,
+          "label": "Attack & Move Speed +X%",
+          "tier": "high",
+          "value": [
+            6
+          ],
+          "fixed": false,
+          "damage": 0.5982071677547469,
+          "familyLetter": "D"
+        },
         {
           "cat": "special",
           "family": "critRate",
@@ -15486,19 +15499,6 @@
           "fixed": false,
           "damage": 4.289044204224382,
           "familyLetter": "S"
-        },
-        {
-          "cat": "special",
-          "family": "atkMoveSpeed",
-          "familyId": 1,
-          "label": "Attack & Move Speed +X%",
-          "tier": "high",
-          "value": [
-            6
-          ],
-          "fixed": false,
-          "damage": 0.5982071677547469,
-          "familyLetter": "D"
         }
       ],
       "rerollsLeft": {
@@ -15552,9 +15552,7 @@
           "fixed": false
         }
       ],
-      "notes": [
-        "type:3 index 11261 sits in the UTILITY block the model's index formula does not cover; decoded by local override as family 1 (atkMoveSpeed) high"
-      ],
+      "notes": [],
       "biblePct": 7.06,
       "biblePctDelta": 0.9786675617422746,
       "bibleLines": [
@@ -15579,15 +15577,15 @@
           "text": "Skill cooldown +2%. Outgoing Damage +5%."
         }
       ],
-      "bibleComparesLoadout": "most_recent_chaos_dungeon",
+      "bibleComparesLoadout": "most_recent_raid",
       "loadouts": [
         {
           "classification": "most_recent_chaos_dungeon",
           "label": "Chaos",
           "itemLevel": 1780.0001,
           "lastUpdated": 1786416514000,
-          "isRendered": true,
-          "validatedAgainstBible": true,
+          "isRendered": false,
+          "validatedAgainstBible": false,
           "grade": "ancient",
           "traits": [
             {
@@ -15602,6 +15600,19 @@
             }
           ],
           "lines": [
+            {
+              "cat": "special",
+              "family": "atkMoveSpeed",
+              "familyId": 1,
+              "label": "Attack & Move Speed +X%",
+              "tier": "high",
+              "value": [
+                6
+              ],
+              "fixed": false,
+              "damage": 0.5982071677547469,
+              "familyLetter": "D"
+            },
             {
               "cat": "special",
               "family": "critRate",
@@ -15627,19 +15638,6 @@
               "fixed": false,
               "damage": 4.289044204224382,
               "familyLetter": "S"
-            },
-            {
-              "cat": "special",
-              "family": "atkMoveSpeed",
-              "familyId": 1,
-              "label": "Attack & Move Speed +X%",
-              "tier": "high",
-              "value": [
-                6
-              ],
-              "fixed": false,
-              "damage": 0.5982071677547469,
-              "familyLetter": "D"
             }
           ],
           "rerollsUsed": {
@@ -15656,9 +15654,7 @@
           "linesPct": 8.038667561742274,
           "goldAt1_5M": 20807797.753406987,
           "benchmark": "good",
-          "notes": [
-            "type:3 index 11261 sits in the UTILITY block the model's index formula does not cover; decoded by local override as family 1 (atkMoveSpeed) high"
-          ],
+          "notes": [],
           "rawStats": [
             {
               "type": 2,
@@ -15700,10 +15696,10 @@
         {
           "classification": "most_recent_raid",
           "label": "Raid",
-          "itemLevel": 1780.0001,
-          "lastUpdated": 1786410436000,
-          "isRendered": false,
-          "validatedAgainstBible": false,
+          "itemLevel": 1782.5001,
+          "lastUpdated": 1786466091000,
+          "isRendered": true,
+          "validatedAgainstBible": true,
           "grade": "ancient",
           "traits": [
             {
@@ -15718,6 +15714,19 @@
             }
           ],
           "lines": [
+            {
+              "cat": "special",
+              "family": "atkMoveSpeed",
+              "familyId": 1,
+              "label": "Attack & Move Speed +X%",
+              "tier": "high",
+              "value": [
+                6
+              ],
+              "fixed": false,
+              "damage": 0.5982071677547469,
+              "familyLetter": "D"
+            },
             {
               "cat": "special",
               "family": "critRate",
@@ -15743,19 +15752,6 @@
               "fixed": false,
               "damage": 4.289044204224382,
               "familyLetter": "S"
-            },
-            {
-              "cat": "special",
-              "family": "atkMoveSpeed",
-              "familyId": 1,
-              "label": "Attack & Move Speed +X%",
-              "tier": "high",
-              "value": [
-                6
-              ],
-              "fixed": false,
-              "damage": 0.5982071677547469,
-              "familyLetter": "D"
             }
           ],
           "rerollsUsed": {
@@ -15772,9 +15768,7 @@
           "linesPct": 8.038667561742274,
           "goldAt1_5M": 20807797.753406987,
           "benchmark": "good",
-          "notes": [
-            "type:3 index 11261 sits in the UTILITY block the model's index formula does not cover; decoded by local override as family 1 (atkMoveSpeed) high"
-          ],
+          "notes": [],
           "rawStats": [
             {
               "type": 2,
@@ -15814,10 +15808,10 @@
           ]
         }
       ],
-      "chosenLoadout": 0,
-      "renderedLoadout": 0,
+      "chosenLoadout": 1,
+      "renderedLoadout": 1,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Guynamedcharlie",
@@ -15833,6 +15827,19 @@
         }
       ],
       "lines": [
+        {
+          "cat": "special",
+          "family": "moveSkillCd",
+          "familyId": 9,
+          "label": "Movement / stand-up skill cooldown −X%",
+          "tier": "mid",
+          "value": [
+            10
+          ],
+          "fixed": true,
+          "damage": 0,
+          "familyLetter": "F"
+        },
         {
           "cat": "special",
           "family": "critRateOnCrit",
@@ -15871,19 +15878,6 @@
           "fixed": false,
           "damage": 2.496741432969326,
           "familyLetter": "B"
-        },
-        {
-          "cat": "special",
-          "family": "moveSkillCd",
-          "familyId": 9,
-          "label": "Movement / stand-up skill cooldown −X%",
-          "tier": "mid",
-          "value": [
-            10
-          ],
-          "fixed": true,
-          "damage": 0,
-          "familyLetter": "F"
         }
       ],
       "rerollsLeft": {
@@ -15938,7 +15932,6 @@
         }
       ],
       "notes": [
-        "type:3 index 11342 sits in the UTILITY block the model's index formula does not cover; decoded by local override as family 9 (moveSkillCd) mid",
         "1 combat-trait lines (expected 2)",
         "4 of 5 lines are locked (fixed:true = bible's lock icon). Players can lock granted lines, so the drop's fixed/granted split cannot be read off this payload."
       ],
@@ -15986,6 +15979,19 @@
           "lines": [
             {
               "cat": "special",
+              "family": "moveSkillCd",
+              "familyId": 9,
+              "label": "Movement / stand-up skill cooldown −X%",
+              "tier": "mid",
+              "value": [
+                10
+              ],
+              "fixed": true,
+              "damage": 0,
+              "familyLetter": "F"
+            },
+            {
+              "cat": "special",
               "family": "critRateOnCrit",
               "familyId": 11,
               "label": "Crit Rate +A%; on crit, damage +1.5%",
@@ -16022,19 +16028,6 @@
               "fixed": false,
               "damage": 2.496741432969326,
               "familyLetter": "B"
-            },
-            {
-              "cat": "special",
-              "family": "moveSkillCd",
-              "familyId": 9,
-              "label": "Movement / stand-up skill cooldown −X%",
-              "tier": "mid",
-              "value": [
-                10
-              ],
-              "fixed": true,
-              "damage": 0,
-              "familyLetter": "F"
             }
           ],
           "rerollsUsed": {
@@ -16052,7 +16045,6 @@
           "goldAt1_5M": 20443950.709670022,
           "benchmark": "near-final",
           "notes": [
-            "type:3 index 11342 sits in the UTILITY block the model's index formula does not cover; decoded by local override as family 9 (moveSkillCd) mid",
             "1 combat-trait lines (expected 2)",
             "4 of 5 lines are locked (fixed:true = bible's lock icon). Players can lock granted lines, so the drop's fixed/granted split cannot be read off this payload."
           ],
@@ -16112,6 +16104,19 @@
           "lines": [
             {
               "cat": "special",
+              "family": "moveSkillCd",
+              "familyId": 9,
+              "label": "Movement / stand-up skill cooldown −X%",
+              "tier": "mid",
+              "value": [
+                10
+              ],
+              "fixed": true,
+              "damage": 0,
+              "familyLetter": "F"
+            },
+            {
+              "cat": "special",
               "family": "critRateOnCrit",
               "familyId": 11,
               "label": "Crit Rate +A%; on crit, damage +1.5%",
@@ -16148,19 +16153,6 @@
               "fixed": false,
               "damage": 2.496741432969326,
               "familyLetter": "B"
-            },
-            {
-              "cat": "special",
-              "family": "moveSkillCd",
-              "familyId": 9,
-              "label": "Movement / stand-up skill cooldown −X%",
-              "tier": "mid",
-              "value": [
-                10
-              ],
-              "fixed": true,
-              "damage": 0,
-              "familyLetter": "F"
             }
           ],
           "rerollsUsed": {
@@ -16178,7 +16170,6 @@
           "goldAt1_5M": 20443950.709670022,
           "benchmark": "near-final",
           "notes": [
-            "type:3 index 11342 sits in the UTILITY block the model's index formula does not cover; decoded by local override as family 9 (moveSkillCd) mid",
             "1 combat-trait lines (expected 2)",
             "4 of 5 lines are locked (fixed:true = bible's lock icon). Players can lock granted lines, so the drop's fixed/granted split cannot be read off this payload."
           ],
@@ -16224,7 +16215,7 @@
       "chosenLoadout": 1,
       "renderedLoadout": 1,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Phoënix",
@@ -16598,7 +16589,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Weinerwarden",
@@ -16890,19 +16881,6 @@
           "lines": [
             {
               "cat": "special",
-              "family": "cdUpDmgUp",
-              "familyId": 15,
-              "label": "Skill cooldown +2% but damage +A%",
-              "tier": "mid",
-              "value": [
-                5
-              ],
-              "fixed": false,
-              "damage": 4.289044204224382,
-              "familyLetter": "S"
-            },
-            {
-              "cat": "special",
               "family": "hitImmunity",
               "familyId": 10,
               "label": "On-hit stagger/debuff immunity Xs, gone after 1 hit (CD Xs)",
@@ -16913,6 +16891,19 @@
               "fixed": true,
               "damage": 0,
               "familyLetter": "F"
+            },
+            {
+              "cat": "special",
+              "family": "cdUpDmgUp",
+              "familyId": 15,
+              "label": "Skill cooldown +2% but damage +A%",
+              "tier": "mid",
+              "value": [
+                5
+              ],
+              "fixed": false,
+              "damage": 4.289044204224382,
+              "familyLetter": "S"
             }
           ],
           "rerollsUsed": {
@@ -16930,7 +16921,6 @@
           "goldAt1_5M": 14707028.836809766,
           "benchmark": "work to do",
           "notes": [
-            "type:4 index 605100353 sits in the UTILITY block the model's index formula does not cover; decoded by local override as family 10 (hitImmunity) low",
             "a combat trait sits in a GRANTED slot; scored at its rolled value anyway",
             "4 total lines (5 is the normal max)"
           ],
@@ -16969,7 +16959,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": true,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Gettingcards",
@@ -17110,6 +17100,121 @@
       "bibleComparesLoadout": "most_recent_raid",
       "loadouts": [
         {
+          "classification": "most_recent_raid",
+          "label": "Raid",
+          "itemLevel": 1789.1661,
+          "lastUpdated": 1786473909000,
+          "isRendered": true,
+          "validatedAgainstBible": true,
+          "grade": "ancient",
+          "traits": [
+            {
+              "trait": "crit",
+              "value": 99,
+              "fixed": true
+            },
+            {
+              "trait": "swiftness",
+              "value": 74,
+              "fixed": true
+            }
+          ],
+          "lines": [
+            {
+              "cat": "special",
+              "family": "nonDirectional",
+              "familyId": 27,
+              "label": "Non-directional skill damage +X% (not Awakening)",
+              "tier": "low",
+              "value": [
+                2.5
+              ],
+              "fixed": false,
+              "damage": 2.4692612590371414,
+              "familyLetter": "B"
+            },
+            {
+              "cat": "special",
+              "family": "critRateOnCrit",
+              "familyId": 11,
+              "label": "Crit Rate +A%; on crit, damage +1.5%",
+              "tier": "low",
+              "value": [
+                3.4
+              ],
+              "fixed": false,
+              "damage": 3.7614903097401466,
+              "familyLetter": "S"
+            },
+            {
+              "cat": "special",
+              "family": "addDmgDemon",
+              "familyId": 14,
+              "label": "Additional Damage +A%; Demon/Archdemon damage +B%",
+              "tier": "mid",
+              "value": [
+                3,
+                2.5
+              ],
+              "fixed": false,
+              "damage": 2.1438580122189874,
+              "familyLetter": "C"
+            }
+          ],
+          "rerollsUsed": {
+            "base": 4,
+            "ticket": 3
+          },
+          "rollsRemaining": {
+            "base": 0,
+            "ticket": 0
+          },
+          "damage": 12.628085124031761,
+          "damagePct": 13.46007775756708,
+          "linesDamage": 8.374609580996275,
+          "linesPct": 8.735277533078524,
+          "goldAt1_5M": 20190116.63635062,
+          "benchmark": "good",
+          "notes": [],
+          "rawStats": [
+            {
+              "type": 2,
+              "index": 15,
+              "id": 213400023,
+              "value": 99,
+              "fixed": true
+            },
+            {
+              "type": 2,
+              "index": 18,
+              "id": 213400023,
+              "value": 74,
+              "fixed": true
+            },
+            {
+              "type": 4,
+              "index": 605100173,
+              "id": 213400023,
+              "value": 0,
+              "fixed": false
+            },
+            {
+              "type": 3,
+              "index": 11013,
+              "id": 213400023,
+              "value": 5,
+              "fixed": false
+            },
+            {
+              "type": 3,
+              "index": 11042,
+              "id": 213400023,
+              "value": 5,
+              "fixed": false
+            }
+          ]
+        },
+        {
           "classification": "most_recent_chaos_dungeon",
           "label": "Chaos",
           "itemLevel": 1789.1661,
@@ -17223,127 +17328,12 @@
               "fixed": false
             }
           ]
-        },
-        {
-          "classification": "most_recent_raid",
-          "label": "Raid",
-          "itemLevel": 1789.1661,
-          "lastUpdated": 1786424322000,
-          "isRendered": true,
-          "validatedAgainstBible": true,
-          "grade": "ancient",
-          "traits": [
-            {
-              "trait": "crit",
-              "value": 99,
-              "fixed": true
-            },
-            {
-              "trait": "swiftness",
-              "value": 74,
-              "fixed": true
-            }
-          ],
-          "lines": [
-            {
-              "cat": "special",
-              "family": "nonDirectional",
-              "familyId": 27,
-              "label": "Non-directional skill damage +X% (not Awakening)",
-              "tier": "low",
-              "value": [
-                2.5
-              ],
-              "fixed": false,
-              "damage": 2.4692612590371414,
-              "familyLetter": "B"
-            },
-            {
-              "cat": "special",
-              "family": "critRateOnCrit",
-              "familyId": 11,
-              "label": "Crit Rate +A%; on crit, damage +1.5%",
-              "tier": "low",
-              "value": [
-                3.4
-              ],
-              "fixed": false,
-              "damage": 3.7614903097401466,
-              "familyLetter": "S"
-            },
-            {
-              "cat": "special",
-              "family": "addDmgDemon",
-              "familyId": 14,
-              "label": "Additional Damage +A%; Demon/Archdemon damage +B%",
-              "tier": "mid",
-              "value": [
-                3,
-                2.5
-              ],
-              "fixed": false,
-              "damage": 2.1438580122189874,
-              "familyLetter": "C"
-            }
-          ],
-          "rerollsUsed": {
-            "base": 4,
-            "ticket": 3
-          },
-          "rollsRemaining": {
-            "base": 0,
-            "ticket": 0
-          },
-          "damage": 12.628085124031761,
-          "damagePct": 13.46007775756708,
-          "linesDamage": 8.374609580996275,
-          "linesPct": 8.735277533078524,
-          "goldAt1_5M": 20190116.63635062,
-          "benchmark": "good",
-          "notes": [],
-          "rawStats": [
-            {
-              "type": 2,
-              "index": 15,
-              "id": 213400023,
-              "value": 99,
-              "fixed": true
-            },
-            {
-              "type": 2,
-              "index": 18,
-              "id": 213400023,
-              "value": 74,
-              "fixed": true
-            },
-            {
-              "type": 4,
-              "index": 605100173,
-              "id": 213400023,
-              "value": 0,
-              "fixed": false
-            },
-            {
-              "type": 3,
-              "index": 11013,
-              "id": 213400023,
-              "value": 5,
-              "fixed": false
-            },
-            {
-              "type": 3,
-              "index": 11042,
-              "id": 213400023,
-              "value": 5,
-              "fixed": false
-            }
-          ]
         }
       ],
-      "chosenLoadout": 1,
-      "renderedLoadout": 1,
+      "chosenLoadout": 0,
+      "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Shizukaziye",
@@ -17717,7 +17707,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Viosin",
@@ -18238,7 +18228,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Mylaela",
@@ -18588,7 +18578,7 @@
       "chosenLoadout": 1,
       "renderedLoadout": 0,
       "loadoutsDiffer": true,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Mirget",
@@ -18959,7 +18949,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Dubyew",
@@ -19333,7 +19323,7 @@
       "chosenLoadout": 1,
       "renderedLoadout": 1,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Craftedswifts",
@@ -19472,15 +19462,15 @@
           "text": "Non-directional Skill Damage +3.5%. Awakening Skills do not apply."
         }
       ],
-      "bibleComparesLoadout": "most_recent_chaos_dungeon",
+      "bibleComparesLoadout": "most_recent_raid",
       "loadouts": [
         {
           "classification": "most_recent_chaos_dungeon",
           "label": "Chaos",
           "itemLevel": 1778.3331,
           "lastUpdated": 1786402133000,
-          "isRendered": true,
-          "validatedAgainstBible": true,
+          "isRendered": false,
+          "validatedAgainstBible": false,
           "grade": "ancient",
           "traits": [
             {
@@ -19594,9 +19584,9 @@
           "classification": "most_recent_raid",
           "label": "Raid",
           "itemLevel": 1778.3331,
-          "lastUpdated": 1786397810000,
-          "isRendered": false,
-          "validatedAgainstBible": false,
+          "lastUpdated": 1786483049000,
+          "isRendered": true,
+          "validatedAgainstBible": true,
           "grade": "ancient",
           "traits": [
             {
@@ -19707,10 +19697,10 @@
           ]
         }
       ],
-      "chosenLoadout": 0,
-      "renderedLoadout": 0,
+      "chosenLoadout": 1,
+      "renderedLoadout": 1,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Noa",
@@ -20087,7 +20077,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Chryseis",
@@ -20348,7 +20338,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Theschmeatdragon",
@@ -20718,7 +20708,7 @@
       "chosenLoadout": 1,
       "renderedLoadout": 1,
       "loadoutsDiffer": true,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Kayamix",
@@ -21089,7 +21079,7 @@
       "chosenLoadout": 1,
       "renderedLoadout": 1,
       "loadoutsDiffer": true,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Komyosanzo",
@@ -21579,7 +21569,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": true,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     },
     {
       "name": "Ashukel",
@@ -21974,7 +21964,7 @@
       "chosenLoadout": 0,
       "renderedLoadout": 0,
       "loadoutsDiffer": false,
-      "scoredAt": "2026-08-11T21:26:03.658Z"
+      "scoredAt": "2026-08-11T21:45:43.349Z"
     }
   ]
 }
