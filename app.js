@@ -90,10 +90,11 @@
       // Where the damage lands, how the cooldown line is judged, and what the
       // class pays for a Spec / Swiftness trait line (points per 100 points).
       fight: { back: 100, front: 100, nonDir: 100, cdWeight: 70, demon: false, wSpec: 2.5, wSwift: 2.5 },
-      // The bracelet's two FIXED combat traits. Exactly two are ever active;
-      // traitOrder lists the active keys oldest-first so a third can evict one.
+      // The bracelet's two FIXED combat traits. A real bracelet carries exactly
+      // two, but the panel no longer polices it: a third can be switched on and
+      // the score keeps counting it, with a warning that the state is illegal
+      // in game (Shizu, 2026-08-11 — the silent auto-off was worse).
       traits: { crit: { on: true, v: 120 }, spec: { on: true, v: 120 }, swift: { on: false, v: 120 } },
-      traitOrder: ["crit", "spec"],
       adv: {
         msPct: 9, karmaWp: 2.5, baseApOverride: false, baseApPct: 12.5, flatAP: 2700,
         accessoryMainStat: 71429, rosterBonus: 2085,
@@ -200,41 +201,32 @@
     if (!S.skills.length) S.skills = [{ name: "", share: 100, cr: 90, cd: 280 }];
     normalizeShares();
     fitTraits();
+    migrateJunkRows();
   }
 
   /**
-   * Exactly two traits active, every value inside the grade's band. Called on
-   * load and whenever the grade moves, so a Relic bracelet can never show an
-   * Ancient-only 120.
+   * Every trait value inside the grade's band, so a Relic bracelet can never
+   * show an Ancient-only 120. Called on load and whenever the grade moves.
+   *
+   * It no longer forces exactly two active. Three combat traits is illegal in
+   * game, but the panel says so rather than switching one off behind the
+   * user's back, and the score counts whatever is on.
    */
   function fitTraits() {
-    var band = traitBand(), i, k, on = [];
+    var band = traitBand(), i, k;
     for (i = 0; i < TRAIT_KEYS.length; i++) {
       k = TRAIT_KEYS[i];
       if (!S.traits[k]) S.traits[k] = { on: false, v: band[1] };
       S.traits[k].v = clamp(Math.round(num(S.traits[k].v, band[1])), band[0], band[1]);
-      if (S.traits[k].on) on.push(k);
     }
-    // traitOrder is the eviction queue: oldest activation first.
-    var order = [];
-    for (i = 0; i < (S.traitOrder || []).length; i++) {
-      if (on.indexOf(S.traitOrder[i]) >= 0 && order.indexOf(S.traitOrder[i]) === -1) order.push(S.traitOrder[i]);
-    }
-    for (i = 0; i < on.length; i++) if (order.indexOf(on[i]) === -1) order.push(on[i]);
-    while (order.length > 2) { S.traits[order.shift()].on = false; }
-    for (i = 0; i < TRAIT_KEYS.length && order.length < 2; i++) {
-      if (order.indexOf(TRAIT_KEYS[i]) === -1) { S.traits[TRAIT_KEYS[i]].on = true; order.push(TRAIT_KEYS[i]); }
-    }
-    S.traitOrder = order;
+    delete S.traitOrder;                                 // the old eviction queue, no longer used
   }
 
-  /** Turn on `key`, evicting the least-recently-activated of the two on now. */
-  function activateTrait(key) {
-    if (S.traits[key].on) return false;                  // never drop below two
-    S.traits[key].on = true;
-    S.traitOrder.push(key);
-    while (S.traitOrder.length > 2) S.traits[S.traitOrder.shift()].on = false;
-    return true;
+  /** How many combat traits are switched on right now. Two is the legal count. */
+  function traitOnCount() {
+    var n = 0, i;
+    for (i = 0; i < TRAIT_KEYS.length; i++) if (S.traits[TRAIT_KEYS[i]].on) n++;
+    return n;
   }
 
   // ------------------------------------------------------------------
@@ -312,8 +304,16 @@
     return Math.round(B.basicBandExpected(fam, grade));
   }
 
-  function rowToLine(r, grade) {
+  function rowToLine(r, grade, junkFam) {
     if (!r || !r.fam || r.fam === "none") return null;
+    if (r.fam === JUNK) {
+      // "Junk Line" is one option standing in for every zero-damage family (see
+      // junkFamPool). It still needs A family to be a legal line, so the caller
+      // hands us a stand-in — a different one per slot, so two junk slots never
+      // read as a duplicate roll.
+      var jf = junkFam || junkFamPool(grade)[0];
+      return { cat: "special", family: jf, tier: "low", junk: true };
+    }
     if (r.fam.indexOf("basic:") === 0) {
       var fam = r.fam.slice(6);
       var v = (r.value === null || r.value === undefined || r.value === "") ? defaultBasicValue(grade, fam) : num(r.value, defaultBasicValue(grade, fam));
@@ -324,9 +324,10 @@
     return { cat: "special", family: Number(r.fam.slice(3)), tier: r.tier || "mid" };
   }
 
-  function linesOf(rows, grade) {
+  function linesOf(rows, grade, reps) {
     var out = [], i, l;
-    for (i = 0; i < rows.length; i++) { l = rowToLine(rows[i], grade); if (l) out.push(l); }
+    reps = reps || [];
+    for (i = 0; i < rows.length; i++) { l = rowToLine(rows[i], grade, reps[i]); if (l) out.push(l); }
     return out;
   }
 
@@ -372,8 +373,9 @@
     return null;
   }
 
+  // Fixed rows keep the full family list, so they never carry a junk sentinel.
   function fixedLines() { return linesOf(S.fixedRows, S.grade); }
-  function grantedLines() { return linesOf(S.rows, S.grade); }
+  function grantedLines() { return linesOf(S.rows, S.grade, junkReps()); }
   function isUnrolled() { return grantedLines().length < S.slots; }
   function isPartial() { var n = grantedLines().length; return n > 0 && n < S.slots; }
 
@@ -416,6 +418,103 @@
     return famGradeCache[grade];
   }
 
+  /** The letter the picker shows for a stored family value. */
+  function letterOf(val, grade) {
+    if (!val || val === "none") return null;
+    if (val === JUNK) return "F";
+    var fg = famGrades(grade);
+    if (val.indexOf("basic:") === 0) return (fg.basic[val.slice(6)] || {}).letter || "F";
+    if (val.indexOf("trait:") === 0) return (fg.trait[val.slice(6)] || {}).letter || "F";
+    if (val.indexOf("sp:") === 0) return (fg.special[Number(val.slice(3))] || {}).letter || "F";
+    return null;
+  }
+
+  // ---- "Junk Line": every F family under one option ----
+  //
+  // Fifteen of the families a granted slot can roll score exactly nothing —
+  // Vitality, all six combat traits and thirteen of the specials — and the
+  // model already treats them as one interchangeable atom. Listing them
+  // separately was fifteen rows of noise, so the granted picker shows a single
+  // "Junk Line" entry (Shizu, 2026-08-11). The FIXED-line editor keeps the full
+  // list: see the note on junkFamPool.
+  var JUNK = "junk";
+
+  /**
+   * The stand-in families a "Junk Line" pick resolves to, lightest listed
+   * weight first. They are all specials, deliberately:
+   *
+   *   - Which one we pick cannot change a granted slot's answer. A junk line is
+   *     never locked (the solver's allowLockJunk is off), so it is always
+   *     rerolled away and never enters buildPool's present-family set or its
+   *     per-category count. Solving the same bracelet with a junk trait, with
+   *     Vitality and with a junk special returns bit-identical numbers.
+   *   - The category still has to be plausible for the CAP check in
+   *     validateSet, which a granted set does run. Specials cap at five, so
+   *     three junk slots plus two fixed lines always fit; traits cap at TWO, so
+   *     resolving junk to a trait would make three junk slots illegal.
+   *   - All thirteen score zero for every profile, not just the default one, so
+   *     "Junk Line" really is worth nothing to whoever is looking at it.
+   *
+   * This is exactly why the collapse stops at the granted slots. A FIXED line
+   * never rerolls, so it DOES sit in the pool's present set and its category
+   * count for good, and there the category matters a great deal: two fixed
+   * combat traits close the whole 35% trait share of the pool, which a fixed
+   * junk special does not (expected final 5.94% against 4.49%). The Advanced
+   * fixed-line editor therefore still lists every family by name.
+   */
+  var junkPoolCache = {};
+  function junkFamPool(grade) {
+    if (junkPoolCache[grade]) return junkPoolCache[grade];
+    var fg = famGrades(grade), sum = DATA.GRANTED_LISTED_SUM, list = [], k, id, fam, w, t;
+    for (k in fg.special) if (Object.prototype.hasOwnProperty.call(fg.special, k)) {
+      if (fg.special[k].letter !== "F") continue;
+      id = Number(k); fam = DATA.SPECIAL_BY_ID[id];
+      if (!fam) continue;
+      w = 0;
+      for (t = 0; t < DATA.TIERS.length; t++) w += fam.granted[DATA.TIERS[t]] / sum;
+      list.push({ id: id, w: w });
+    }
+    list.sort(function (a, b) { return a.w - b.w || a.id - b.id; });
+    var out = [];
+    for (k = 0; k < list.length; k++) out.push(list[k].id);
+    junkPoolCache[grade] = out;
+    return out;
+  }
+
+  /**
+   * One stand-in per granted slot, index-aligned, skipping anything a fixed
+   * line already holds — two lines of the same family would otherwise trip the
+   * duplicate check in validateSet.
+   */
+  function junkReps() {
+    var pool = junkFamPool(S.grade), used = {}, i, r, out = [];
+    for (i = 0; i < S.fixedRows.length; i++) {
+      r = S.fixedRows[i];
+      if (r && r.fam && r.fam.indexOf("sp:") === 0) used[Number(r.fam.slice(3))] = 1;
+    }
+    for (i = 0; i < pool.length && out.length < S.slots; i++) if (!used[pool[i]]) out.push(pool[i]);
+    while (out.length < S.slots) out.push(pool[out.length] || pool[0]);
+    return out;
+  }
+
+  /** True for a stored family value the granted picker now folds into JUNK. */
+  function isJunkFam(val, grade) {
+    if (!val || val === "none" || val === JUNK) return false;
+    return letterOf(val, grade) === "F";
+  }
+
+  /** Rewrite granted / rolled rows saved before the collapse existed. */
+  function migrateJunkRows() {
+    var sets = [S.rows, S.rolled], s, i, rows;
+    for (s = 0; s < sets.length; s++) {
+      rows = sets[s];
+      if (!rows) continue;
+      for (i = 0; i < rows.length; i++) {
+        if (rows[i] && isJunkFam(rows[i].fam, S.grade)) { rows[i].fam = JUNK; rows[i].value = null; }
+      }
+    }
+  }
+
   /**
    * The official labels carry placeholders (+A%, +X, +B%) that say nothing
    * until the tier is known, and an ally-buff rider a damage dealer can ignore.
@@ -446,8 +545,13 @@
     return parts.join(" / ");
   }
 
-  /** Every family a slot can hold, grouped, letter-graded and sorted. */
-  function familyOptions(grade) {
+  /**
+   * Every family a slot can hold, grouped, letter-graded and sorted.
+   *
+   * collapseJunk (granted slots only) drops every F-graded family, whichever
+   * group it landed in, and puts one "Junk Line" in their place.
+   */
+  function familyOptions(grade, collapseJunk) {
     var fg = famGrades(grade);
     var G = { Damage: [], Party: [], "Weapon Power": [], Stats: [], Junk: [] };
     var i, g;
@@ -465,7 +569,17 @@
       G[g].push({ val: "sp:" + fam.id, text: cleanFamLabel(fam), letter: e.letter, avg: e.avg });
     }
 
-    var groups = [], order = ["Damage", "Party", "Weapon Power", "Stats", "Junk"];
+    var order = ["Damage", "Party", "Weapon Power", "Stats", "Junk"], j;
+    if (collapseJunk) {
+      for (i = 0; i < order.length; i++) {
+        var keep = [];
+        for (j = 0; j < G[order[i]].length; j++) if (G[order[i]][j].letter !== "F") keep.push(G[order[i]][j]);
+        G[order[i]] = keep;
+      }
+      G.Junk = [{ val: JUNK, text: "Junk Line — no damage at all", letter: "F", avg: 0 }];
+    }
+
+    var groups = [];
     for (i = 0; i < order.length; i++) {
       G[order[i]].sort(function (a, b) { return b.avg - a.avg; });
       groups.push({ label: order[i], items: G[order[i]] });
@@ -473,17 +587,23 @@
     return groups;
   }
 
-  function pickerHtml(id, groups, selected) {
-    // The box is narrow and long labels are clipped, so the full name of the
-    // family currently in the slot leads the tooltip — nothing is lost.
+  function pickerHtml(id, groups, selected, grade) {
+    // Most labels fit now; only the longest are clipped, and the full name of
+    // the family currently in the slot leads the tooltip — nothing is lost.
     var full = "", i, j;
     for (i = 0; i < groups.length; i++) {
       for (j = 0; j < groups[i].items.length; j++) if (groups[i].items[j].val === selected) full = groups[i].items[j].text;
     }
     var gloss = (full ? full + " — " : "") +
       "the effect family this slot holds. The letter is the family's own grade, F to S: how good its AVERAGE roll is next to the best family in the game, always measured on the default character so the letters mean the same thing to everyone. What a particular roll is worth is the rarity box beside it.";
-    var h = '<select id="' + id + '" class="bc-fam" title="' + esc(full) + '" data-gloss="' + esc(gloss) + '">';
-    h += '<option value="none"' + (selected === "none" ? " selected" : "") + '>— empty —</option>';
+    // A native select cannot colour its closed text per option, so paint the
+    // control itself from the selected family's grade — same trick the rarity
+    // box beside it already uses. handleRowEvent repaints it on every change.
+    var letter = letterOf(selected, grade || S.grade);
+    var shut = letter ? GRADE_COLOR[letter] : "var(--text)";
+    var h = '<select id="' + id + '" class="bc-fam" style="color:' + shut + ';font-weight:700" title="' +
+      esc(full) + '" data-gloss="' + esc(gloss) + '">';
+    h += '<option value="none" style="color:var(--dim);font-weight:400"' + (selected === "none" ? " selected" : "") + ">&mdash; empty &mdash;</option>";
     for (i = 0; i < groups.length; i++) {
       if (!groups[i].items.length) continue;
       h += '<optgroup label="' + esc(groups[i].label) + '">';
@@ -521,6 +641,11 @@
 
   function explainLine(line, grade, profile) {
     if (!line) return "";
+    if (line.junk) {
+      return "A line that does nothing for damage — Vitality, a combat trait, a defensive or party-only effect. " +
+        "Fifteen families land here and they are all worth the same to a damage score: nothing. The solver never " +
+        "locks one, so a junk slot is always a slot you reroll.";
+    }
     if (line.cat === "trait") {
       return "Combat traits (Crit, Specialization, …) feed class mechanics this model does not read, so they score 0% damage. Their in-game value is real; it just is not comparable in % damage.";
     }
@@ -886,13 +1011,19 @@
       "#tab-calculator .bc-sub{font-size:11px;color:var(--dim);margin:-4px 0 10px}" +
       "#tab-calculator .bc-hdrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}" +
       "#tab-calculator .bc-fam{width:100%}" +
-      "#tab-calculator .bc-slot{display:grid;grid-template-columns:44px 168px minmax(0,300px) 120px;gap:8px;align-items:end;margin-bottom:8px;justify-content:start}" +
-      // A long family label is clipped, not stretched: the full name rides in
+      // The family box carries the longest text on the row, so it gets the
+      // room: 430px fits nearly every label outright (the shrink last round
+      // went too far — Shizu, 2026-08-11).
+      "#tab-calculator .bc-slot{display:grid;grid-template-columns:44px 168px minmax(0,430px) 120px;gap:8px;align-items:end;margin-bottom:8px;justify-content:start}" +
+      // Only the few labels still too long are clipped: the full name rides in
       // the tooltip and the title attribute.
       "#tab-calculator .bc-fam{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
       "#tab-calculator .bc-slot .sn{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;padding-bottom:7px}" +
       "@media(max-width:640px){#tab-calculator .bc-slot{grid-template-columns:1fr;gap:5px}#tab-calculator .bc-slot .sn{padding-bottom:0}}" +
       "@media(max-width:900px) and (min-width:641px){#tab-calculator .bc-slot{grid-template-columns:44px 150px minmax(0,1fr) 110px}}" +
+      // An illegal-but-scored state (three combat traits, or fewer than two):
+      // the house note, flagged with the bad colour. A warning, not a block.
+      "#tab-calculator .note.bc-illegal{color:var(--bad);border-left:2px solid var(--bad);padding-left:9px;margin-top:8px}" +
       // headline cards
       "#tab-calculator .bc-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:14px}" +
       "#tab-calculator .bc-card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 14px}" +
@@ -1299,14 +1430,24 @@
           (t.on ? "" : " disabled") + ">" +
         '<button type="button" class="mbtn bc-tgl bc-tract" data-tron="' + k + '" aria-pressed="' + (t.on ? "true" : "false") + '"' +
           ' data-gloss="' + (t.on
-            ? "This trait is one of the two your bracelet carries. Turn a different one on to swap it out — there are always exactly two."
-            : "Turn this trait on. A bracelet carries exactly two, so whichever of the two has been on longest turns off.") + '">' +
+            ? "One of the trait lines your bracelet carries. Switch it off if the bracelet does not have it."
+            : "Switch this trait on if your bracelet carries it. Nothing else turns off — a bracelet only ever has two, and the panel warns you if you go over.") + '">' +
           (t.on ? "active" : "off") + "</button>" +
         "</div>";
     }
     h += '<div class="note">Every bracelet comes with two combat traits, ' + band[0] + "&ndash;" + band[1] +
       " points on " + (S.grade === "relic" ? "Relic" : "Ancient") +
       ". They never reroll, so they are a constant added to every score below.</div>";
+    // Nothing is switched off behind the user's back; the panel just says when
+    // the set on screen could not exist in game. The score counts it either way.
+    var n = traitOnCount();
+    if (n > 2) {
+      h += '<div class="note bc-illegal">Three combat traits are active. A real bracelet only ever carries two, ' +
+        "so this bracelet cannot exist in game &mdash; every score below still counts all three exactly as entered.</div>";
+    } else if (n < 2) {
+      h += '<div class="note bc-illegal">' + (n === 1 ? "Only one combat trait is active" : "No combat trait is active") +
+        ". Every bracelet carries two, so this one is short a line &mdash; the score counts only what is on.</div>";
+    }
     box.innerHTML = h;
   }
 
@@ -1370,7 +1511,10 @@
     var isSpecial = row.fam.indexOf("sp:") === 0;
     var famKey = isBasic ? row.fam.slice(6) : "mainStat";
     var msValue = (row.value === null || row.value === undefined || row.value === "") ? defaultBasicValue(grade, famKey) : num(row.value, defaultBasicValue(grade, famKey));
-    var groups = familyOptions(grade);
+    // Granted and rolled rows fold the F families into one "Junk Line"; the
+    // Advanced fixed-line editor ("bc-f") keeps every family by name, because a
+    // fixed line's category is load-bearing for the pool (see junkFamPool).
+    var groups = familyOptions(grade, prefix !== "bc-f");
     var rg = msRange(grade, famKey);
 
     // Rarity first, family second: the rarity is the short, high-signal box and
@@ -1383,7 +1527,7 @@
     } else {
       h += "<div></div>";
     }
-    h += '<div class="fld">' + pickerHtml(prefix + "-fam-" + idx, groups, row.fam) + "</div>";
+    h += '<div class="fld">' + pickerHtml(prefix + "-fam-" + idx, groups, row.fam, grade) + "</div>";
     if (isBasic) {
       h += '<div class="fld"><input type="number" id="' + prefix + "-val-" + idx + '" step="1" min="' + rg[0] + '" max="' + rg[1] +
         '" value="' + msValue + '" data-gloss="The number this stat line actually rolled. The official bands run ' +
@@ -1415,6 +1559,7 @@
 
   function lineLabel(line, grade) {
     if (!line) return "—";
+    if (line.junk) return "Junk Line";                  // the stand-in family is an implementation detail
     if (line.cat === "basic") return (line.family === "mainStat" ? "Str / Dex / Int +" : "Vitality +") + nf(line.value);
     if (line.cat === "trait") {
       var t = null, i;
@@ -1434,6 +1579,7 @@
    */
   function shortLabel(line, grade) {
     if (!line) return "—";
+    if (line.junk) return "Junk Line";
     if (line.cat === "basic") return (line.family === "mainStat" ? "Str / Dex / Int +" : "Vitality +") + nf(line.value);
     if (line.cat === "trait") return lineLabel(line, grade);
     var fam = DATA.SPECIAL_BY_ID[line.family];
@@ -1969,9 +2115,14 @@
     if (!row) return false;
     if (m[2] === "fam") {
       row.fam = el.value;
+      if (row.fam === JUNK) row.value = null;               // a junk line has no number and no rarity
       if (row.fam.indexOf("basic:") === 0 && (row.value === null || row.value === undefined || row.value === "")) {
         row.value = defaultBasicValue(S.grade, row.fam.slice(6));
       }
+      // Repaint the closed control at once: every caller re-renders the row
+      // afterwards, but not before the browser has painted the new selection.
+      var lt = letterOf(row.fam, S.grade);
+      el.style.color = lt ? GRADE_COLOR[lt] : "var(--text)";
       if (m[1] === "bc-r") { S.locks = null; lastVerdict = null; }
     } else if (m[2] === "tier") {
       row.tier = el.value;
@@ -2009,9 +2160,10 @@
     root.addEventListener("click", function (e) {
       var t = e.target, lk, tron;
       if ((tron = t.getAttribute && t.getAttribute("data-tron"))) {
-        // Exactly two traits are ever active: turning a third on drops the one
-        // that has been on longest. Clicking an active one is a no-op.
-        if (activateTrait(tron)) { save(); renderTraits(); updateBasicsNote(); solveNow(); }
+        // A plain on/off toggle. Turning a third one on is allowed — the panel
+        // warns that the bracelet is illegal instead of silently dropping one.
+        S.traits[tron].on = !S.traits[tron].on;
+        save(); renderTraits(); updateBasicsNote(); solveNow();
         return;
       }
       if (t.id === "bc-clear") {
@@ -2032,9 +2184,11 @@
   // ---- the cut flow ----
 
   function rolledSet(locks) {
-    var lines = grantedLines(), out = [], i;
+    var lines = grantedLines(), reps = junkReps(), out = [], i;
     for (i = 0; i < S.slots; i++) {
-      out.push(locks[i] ? lines[i] : rowToLine(S.rolled[i], S.grade));
+      // Same slot, same junk stand-in on both sides, so a locked junk slot and
+      // a rolled one can never collide into a duplicate family.
+      out.push(locks[i] ? lines[i] : rowToLine(S.rolled[i], S.grade, reps[i]));
     }
     return out;
   }
@@ -2125,6 +2279,30 @@
     renderResults(buildProfile(), null);
     recompute();
   }
+
+  /**
+   * The one hook bible-import.js uses. It hands over a patch already in this
+   * file's own shape — grade, slots, the two combat traits, the granted rows and
+   * any fixed rows — and everything after that is the ordinary redraw an edit
+   * would trigger. Keys the patch leaves out keep their current value, so an
+   * import never disturbs the character or economy settings.
+   */
+  window.BraceletApp = {
+    applyImport: function (patch) {
+      if (!patch) return false;
+      var keys = ["grade", "slots", "rollsLeft", "traits", "traitOrder", "rows", "fixedRows"], i;
+      for (i = 0; i < keys.length; i++) {
+        if (patch[keys[i]] !== undefined) S[keys[i]] = patch[keys[i]];
+      }
+      S.locks = null; S.rolled = null;      // a new bracelet voids the cut in progress
+      fitRows();
+      renderInputs();
+      renderSlots();
+      save();
+      recompute();
+      return true;
+    }
+  };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();

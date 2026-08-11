@@ -179,6 +179,47 @@ is the second box's job, and per-option value coloring confused him.
    inputs, not sliders** (Shizu). Keep the band clamp (Ancient 61–120 / Relic 41–100)
    and the exactly-two-active toggles. The spec/swift WEIGHT controls stay sliders.
 
+## Round-two picker + trait revisions (Shizu, 2026-08-11)
+
+1. **Collapse every F family into ONE option labelled "Junk Line"** in the granted-slot
+   family picker. Keep D (Str/Dex/Int) as its own option. Selecting "Junk Line" means
+   "a zero-damage line" — the model already treats them identically, so one entry is
+   honest and removes ~15 rows of noise. The specific junk family is not tracked in
+   the UI (the DP's junk aggregation already assumes this).
+2. **Longer family labels** — the shrink went too far; give the family box more width
+   and truncate later.
+3. **Grade color must show on the CLOSED select**, not only in the open dropdown
+   (a native <select> can't color its closed text per-option — use a custom
+   button+listbox, or paint the closed control from the selected option's grade).
+4. **Traits: no auto-deactivation.** Turning on a third trait is ALLOWED; instead show
+   a clear warning that the state is illegal in game (a bracelet only ever has two),
+   and keep scoring what's entered. Do not silently switch anything off.
+
+### What the build found (Fable, 2026-08-11) — where the collapse stops
+
+The collapse is safe for **granted slots** and only for granted slots.
+
+A junk line is never locked (`allowLockJunk` is off), so it is always rerolled away
+and never reaches `buildPool`'s present-family set or its per-category count. Solving
+the same bracelet with a junk combat trait, with Vitality and with a junk special
+returns bit-identical numbers, so which family stands in for "Junk Line" cannot change
+a granted answer. Combat traits fold in with the rest.
+
+A **fixed** line never rerolls, so it sits in the pool's present set and its category
+count for good — and there the category decides a great deal. Two fixed combat traits
+close the whole 35% trait share of the pool; two fixed junk specials close almost
+nothing (expected final 5.94% against 4.49%, three slots, seven rolls). The Advanced
+fixed-line editor therefore still lists every family by name.
+
+Two consequences for the stand-in itself:
+
+- It must be a **special**. Specials cap at five, so three junk slots plus two fixed
+  lines always fit; traits cap at TWO, so resolving junk to a trait would make three
+  junk slots fail `validateSet`.
+- Each granted slot gets a **different** stand-in, skipping anything a fixed line
+  already holds, or two junk slots would read as a duplicate roll and the cut flow
+  would reject a legal roll.
+
 ## Craft notes
 
 - Segmented controls and toggles are buttons with aria-pressed; sliders are native
