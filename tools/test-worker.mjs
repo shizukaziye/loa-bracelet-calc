@@ -35,7 +35,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 const { score, extractBracelets, collectRosterChars, ownsCharacter, normRegion,
         extractLoadouts, pickBestLoadout, briefScore, loadoutLabel,
-        parseCharacterProfile, snapTo, modal, MASTER_NODE_ID, GEM_AP_LEVEL } = __test;
+        parseCharacterProfile, snapTo, modal, MASTER_NODE_ID, GEM_AP_LEVEL,
+        noSuchMsg, lookupKey, regionLabel } = __test;
 
 let pass = 0, fail = 0;
 function ok(name, cond, detail) {
@@ -362,6 +363,36 @@ ok("eu-central maps to CE", normRegion("Europe Central") === "CE");
 ok("NA stays NA", normRegion("na") === "NA");
 ok("KR is refused (this Worker reads lostark.bible only)", normRegion("KR") === "");
 ok("nonsense is refused", normRegion("../etc") === "");
+
+// ---------------------------------------------------------------------------
+console.log("\n4. the failure copy");
+// ---------------------------------------------------------------------------
+// The sentence a visitor reads when a name comes back empty. It is checked HERE
+// because the only way to see it from the live Worker is to fetch a name that
+// does not exist, and spending a real lostark.bible request to read our own
+// sentence is the kind of request this whole design exists to avoid.
+//
+// The rule these assert: say what actually happened, and never hang a rule of
+// OURS on lostark.bible. The old copy read "That character is not on the roster
+// lostark.bible shows for your account" -- which blamed lostark.bible for a
+// restriction WE had chosen, and sent people off to fix the wrong thing.
+const nfNA = noSuchMsg("NA", "Nobodyhere");
+const nfCE = noSuchMsg("CE", "Nobodyhere");
+ok("not-found copy names the character and the region", /No character called Nobodyhere on NA/.test(nfNA), nfNA);
+ok("not-found copy offers the spelling and the other region", /spelling/.test(nfNA) && /try EU/.test(nfNA), nfNA);
+ok("not-found copy says a hidden character cannot be read", /hidden on lostark\.bible/.test(nfNA), nfNA);
+ok("CE is shown to the player as EU, and points at NA", /on EU/.test(nfCE) && /try NA/.test(nfCE), nfCE);
+ok("CE displays as EU, NA as NA", regionLabel("CE") === "EU" && regionLabel("NA") === "NA");
+ok("the copy never says the character is not yours",
+  !/not on the roster|your roster|only your own/i.test(nfNA + nfCE), nfNA);
+ok("the copy never blames lostark.bible for refusing us",
+  !/would not confirm|refused|not allowed|not permitted/i.test(nfNA), nfNA);
+
+// The lookup throttle keys on the IP, not on a token: a signed-out visitor has no
+// token, and keying the signed-in separately would be a second bucket for the
+// price of signing out.
+ok("the lookup throttle keys on the IP", lookupKey("1.2.3.4") === "look:1.2.3.4");
+ok("a missing IP still lands in one bucket, never an empty key", lookupKey("") === "look:0.0.0.0");
 
 // ---------------------------------------------------------------------------
 console.log("\n" + (fail ? "FAILED" : "PASSED") + " — " + pass + " checks passed, " + fail + " failed\n");

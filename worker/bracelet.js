@@ -3168,6 +3168,11 @@ export const __test = {
   encodeSnapshot: encodeSnapshot, snapshotEntry: snapshotEntry,
   drainSpacingMs: drainSpacingMs, validateNameRegion: validateNameRegion,
   isCharKey: isCharKey,
+  // The failure copy. It is checked here rather than against the live Worker
+  // because the only way to see it upstream is to fetch a name that does not
+  // exist, and spending a real lostark.bible request to read our own sentence is
+  // exactly the kind of request we promised not to make.
+  noSuchMsg: noSuchMsg, lookupKey: lookupKey, regionLabel: regionLabel,
   DRAIN_PER_MIN_MAX: DRAIN_PER_MIN_MAX, DRAIN_MIN_SPACING_MS: DRAIN_MIN_SPACING_MS,
   SNAPSHOT_MIN_INTERVAL_MS: SNAPSHOT_MIN_INTERVAL_MS, CHAR_TTL_MS: CHAR_TTL_MS
 };
