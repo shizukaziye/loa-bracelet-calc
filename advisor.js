@@ -130,8 +130,88 @@
   // Gold always converts the EXACT damage percentage, never the log-space score,
   // so the arithmetic on screen matches the percentages printed beside it.
   function gpd() { return num(S.econ.gpd, 0); }
-  function valueGold(D) { return (pct(D) - num(S.econ.baseline, 0)) * gpd(); }
+  // A DIFFERENCE between two options — lock mask A against lock mask B, the new
+  // set against the old one. Both are futures you could still choose, so this one
+  // is signed on purpose. WORTH is not a difference of that kind; see below.
   function deltaGold(Da, Db) { return (pct(Da) - pct(Db)) * gpd(); }
+
+  // ------------------------------------------------------------------
+  // WORTH — one implementation, on both tabs
+  //
+  //     E[ max(0, final% - baseline%) ] x gold per 1%
+  //
+  // You are paid only by the outcomes that BEAT the bracelet you would wear
+  // instead, weighted by how often they happen and by how far they clear it. So
+  // the figure is never negative: a bracelet you would not equip is worth
+  // nothing, not a debt.
+  //
+  // This tab used to carry its own (expectedFinal - baseline) x gold — a
+  // difference of MEANS, which goes negative the moment the baseline outruns the
+  // bracelet, and which compared a LOG-SPACE score against a damage percentage,
+  // mixing units on top (Shizu, 2026-08-11). Both halves of that are gone.
+  //
+  // Not read off res.valueGold: the solve is run with goldPer1Pct 0 and
+  // baselinePct 0 on purpose, to keep gold out of the solve cache key so the gold
+  // slider drags without a three-second re-solve. The worker's own valueGold is
+  // therefore identically zero and its pBeatBaseline is P(final > 0) ~ 1.
+  //
+  // The Calculator and the Advisor must never quote different worths for the same
+  // bracelet, so the arithmetic is app.js's and this file only asks for it.
+  // ------------------------------------------------------------------
+
+  function W() {
+    var A = window.BraceletApp;
+    return (A && A.worth && typeof A.worth.of === "function") ? A.worth : LOCAL_WORTH;
+  }
+  /** { gold, p } — what it is worth, and the odds of clearing the baseline at all. */
+  function worthOf(res, shift) { return W().of(res, shift); }
+  function worthNote(w) { return W().note(w); }
+  function worthGloss(w) { return W().gloss(w); }
+
+  // ---- FALLBACK, and nothing else ----------------------------------------
+  // A mirror of app.js's four worth functions, used only while app.js has no
+  // `worth` export. Delete this whole block the moment it does: two copies of one
+  // formula is exactly the drift this seam exists to prevent.
+  var LOCAL_WORTH = {
+    of: function (res, shift) {
+      if (!res || !res.finalScore || !res.finalScore.cdf || !res.finalScore.cdf.length) return null;
+      var cdf = res.finalScore.cdf, base = num(S.econ.baseline, 0), off = num(shift, 0);
+      var acc = 0, p = 0, prev = 0, prevS = null, i, m, s, over;
+      for (i = 0; i < cdf.length; i++) {
+        m = cdf[i].cum - prev;
+        prev = cdf[i].cum;
+        // The cdf arrives THINNED to ~400 rungs, so each rung stands for the whole
+        // interval below it — charge it at that interval's MIDPOINT, not its top
+        // end, or the answer prices several percent high.
+        s = prevS === null ? cdf[i].score : (prevS + cdf[i].score) / 2;
+        prevS = cdf[i].score;
+        if (m <= 0) continue;
+        over = pct(s + off) - base;
+        if (over > 0) { acc += m * over; p += m; }
+      }
+      return { gold: acc * gpd(), p: p };
+    },
+    odds: function (p) {
+      var v = clamp(num(p, 0), 0, 1) * 100;
+      if (v < 0.1) return "under 0.1%";
+      if (v < 1) return fx(v, 2) + "%";
+      if (v >= 99.95) return "very nearly all";
+      return fx(v, v < 10 ? 1 : 0) + "%";
+    },
+    note: function (w) {
+      if (!w) return "";
+      var base = fx(num(S.econ.baseline, 0), 2) + "% baseline";
+      if (w.p <= 0) return "Nothing this bracelet can roll beats your " + base + ", so it is worth nothing.";
+      return LOCAL_WORTH.odds(w.p) + " of the outcomes beat your " + base +
+        ". Worth is how far they clear it, on average, at " + gold(gpd()) + " gold per 1%.";
+    },
+    gloss: function (w) {
+      if (!w) return "What the bracelet is worth over the one you would wear instead. It needs a solve first.";
+      return "What this bracelet is worth over the one you would wear instead. " + LOCAL_WORTH.note(w) +
+        " It is never negative — a bracelet you would not equip is worth nothing, not a debt.";
+    }
+  };
+  // ---- end fallback -------------------------------------------------------
 
   /** The profile every tab scores on — it honours the character/default toggle. */
   function scoringProfile() {
@@ -615,8 +695,21 @@
       "#tab-advisor .av-strip .cur{position:absolute;top:2px;width:2px;height:30px;background:var(--high)}" +
       "#tab-advisor .av-qlab{display:flex;justify-content:space-between;gap:4px;flex-wrap:wrap;font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}" +
       // ---- the cut flow ----
+      // minmax(0,1fr), never a bare 1fr. A bare 1fr is minmax(AUTO,1fr), and auto
+      // is the widest thing inside — here a <select> whose longest option name is
+      // half a sentence. That pushed the column past the phone and scrolled the
+      // whole page sideways. minmax(0,…) lets the column be narrower than its
+      // contents, which is what the ellipsis and the scroll wrappers are for.
       "#tab-advisor .av-cutgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}" +
-      "@media(max-width:760px){#tab-advisor .av-cutgrid{grid-template-columns:1fr}}" +
+      "@media(max-width:760px){#tab-advisor .av-cutgrid{grid-template-columns:minmax(0,1fr)}}" +
+      // The rolled-set rows are app.js's .bc-slot widget, borrowed. Its phone
+      // layout (profile.js, max-width 640) has the same bare 1fr, so cap it here
+      // rather than reach into profile.js's sheet: on this tab the row sits inside
+      // a grid column, not across the page, so it has less room to start with and
+      // the fix belongs where the crowding is. Desktop columns are left alone.
+      "#tab-advisor .bc-slot>*{min-width:0}" +
+      "#tab-advisor .bc-slot select,#tab-advisor .bc-slot input{max-width:100%}" +
+      "@media(max-width:640px){#tab-advisor .bc-slot{grid-template-columns:minmax(0,1fr)}}" +
       "#tab-advisor .av-lockrow{display:flex;align-items:center;gap:8px;padding:5px 8px;border:1px solid var(--border);" +
         "border-radius:7px;margin-bottom:6px;background:var(--panel2);font-size:12.5px}" +
       "#tab-advisor .av-lockrow input{accent-color:var(--accent);flex:0 0 auto}" +
@@ -805,9 +898,8 @@
 
   /** The advice framing: play every remaining roll and this is where you land. */
   function cardsHtml(res) {
-    var baseD = num(S.econ.baseline, 0);
     var curPct = pct(res.currentScore), finPct = pct(res.expectedFinal);
-    var val = valueGold(res.expectedFinal);
+    var w = worthOf(res, 0);
     var n = S.rollsLeft, plural = n === 1 ? "" : "s";
     var h = '<div class="av-cards">';
     h += '<div class="av-card hero"><div class="k">Play all ' + n + " roll" + plural + " and you land at</div>" +
@@ -820,9 +912,9 @@
     h += '<div class="av-card"><div class="k">Chance it improves</div><div class="v">' + fx(res.pImprove * 100, 1) + "%</div>" +
       '<div class="s"><span data-gloss="Not the chance any single roll comes out better. You keep the old set whenever the new one is worse, so the only way to finish below where you started is to never take a roll.">How often</span> the bracelet you end with beats the ' +
       fx(curPct, 2) + "% you hold.</div></div>";
-    h += '<div class="av-card"><div class="k">Worth playing out</div><div class="v gold">' +
-      (val >= 0 ? "" : "−") + gold(Math.abs(val)) + "</div>" +
-      '<div class="s">(' + fx(finPct, 2) + "% − " + fx(baseD, 2) + "% baseline) × " + gold(gpd()) + " gold.</div></div>";
+    h += '<div class="av-card"><div class="k" data-gloss="' + esc(worthGloss(w)) + '">Worth playing out</div>' +
+      '<div class="v gold">' + (w ? gold(w.gold) : "—") + "</div>" +
+      '<div class="s">' + esc(worthNote(w)) + "</div></div>";
     return h + "</div>";
   }
 
@@ -997,19 +1089,30 @@
     var res = lastSolve;
 
     if (res.unrolled || isUnrolled()) {
+      var wu = worthOf(res, 0);
       return '<div class="av-empty"><b>The bracelet has not been opened yet.</b><br>' +
         "An unrolled " + esc(S.grade) + " bracelet with " + S.slots + " granted slots and " + S.rollsLeft +
-        " rolls is worth <b>" + fx(pct(res.expectedFinal), 2) + "%</b> expected, or " + gold(valueGold(res.expectedFinal)) +
-        " gold. Type its granted lines into the Calculator's Bracelet panel and this tab will name the lines to lock.</div>" +
+        " rolls lands at <b>" + fx(pct(res.expectedFinal), 2) + "%</b> expected, and is worth <b>" +
+        (wu ? gold(wu.gold) : "—") + "</b> gold. " + esc(worthNote(wu)) +
+        " Type its granted lines into the Calculator's Bracelet panel and this tab will name the lines to lock.</div>" +
         '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Where an unrolled one can land</h2>' +
         quantileStrip(res.finalScore.quantiles, res.currentScore) +
         '<p class="note">Every way the ' + S.rollsLeft + " rolls can go, played the way the solver would play them.</p></div>";
     }
 
     if (S.rollsLeft <= 0) {
+      // A finished bracelet has one outcome, so its worth is simply how far that
+      // one outcome clears the baseline — and nothing if it does not clear it.
+      // Say so in those words: "worth 0" with no explanation reads as a bug.
+      var wf = worthOf(res, 0), baseF = fx(num(S.econ.baseline, 0), 2) + "%";
+      var tail = (wf && wf.gold > 0)
+        ? "It clears your " + baseF + " baseline by " + fx(pct(res.currentScore) - num(S.econ.baseline, 0), 2) +
+          "%, so it is worth <b>" + gold(wf.gold) + "</b> gold at " + gold(gpd()) + " gold per 1%."
+        : "It does not beat your " + baseF + " baseline, so it is worth <b>0</b> to you — " +
+          "the bracelet you already wear is the better one, and worth is never a debt.";
       return '<div class="av-empty"><b>No rolls left — this bracelet is final at ' + fx(pct(res.currentScore), 2) + "%.</b><br>" +
-        "Nothing to advise: there is no decision in front of you. The Calculator has the line-by-line breakdown, " +
-        "and it is worth " + gold(valueGold(res.currentScore)) + " gold at your baseline and gold rate.</div>" +
+        "Nothing to advise: there is no decision in front of you. The Calculator has the line-by-line breakdown. " +
+        tail + "</div>" +
         (S.history.length ? '<div class="panel" style="margin-top:12px">' + historyHtml() + "</div>" : "");
     }
 
