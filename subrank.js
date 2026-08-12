@@ -33,9 +33,10 @@
  *     only the two trait lines the bracelet came with carry value, and those
  *     come through traitDamage(). Dropping the second term was a live bug once;
  *     it is why the two are added here and never anywhere else.
- *   perfect = the three highest-scoring DISTINCT special families at `high`
- *             tier, plus two combat traits at the grade's cap (120 Ancient,
- *             100 Relic).
+ *   perfect = the three highest-scoring DISTINCT special families at `mid`
+ *             (Epic) tier, plus two combat traits at 110 (Ancient) / 92 (Relic).
+ *             A REACHABLE good bracelet, not a theoretical maximum — so scores
+ *             run past 100 and S+ means you beat it.
  *   floor   = two combat traits at 40 and three lines worth nothing — i.e. just
  *             traitDamage({crit:40, spec:40}). Shizu's rule: an empty bracelet
  *             with 40/40 and three junk lines scores 0.
@@ -62,12 +63,15 @@
 
   // key, and the percentage at which the band OPENS. Descending, so the first
   // band whose min a percentage clears is the band it belongs to.
+  // S+ starts just past 100 because 100 is the ANCHOR — a reachable good bracelet
+  // (three best families at Epic, traits at 110), not a maximum. Clearing it is
+  // the whole meaning of S+. Everything below is a flat five-point step.
   var LADDER = [
-    ["S+", 95], ["S", 90], ["S-", 85],
-    ["A+", 80], ["A", 75], ["A-", 70],
-    ["B+", 65], ["B", 60], ["B-", 55],
-    ["C+", 50], ["C", 45], ["C-", 40],
-    ["D+", 35], ["D", 30], ["D-", 25],
+    ["S+", 100.1], ["S", 95], ["S-", 90],
+    ["A+", 85], ["A", 80], ["A-", 75],
+    ["B+", 70], ["B", 65], ["B-", 60],
+    ["C+", 55], ["C", 50], ["C-", 45],
+    ["D+", 40], ["D", 35], ["D-", 30],
     ["F+", 20], ["F", 10], ["F-", -Infinity]
   ];
 
@@ -186,7 +190,11 @@
 
   // The highest a combat trait rolls, per grade. Same numbers bible-import.js and
   // leaderboard.js check a decode against.
-  var TRAIT_MAX = { relic: 100, ancient: 120 };
+  // The grade's yardstick is a REACHABLE bracelet, not a theoretical maximum
+  // (Shizu, 2026-08-11): two traits at 110 and the three best families at EPIC.
+  // A Legendary roll or a 120 trait then pushes the score past 100, which is the
+  // point — S+ should mean "better than a very good bracelet", not "perfect".
+  var TRAIT_ANCHOR = { relic: 92, ancient: 110 };
   var TRAIT_FLOOR = 40;      // below the lowest real roll on either grade, on purpose
 
   var canonCache = {};       // grade -> anchors on the canonical default profile
@@ -225,10 +233,10 @@
     // bracelet anyone can own.
     var S = B.DATA.SPECIALS, byFam = [], i;
     for (i = 0; i < S.length; i++) {
-      byFam.push(B.lineDamage({ cat: "special", family: S[i].id, tier: "high" }, grade, profile));
+      byFam.push(B.lineDamage({ cat: "special", family: S[i].id, tier: "mid" }, grade, profile));
     }
     byFam.sort(function (a, b) { return b - a; });
-    var cap = TRAIT_MAX[grade] || TRAIT_MAX.ancient;
+    var cap = TRAIT_ANCHOR[grade] || TRAIT_ANCHOR.ancient;
     return {
       best: d.length ? d[0] : 0,
       perfect: byFam[0] + byFam[1] + byFam[2] + B.traitDamage({ crit: cap, spec: cap }, profile),
@@ -269,7 +277,7 @@
     var s = span > 0 ? 100 * (total - a.floor) / span : 0;
     if (!isFinite(s)) s = 0;
     if (s < 0) s = 0;
-    if (s > 100) s = 100;
+    // NOT clamped at 100: the anchor is beatable, and S+ is exactly "over it".
     return {
       score: s,
       band: of(s),
@@ -277,7 +285,7 @@
       // families at their best roll with both traits capped — not "very good".
       // Named isPerfect, not perfect: `perfect` below is the ANCHOR, and one
       // object cannot carry both spellings without the flag silently losing.
-      isPerfect: s >= 100,
+      isPerfect: s > 100.1,
       total: total,
       floor: a.floor,
       perfect: a.perfect,
@@ -290,7 +298,7 @@
     BY_KEY: BY_KEY,
     BOTTOM: BOTTOM,
     RAINBOW: RAINBOW,
-    TRAIT_MAX: TRAIT_MAX,
+    TRAIT_ANCHOR: TRAIT_ANCHOR,
     TRAIT_FLOOR: TRAIT_FLOOR,
     of: of,
     colorOf: colorOf,
