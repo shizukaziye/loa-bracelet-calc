@@ -622,6 +622,7 @@
     });
     var best = bestOf(los, e.chosenLoadout || 0);
     return {
+      pick: raidPick(los, best),
       region: normRegion(e.region) || "NA",
       name: e.name,
       "class": e["class"] || null,
@@ -648,6 +649,31 @@
       if (p > best + 1e-9 || (Math.abs(p - best) < 1e-9 && i === chosen)) { best = p; bi = i; }
     }
     return bi >= 0 ? bi : (chosen || 0);
+  }
+
+  /**
+   * WHICH LOADOUT THE CALCULATOR OPENS ON: the raid one, every time.
+   *
+   * A character page carries one loadout per bible tab, and the tab bible DRAWS
+   * is whichever was updated last — so a character who ran a chaos dungeon after
+   * their last raid opens on their chaos bracelet, chaos accessories and chaos
+   * gems. That is not the build anybody wants graded (Shizu, 2026-08-11). Raid
+   * first, then an estimated raid, then anything unrecognised, and chaos last.
+   *
+   * This is ONLY the pill the calculator starts on. What the BOARD ranks is
+   * still bestOf() — the highest-scoring loadout — and the ▲ marker still points
+   * at it, so the two never get confused for each other.
+   */
+  var LOADOUT_PREF = { most_recent_raid: 0, raid_merged: 1, most_recent_chaos_dungeon: 3 };
+  function raidPick(los, fallback) {
+    var bi = -1, br = 99, i, r;
+    for (i = 0; i < los.length; i++) {
+      if (!los[i] || !los[i].stats || !los[i].stats.length) continue;
+      r = LOADOUT_PREF[los[i].classification];
+      if (r === undefined) r = 2;                       // a tab we have no name for beats chaos
+      if (r < br) { br = r; bi = i; }                   // first of the best rank wins
+    }
+    return bi >= 0 ? bi : (fallback || 0);
   }
 
   /** The Worker's /character answer -> the same internal record. */
@@ -681,6 +707,7 @@
     if (!los.length) return null;
     var best = bestOf(los, typeof d.chosenLoadout === "number" ? d.chosenLoadout : 0);
     return {
+      pick: raidPick(los, best),
       region: normRegion(d.region) || "NA",
       name: d.name,
       "class": d["class"] || null,
@@ -1060,11 +1087,25 @@
     if (host) host.innerHTML = msgHtml();
   }
 
+  /**
+   * The one sentence that tells the story of a pull: board hit, queue position,
+   * no bracelet on the page, worker unreachable. It goes in #bi-pull-status AND
+   * out to any subscriber, because the character picker shows the same sentence
+   * in its own panel — and it was reading it back off this element with a
+   * MutationObserver. Rewording it there would be a second load path written in
+   * prose; watching a DOM node for it is a seam that breaks the moment this
+   * markup moves. A listener list is neither.
+   */
+  var statusListeners = [];
   function setPullStatus(msg, kind) {
     var el = $("bi-pull-status");
-    if (!el) return;
-    el.textContent = msg || "";
-    el.className = "bi-status" + (kind ? " " + kind : "");
+    if (el) {
+      el.textContent = msg || "";
+      el.className = "bi-status" + (kind ? " " + kind : "");
+    }
+    for (var i = 0; i < statusListeners.length; i++) {
+      try { statusListeners[i](msg || "", kind || ""); } catch (e) { /* a bad subscriber must not break a pull */ }
+    }
   }
 
   /**
@@ -1383,8 +1424,8 @@
     if (!rec || !rec.loadouts || !rec.loadouts.length) return false;
     state.record = rec;
     state.loadouts = rec.loadouts;
-    state.bestLoadout = rec.best || 0;
-    state.loadoutIdx = rec.best || 0;
+    state.bestLoadout = rec.best || 0;                       // what the board ranks: the ▲
+    state.loadoutIdx = rec.pick != null ? rec.pick : (rec.best || 0);   // what we OPEN on: the raid tab
     var btn = $("bi-pull-refresh");
     if (btn) { btn.style.display = ""; syncSourceUI(); }
     renderLoadoutPills();
@@ -1983,6 +2024,20 @@
     // The one load entry point — a chip, the character banner and the console all
     // come through here, so every path lands in identical state.
     loadCharacter: loadCharacter,
+    /**
+     * cb(message, kind) after every status line a pull writes; kind is "",
+     * "working", "ok" or "err". Returns an unsubscribe. For anything that shows
+     * the same sentence somewhere else — the character picker does — so nobody
+     * has to watch the status element for it.
+     */
+    onStatus: function (cb) {
+      if (typeof cb !== "function") return function () {};
+      statusListeners.push(cb);
+      return function () {
+        var i = statusListeners.indexOf(cb);
+        if (i !== -1) statusListeners.splice(i, 1);
+      };
+    },
     record: function () { return state.record; },
     // The board figure + where a bracelet sits on the board (app.js draws both).
     defaultScore: defaultScore,

@@ -137,6 +137,7 @@
       deckOpen: false,               // the deck starts COLLAPSED; the results come first
       // ---- import provenance (see the header) ----
       char: null,                    // { name, region, class, itemLevel, source, pulledAt, cached }
+      importSnap: null,              // the BRACELET an import applied, whole — "Reset to imported" replays it
       prov: {},                      // state path -> the character name it came from, while untouched
       provWas: {},                   // state path -> the value that character suggested, kept after
       provNote: {}                   // state path -> what the page ACTUALLY said, in words
@@ -440,12 +441,6 @@
   // blocks it. The mode decides which profile the SCORING reads, nothing else;
   // the note beside the toggle is what says so.
 
-  // The one line the whole deck turns on: an import fills the LEFT column and
-  // nothing else. Everything in the right column is judgement the user supplies.
-  var DISCLAIMER_HTML = '<span class="bc-pmodedisc">Character settings only fill the ' +
-    '<b>left column</b> — honing, accessories, gems, the stone and Master. The ' +
-    '<b>right column</b> — fight shares, trait weights, skills and economy — is ' +
-    'yours to set, and no import ever touches it.</span>';
 
   /**
    * ROW 3 of the character header: which settings the numbers are on, the two
@@ -465,19 +460,33 @@
   function modeControlHtml() {
     if (!hasCharacter()) return "";
     var def = onDefaults(), who = esc(S.char.name);
+    // TWO PILLS, one pressed — the same segmented control Grade and Granted slots
+    // use, and the same shape as the loadout pills above. It was one button that
+    // rewrote its own label, and a label like "Character settings" reads as the
+    // state you are in to half the room and the state you would move to for the
+    // other half (Shizu, 2026-08-11). A pressed pill cannot be read two ways.
     var h = '<div class="bc-modeline"><span class="lab">Scoring on</span>' +
-      '<button type="button" class="bc-pmodebtn' + (def ? " def" : "") + '" data-pmode="' +
-      (def ? "character" : "default") + '">' +
-      (def ? "Default settings" : "Character settings") + "</button></div>";
+      '<div class="bc-seg bc-modeseg" role="group" aria-label="Scoring on">' +
+      '<button type="button" data-pmode="default" aria-pressed="' + (def ? "true" : "false") +
+        '" data-gloss="Score on the canonical default profile — the one the leaderboard ranks everyone on. ' +
+        'The deck stays editable; nothing reads it while this is pressed.">Default settings</button>' +
+      '<button type="button" data-pmode="character" aria-pressed="' + (def ? "false" : "true") +
+        '" data-gloss="Score on the settings in the deck, which ' + who +
+        '\'s character page filled in and you can edit.">Character settings</button>' +
+      "</div></div>";
     h += '<div class="bc-modeline">';
-    if (provWasCount()) {
+    if (hasImport()) {
       h += '<button type="button" class="mbtn" data-bcreset="imported"' +
-        ' data-gloss="Put every value ' + who + "'s character page suggested back, marks and all." +
-        ' Only the left column ever came from the page.">Reset to imported</button>';
+        ' data-gloss="Puts the import back, both halves: the bracelet ' + who + " was wearing — granted lines," +
+        ' combat traits, grade, granted slots, rolls left and the padlocks — and every value the character page' +
+        ' filled in on the left. The fight, trait, skill and economy settings on the right are yours and are left' +
+        ' alone; a cut you were part-way through is dropped, because it was judged against the other bracelet.">' +
+        "Reset to imported</button>";
     }
     h += '<button type="button" class="mbtn" data-bcreset="defaults"' +
-      ' data-gloss="Clears BOTH columns back to the calculator\'s defaults — the imported gear on the left and' +
-      ' the fight, trait, skill and economy settings you chose on the right. The bracelet itself is left alone.">' +
+      ' data-gloss="Puts the SETTINGS back to the calculator\'s defaults — gear, accessories, gems and the two nodes' +
+      ' on the left, the fight, trait, skill and economy settings on the right, and the bracelet\'s grade, granted' +
+      ' slots and rolls left in the Grader. It keeps ' + who + ' loaded, and it leaves the lines you typed alone.">' +
       "Reset to defaults</button></div>";
     return h;
   }
@@ -490,15 +499,14 @@
    */
   function modeNoteHtml() {
     if (!hasCharacter()) return "";
-    var def = onDefaults(), who = esc(S.char.name);
-    return '<div class="bc-pmode">' +
-      '<span class="bc-pmodenote">' +
-      (def
-        ? "Every number is on the canonical default profile — the one the leaderboard ranks everyone on. " +
-          "The Character deck stays editable; nothing reads it until you switch back."
-        : "Every number is on the settings in the deck, which " + who + "'s character page filled in and you can edit. " +
-          "Switch to the defaults to see the figure the leaderboard ranks.") +
-      "</span>" + DISCLAIMER_HTML + "</div>";
+    // The prose that used to sit here (which profile the numbers are on, and the
+    // left-column/right-column note) is gone — Shizu, 2026-08-11. The toggle
+    // beside it already says which mode is active, and the provenance markers
+    // already show which fields an import filled; saying it again in two
+    // paragraphs was noise. The empty wrapper went with it: a div with a margin
+    // and nothing in it is a gap nobody asked for. The function stays because
+    // three tabs call it, and each of them writes the answer into its own host.
+    return "";
   }
 
   /** How many values a character page ever suggested — "Reset to imported" needs one. */
@@ -735,19 +743,83 @@
     return txt;
   }
 
-  /** Put every imported value back, marks and all. */
+  // ------------------------------------------------------------------
+  // the import snapshot
+  //
+  // An import lands in two halves. The LEFT COLUMN arrives through
+  // applyImported, path by path, and each path is remembered in provWas. The
+  // BRACELET arrives through app.js's applyImport as one patch — the granted
+  // rows, the two combat traits, the grade, the granted-slot count, rolls left
+  // and the padlocks the character is wearing — and none of that has a path in
+  // provWas, so "Reset to imported" used to put the character settings back and
+  // leave the bracelet exactly as the user had rerolled it (Shizu, 2026-08-11:
+  // "when i click reset to imported the bracelet itself doesn't reset").
+  //
+  // So the whole applied patch is kept here, taken from the state AFTER it
+  // landed — that is the honest record of what the import made the bracelet,
+  // fitted rows and all. It is part of the saved blob, so it survives a reload.
+  // ------------------------------------------------------------------
+
+  var SNAP_KEYS = ["grade", "slots", "rollsLeft", "traits", "rows", "fixedRows", "locks"];
+
+  function clone(v) {
+    if (v === null || typeof v !== "object") return v;
+    try { return JSON.parse(JSON.stringify(v)); } catch (e) { return null; }
+  }
+
+  /** Record the bracelet an import just applied. app.js calls this. */
+  function setImportSnapshot() {
+    var snap = { charKey: charKey() }, i, k;
+    for (i = 0; i < SNAP_KEYS.length; i++) { k = SNAP_KEYS[i]; snap[k] = clone(S[k]); }
+    S.importSnap = snap;
+    save();
+    modeRepaint();               // the "Reset to imported" button appears with it
+    return snap;
+  }
+
+  /** The snapshot, if it belongs to the character currently loaded. */
+  function importSnapshot() {
+    var s = S.importSnap;
+    if (!s) return null;
+    // A snapshot from an earlier character must not be replayed onto this one.
+    // Both keys null (a bracelet imported with no character attached) still match.
+    return (s.charKey || null) === (charKey() || null) ? s : null;
+  }
+
+  /** Is there anything for "Reset to imported" to go back to? */
+  function hasImport() { return !!(provWasCount() || importSnapshot()); }
+
+  /**
+   * Put the import back — BOTH halves. Every value the character page suggested,
+   * marks and all, and the bracelet exactly as the import left it.
+   *
+   * The cut in progress goes with it: a rolled set, and the verdict the Advisor
+   * is showing, were computed against the bracelet being replaced. Leaving a
+   * keep-or-replace answer on screen beside a different bracelet is the same
+   * class of bug as judging a cut against a stale solve, and the `reset` in the
+   * notification is what tells app.js and advisor.js to drop theirs.
+   */
   function resetToImported() {
-    var k, any = false;
+    var k, any = false, i, snap = importSnapshot();
     for (k in S.provWas) if (Object.prototype.hasOwnProperty.call(S.provWas, k)) {
       try { setPath(S, k, S.provWas[k]); } catch (e) { continue; }
       S.prov[k] = provWho() || "the character page";
+      any = true;
+    }
+    if (snap) {
+      for (i = 0; i < SNAP_KEYS.length; i++) {
+        k = SNAP_KEYS[i];
+        if (snap[k] !== undefined) S[k] = clone(snap[k]);
+      }
+      S.rolled = null;           // the cut in progress described the bracelet being replaced
+      S.history = [];            // and so does every undo entry behind it
       any = true;
     }
     if (!any) return;
     fitRows();
     save();
     renderAll();
-    notify({ shape: true, immediate: true, imported: true });
+    notify({ shape: true, immediate: true, imported: true, reset: "imported" });
   }
 
   /**
@@ -824,8 +896,10 @@
   // must not forget who you are.
   // ------------------------------------------------------------------
 
-  /** Everything that describes the PLAYER. The bracelet is untouched. */
+  /** Everything that describes the PLAYER. The bracelet's LINES are untouched. */
   var CHARACTER_BLOCKS = ["gear", "ov", "kit", "fight", "adv", "econ"];
+  /** The three settings that ride in the Grader, beside the lines they describe. */
+  var GRADER_SETTINGS = ["grade", "slots", "rollsLeft"];
 
   function resetCharacter() {
     var d = defaults(), i, k;
@@ -835,8 +909,23 @@
     }
     S.useOverride = d.useOverride;
     S.skills = d.skills;
-    // The import described a character; with the character gone, so are its marks.
-    S.char = null; S.prov = {}; S.provWas = {}; S.provNote = {};
+    // Grade, granted slots and rolls left come back to their defaults too
+    // (Shizu, 2026-08-11, when the three moved into the Grader). The LINES you
+    // typed stay — "Reset bracelet" is the button for those — but a cut in
+    // progress described a bracelet with a different shape, so it goes.
+    for (i = 0; i < GRADER_SETTINGS.length; i++) { k = GRADER_SETTINGS[i]; S[k] = d[k]; }
+    S.locks = null; S.rolled = null;
+    // WHO IS LOADED IS NOT A SETTING. This used to null S.char and wipe every
+    // provenance map with it, so "Reset to defaults" quietly forgot the
+    // character: the banner painted itself empty, the name, the chips, the three
+    // stats and the field rank all went, and "Reset to imported" had nothing left
+    // to go back to (Shizu, 2026-08-11). The character, and everything a page
+    // ever suggested for it, survive a reset of the settings.
+    //
+    // The live MARKS do come off, because the fields now hold the calculator's
+    // defaults rather than the page's numbers — so each label goes back to
+    // reading "<Name> suggests +21", which is exactly what is true.
+    S.prov = {};
     fitRows();
     save();
     renderAll();
@@ -903,9 +992,15 @@
       ".bc-prov b{color:var(--accent)}" +
       ".bc-imp .lb,.bc-imp>label{color:var(--accent)}" +
       ".bc-imp .lb::after,.bc-imp>label::after{content:'\\2022';color:var(--accent);margin-left:5px}" +
-      // A toggle is its own label, so it takes the accent and the dot directly.
-      "button.bc-tgl.bc-imp{color:var(--accent);border-color:var(--accent)}" +
-      "button.bc-tgl.bc-imp::after{content:'\\2022';margin-left:5px}" +
+      // A toggle is its own label, so the mark has to land on the button. It must
+      // NOT be the accent text and border the PRESSED state uses: "Master · off"
+      // with an accent outline read as Master being on, when the outline only
+      // meant "this came from the character page" (Shizu's screenshot,
+      // 2026-08-11). So provenance is an accent RULE down the left edge plus the
+      // dot every other imported control carries, and on/off keeps the whole
+      // button to itself.
+      "button.bc-tgl.bc-imp{border-left:3px solid var(--accent);padding-left:12px}" +
+      "button.bc-tgl.bc-imp::after{content:'\\2022';color:var(--accent);margin-left:5px}" +
       // ---- the two-column control deck -------------------------------
       ".bc-deck{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px 22px}" +
       "@media(max-width:900px){.bc-deck{grid-template-columns:1fr;gap:0}}" +
@@ -922,7 +1017,16 @@
       ".bc-sl .chip.ed{cursor:text;text-decoration:underline dotted;text-underline-offset:3px}" +
       ".bc-sl .chip input{width:100%;background:var(--panel2);color:var(--text);border:1px solid var(--accent);border-radius:5px;padding:2px 4px;font:inherit;font-size:12px;text-align:right}" +
       ".bc-sl .tk{min-width:0}" +
-      ".bc-ticks{display:grid;font-size:9.5px;color:var(--dim);text-align:center;margin-top:-2px;letter-spacing:.03em}" +
+      // Tick labels sit UNDER their own notch, which equal columns cannot do: a
+      // range thumb travels between thumb/2 and width − thumb/2, so a label
+      // centred in column i drifts off its stop, worst at the two ends ("6" right
+      // of the first notch, "10" left of the last — Shizu, 2026-08-11). Each
+      // label is placed at the thumb's own centre instead: thumb/2 + i/(n−1) of
+      // the travel. --bc-thumb is the thumb width from the rules below, in one
+      // place, so the two cannot drift apart.
+      ".bc-sl{--bc-thumb:15px}" +
+      ".bc-ticks{position:relative;height:12px;font-size:9.5px;color:var(--dim);margin-top:-2px;letter-spacing:.03em}" +
+      ".bc-ticks span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap}" +
       // Native range, styled to the house theme — no custom drag code.
       ".bc-sl input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:transparent;margin:0;padding:0;cursor:pointer;display:block}" +
       ".bc-sl input[type=range]::-webkit-slider-runnable-track{height:5px;border-radius:3px;background:var(--panel2);border:1px solid var(--border)}" +
@@ -946,15 +1050,25 @@
       // the parser threw away too — so the rolls slider, still sized for a grid
       // cell it no longer had, sat on top of its neighbours. That is the overlap
       // Shizu photographed (2026-08-11).
-      // In the header cluster they read as a short stacked list, one label above
-      // its control, so grade lines up with the scoring toggle beside it and
-      // granted slots with the resets.
+      // Borrowed by a tab with no Grader (the Tier List, the Advisor) they read
+      // as a short stacked list in the control cluster, one label above its
+      // control. In the Grader they lie along ONE line instead — see #bc-tophost
+      // below — because there is a full panel width to spend there.
       ".bc-brachdr{min-width:150px}" +
       ".bc-toprow{display:flex;flex-direction:column;gap:9px}" +
       ".bc-toprow .bc-segrow,.bc-toprow .bc-sl{display:block;margin:0;min-width:0}" +
       ".bc-toprow .lb{display:block;margin-bottom:4px}" +
       ".bc-toprow .bc-sl .tk{display:inline-block;width:calc(100% - 56px);vertical-align:middle}" +
       ".bc-toprow .bc-sl .chip{display:inline-block;width:52px;text-align:right;vertical-align:middle}" +
+      // ---- the three in their real home: one line inside the Grader ----
+      // They wrap onto their own lines on a phone; the rolls track takes whatever
+      // width is left over, so it never squeezes the two pill groups.
+      "#bc-tophost{margin:2px 0 12px}" +
+      "#bc-tophost .bc-brachdr{min-width:0}" +
+      "#bc-tophost .bc-toprow{flex-direction:row;flex-wrap:wrap;align-items:flex-end;gap:10px 22px}" +
+      "#bc-tophost .bc-toprow>*{flex:0 0 auto}" +
+      "#bc-tophost .bc-toprow .bc-segrow{min-width:132px}" +
+      "#bc-tophost .bc-toprow .bc-sl{flex:1 1 200px;min-width:180px}" +
       ".bc-seg{display:flex;gap:4px}" +
       ".bc-seg button{flex:1 1 0;min-width:0;background:var(--panel2);border:1px solid var(--border);color:var(--dim);" +
         "border-radius:6px;padding:5px 2px;font-size:11.5px;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap}" +
@@ -996,15 +1110,10 @@
       ".bc-modestack{display:flex;flex-direction:column;gap:9px}" +
       ".bc-modeline{display:flex;align-items:center;gap:8px;flex-wrap:wrap}" +
       ".bc-modeline .lab{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--dim);font-weight:700}" +
-      ".bc-pmodebtn{background:var(--panel);border:1px solid var(--border);border-radius:99px;" +
-        "padding:5px 14px;font-size:12px;font-weight:700;font-family:inherit;color:var(--text);cursor:pointer;white-space:nowrap;" +
-        "transition:border-color .12s,color .12s,background .12s}" +
-      ".bc-pmodebtn:hover{border-color:var(--accent);color:var(--accent)}" +
-      ".bc-pmodebtn.def{background:var(--accent);color:#06121f;border-color:var(--accent)}" +
-      ".bc-pmode{margin-top:10px}" +
-      ".bc-pmodenote,.bc-pmodedisc{display:block;font-size:11px;color:var(--dim);line-height:1.5;max-width:92ch}" +
-      ".bc-pmodedisc{margin-top:3px}" +
-      ".bc-pmodedisc b{color:var(--text);font-weight:700}" +
+      // The scoring pills size to their own words rather than splitting the row
+      // evenly — "Default settings" and "Character settings" are not the same
+      // length, and a squashed pill wraps mid-word.
+      ".bc-modeseg button{flex:0 0 auto;white-space:nowrap}" +
       // Phones: the cluster's two columns become one, full width.
       "@media(max-width:560px){.bc-hdrctl{gap:12px}" +
       ".bc-hdrctl .bc-modestack,.bc-hdrctl .bc-brachdr{flex:1 1 100%;min-width:0}}" +
@@ -1083,8 +1192,15 @@
     var fmt = FMT[fmtKey] || FMT.raw;
     var v = num(getPath(S, path), min), t = "";
     if (o.ticks) {
-      t = '<div class="bc-ticks" style="grid-template-columns:repeat(' + o.ticks.length + ',1fr)">';
-      for (var i = 0; i < o.ticks.length; i++) t += "<span>" + esc(o.ticks[i]) + "</span>";
+      // One label per stop, each parked at the centre the thumb reaches there.
+      // See .bc-ticks in the stylesheet for why this is not a grid.
+      var n = o.ticks.length;
+      t = '<div class="bc-ticks">';
+      for (var i = 0; i < n; i++) {
+        var f = n > 1 ? i / (n - 1) : 0.5;
+        t += '<span style="left:calc(var(--bc-thumb)/2 + ' + f.toFixed(6) +
+          ' * (100% - var(--bc-thumb)))">' + esc(o.ticks[i]) + "</span>";
+      }
       t += "</div>";
     }
     return '<div class="bc-sl' + (o.cls ? " " + o.cls : "") + '">' +
@@ -1126,11 +1242,11 @@
       '    <span class="tgl" id="bc-toggle"><span id="bc-caret">&#9656;</span></span></div>' +
       '  <div id="bc-inputs-body" style="display:none">' +
       '    <div class="bc-prov" id="bc-prov" style="display:none"></div>' +
-      // #bc-top (grade / granted slots / rolls left) is NOT here any more: those
-      // three describe the BRACELET, not the character, so they are adopted into
-      // the Bracelet panel's header (see buildTop / adoptBraceletPanel). Sitting
-      // in the deck they collided with the provenance strip above them and said
-      // the same thing as the banner's chips.
+      // #bc-top (grade / granted slots / rolls left) is NOT here: those three
+      // describe the BRACELET, not the character, so they live in the Grader
+      // panel (see buildTop / adoptBraceletPanel). Sitting in the deck they
+      // collided with the provenance strip above them and said the same thing as
+      // the banner's chips.
       '    <div class="bc-deck">' +
       '      <div class="bc-col">' +
       '        <div class="bc-gearhdr"><div class="subh">Gear</div>' +
@@ -1140,7 +1256,7 @@
       '        <div id="bc-kit"></div>' +
       '        <div class="barrow">' +
       '          <button class="mbtn" id="bc-advtoggle" type="button">Advanced ▾</button>' +
-      '          <button class="mbtn" id="bc-reset" type="button" data-gloss="Puts BOTH columns back to the calculator\'s defaults — gear, accessories, gems and the two nodes on the left, and the fight, trait, skill and economy settings on the right. The bracelet itself is left alone.">Reset to defaults</button>' +
+      '          <button class="mbtn" id="bc-reset" type="button" data-gloss="Puts the settings back to the calculator\'s defaults — gear, accessories, gems and the two nodes on the left, the fight, trait, skill and economy settings on the right, and the bracelet\'s grade, granted slots and rolls left in the Grader. The character stays loaded, and the lines you typed are left alone.">Reset to defaults</button>' +
       '        </div>' +
       '      </div>' +
       '      <div class="bc-col">' +
@@ -1167,11 +1283,15 @@
   /**
    * Grade, granted slots and rolls left.
    *
-   * They render into #bc-top, which is not in the deck any more: it is one
-   * element this file builds and re-parents into the CHARACTER HEADER's
-   * right-hand control cluster, beside the scoring toggle and the two resets
-   * (Shizu's mock-up, 2026-08-11 — everything you press lives in one place, to
-   * the right of everything you read).
+   * They render into #bc-top, one element this file builds and parents into the
+   * GRADER panel's own #bc-tophost (app.js's markup, adoptBraceletPanel does the
+   * placing). They sat in the character header's control cluster until
+   * 2026-08-11, which was wrong twice over: that banner is rebuilt by
+   * renderCharHeader, so a rolls-left drag destroyed the slider under the hand,
+   * and with no character loaded the banner is not drawn at all, so all three
+   * controls disappeared from the page. They describe the bracelet, the Grader
+   * grades the bracelet, and nothing rewrites that panel (Shizu: "move that to
+   * the grader so it only interacts with the grader").
    *
    * Grade and slot count are two-option choices, so they read as left/right
    * pills like the loadout switch. Rolls left keeps a tight track because it
@@ -1187,6 +1307,7 @@
       "The rerollable lines. Ancient: 3 slots on 25% of drops, 2 on 75%. Slot count moves the value of an unrolled bracelet a lot.");
     h += slider("rollsLeft", "Rolls left", 0, 7, 1, "rolls",
       { cls: "bc-sl-tight",
+        ticks: ["0", "1", "2", "3", "4", "5", "6", "7"],
         gloss: "A fresh bracelet has 4 rolls plus up to 3 reconversion-ticket rolls = 7. The chip splits the two while the ticket rolls are still there. The cut flow counts this down." });
     h += "</div>";
     buildTop().innerHTML = h;
@@ -1425,11 +1546,13 @@
       // is the honest baseline: worth then answers "what is upgrading worth",
       // not "what is this worth against no bracelet at all".
       //
-      // Rounded DOWN to two decimals, never up. Rounding up puts the baseline a
-      // hair above the score it was taken from, and a bracelet with no rolls left
-      // then reports a small NEGATIVE worth — an arithmetic artefact reading as a
-      // verdict.
-      S.econ.baseline = Math.max(0, Math.floor(num(o.currentPct, 0) * 100) / 100);
+      // Taken EXACTLY, not rounded down. The rounding was a workaround: worth was
+      // (expected final − baseline) × gold back then, so a baseline a hair above
+      // the score it came from turned a bracelet with no rolls left into a small
+      // NEGATIVE worth. Worth is now the truncated expectation the model defines
+      // — you are paid only by the outcomes that beat the baseline — so the same
+      // bracelet reports zero, which is the true answer, and the workaround can go.
+      S.econ.baseline = Math.max(0, num(o.currentPct, 0));
       S.econ.baseAutoKey = key;
       moved = true;
     }
@@ -1448,7 +1571,7 @@
     h += gpdNoteHtml();
     h += slider("econ.baseline", "Baseline %", 0, 25, 0.5, "pct1", {
       edit: true,
-      gloss: "The bracelet you would wear instead. Worth is (expected final − baseline) × gold per 1%, so leaving it at 0 prices this bracelet against no bracelet at all. Importing a character sets it to the bracelet that character is already wearing, which is the comparison that answers \"is upgrading worth it\". Click the number to type an exact one."
+      gloss: "The bracelet you would wear instead. Worth counts only the rolls that BEAT it — how often they land, times how far they clear it, times gold per 1% — so leaving it at 0 prices this bracelet against no bracelet at all, and a bracelet that cannot clear the baseline is worth nothing rather than a negative number. Importing a character sets it to the bracelet that character is already wearing, which is the comparison that answers \"is upgrading worth it\". Click the number to type an exact one."
     });
     h += baselineNoteHtml();
     $("bc-econ").innerHTML = h;
@@ -1564,11 +1687,16 @@
 
   /**
    * A tab hands over its right-hand control cluster (and, optionally, the
-   * full-width element the note goes in). The tab that calls this LAST owns
-   * #bc-top, exactly as the tab that calls mount() last owns the deck — a
-   * repaint of the other tab's cluster never steals it back.
+   * full-width element the note goes in): the scoring toggle, the two resets and
+   * the line that says what an import fills.
+   *
+   * `opts.withTop === false` leaves the bracelet's three settings where they are.
+   * The Calculator passes it, because those three live in its Grader panel now
+   * (see adoptBraceletPanel) and a cluster repaint must never drag them back into
+   * the banner. Every other tab has no Grader to put them in, so they still ride
+   * along with the cluster and the tab that asked last keeps them.
    */
-  function mountModeControl(hostEl, noteEl) {
+  function mountModeControl(hostEl, noteEl, opts) {
     if (!hostEl) return null;
     pruneModeHosts();
     var i, e = null;
@@ -1576,9 +1704,26 @@
     if (!e) { e = { host: hostEl, note: noteEl || null }; modeHosts.push(e); }
     else e.note = noteEl || e.note;
     paintModeHost(e);
-    var top = buildTop();
-    if (top.parentNode !== hostEl) hostEl.appendChild(top);
+    if ((!opts || opts.withTop !== false) && onScreen(hostEl)) {
+      var top = buildTop();
+      if (top.parentNode !== hostEl) { hostEl.appendChild(top); renderTop(); }
+    }
     return hostEl;
+  }
+
+  /**
+   * Is this element in the tab the user is looking at?
+   *
+   * The one movable control may only ever be taken by the VISIBLE tab. The Tier
+   * List redraws its control cluster on every profile change, tab or no tab, and
+   * that redraw used to pull the bracelet's three settings into a hidden pane —
+   * so grade, granted slots and rolls left simply disappeared off the Calculator
+   * while the user was working in it, with no tab switch involved (2026-08-11).
+   * Anything outside a tab pane altogether is treated as on screen.
+   */
+  function onScreen(el) {
+    var pane = el && el.closest ? el.closest(".tabpane") : null;
+    return !pane || pane.className.indexOf("active") >= 0;
   }
 
   // ------------------------------------------------------------------
@@ -1829,6 +1974,17 @@
   function adoptBraceletPanel() {
     var panel = document.getElementById("bc-braceletpanel");
     if (!panel) return;
+    // The bracelet's own three settings live HERE, in the panel that grades the
+    // bracelet — not in the character banner, which is rebuilt on every repaint
+    // and is not drawn at all until a character is loaded. Another tab may have
+    // borrowed the element (see mountModeControl); this claims it back, so it
+    // runs before the early return below rather than after it.
+    var host = document.getElementById("bc-tophost");
+    if (host && onScreen(host)) {
+      var top = buildTop();
+      if (top.parentNode !== host) host.appendChild(top);
+      renderTop();
+    }
     var hdr = panel.getElementsByClassName("bc-hdrow")[0];
     if (!hdr) return;
     var h2 = hdr.getElementsByTagName("h2")[0];
@@ -1851,9 +2007,10 @@
   /**
    * The bracelet's three settings, as one element that lives outside the deck.
    *
-   * It is built detached and adopted into the Bracelet panel on the first mount,
-   * so renderTop() always has something to write into — even on the Tier List,
-   * which has no Bracelet panel and simply leaves the element where it is.
+   * Built detached and parented into the Grader panel's #bc-tophost on the first
+   * mount, so renderTop() always has something to write into — even on the Tier
+   * List, which has no Grader and borrows the element into its control cluster
+   * instead. The Calculator claims it back on activation.
    */
   var topEl = null;
   function buildTop() {
@@ -1955,6 +2112,8 @@
     /** The two scoped resets the panel's buttons call. Neither asks first. */
     resetCharacter: resetCharacter,
     resetBracelet: resetBracelet,
+    /** Put the whole import back — the bracelet as well as the left column. */
+    resetToImported: resetToImported,
 
     // ---- state maintenance the other modules need ----
     save: save,                 // after a direct mutation (the cut flow rewrites rows)
@@ -1985,6 +2144,13 @@
     applyImported: applyImported,
     /** The Worker's §1.1 `profile` block -> every control in the left column. */
     applyCharacterProfile: applyCharacterProfile,
+    /**
+     * Remember the bracelet an import has just applied, so "Reset to imported"
+     * can put it back. Call it AFTER the patch has landed: it photographs the
+     * state, not the patch, so what it keeps is what the bracelet actually
+     * became — rows fitted to the slot count and all.
+     */
+    setImportSnapshot: setImportSnapshot,
 
     // ---- the two economy defaults ----
     /** Seed gold-per-1% and the baseline from a character. Once per character. */

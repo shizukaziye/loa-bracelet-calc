@@ -65,8 +65,80 @@
   // Gold always converts the EXACT damage percentage, never the log-space score,
   // so the arithmetic on screen matches the percentages printed beside it.
   function gpd() { return num(S.econ.gpd, 0); }
-  function valueGold(D) { return (pct(D) - num(S.econ.baseline, 0)) * gpd(); }
+  // A DIFFERENCE between two options — lock mask A against lock mask B. Both are
+  // futures you could still choose, so this one is signed on purpose.
   function deltaGold(Da, Db) { return (pct(Da) - pct(Db)) * gpd(); }
+
+  /**
+   * WHAT A BRACELET IS WORTH, in gold. The model's own definition, applied to the
+   * distribution the solver just returned:
+   *
+   *     E[ max(0, final% - baseline%) ] x gold per 1%
+   *
+   * You are paid only by the outcomes that BEAT the bracelet you would wear
+   * instead, weighted by how often they happen and by how far they clear it. So
+   * the figure is never negative: a bracelet you would not equip is worth
+   * nothing, not a debt.
+   *
+   * It used to be (expectedFinal - baseline) x gold — a difference of means,
+   * which goes negative the moment the baseline outruns the bracelet, and which
+   * compared a LOG-SPACE score against a damage percentage, mixing units on top
+   * (Shizu, 2026-08-11). Both halves of that are gone.
+   *
+   * Why the arithmetic is here and not read off res.valueGold: the solve is run
+   * with goldPer1Pct 0 and baselinePct 0 on purpose (see solveState), because
+   * keeping gold out of the cache key is what lets the gold slider drag without
+   * a three-second re-solve. The worker's own valueGold is therefore always 0.
+   * The distribution is the expensive part; this is the cheap sum over it.
+   *
+   * The cdf arrives THINNED to ~400 rungs, so each rung stands for the whole
+   * interval below it — take that interval's MIDPOINT rather than its top end,
+   * or the answer prices several percent high.
+   *
+   * `shift` moves every outcome by a constant log-space offset: how the unrolled
+   * card reprices one solved distribution at a different combat-trait total.
+   *
+   * Returns { gold, p } — the worth, and the odds of clearing the baseline at
+   * all — or null before a solve has landed.
+   */
+  function worthOf(res, shift) {
+    if (!res || !res.finalScore || !res.finalScore.cdf || !res.finalScore.cdf.length) return null;
+    var cdf = res.finalScore.cdf, base = num(S.econ.baseline, 0), off = num(shift, 0);
+    var acc = 0, p = 0, prev = 0, prevS = null, i, m, s, over;
+    for (i = 0; i < cdf.length; i++) {
+      m = cdf[i].cum - prev;
+      prev = cdf[i].cum;
+      s = prevS === null ? cdf[i].score : (prevS + cdf[i].score) / 2;
+      prevS = cdf[i].score;
+      if (m <= 0) continue;
+      over = pct(s + off) - base;
+      if (over > 0) { acc += m * over; p += m; }
+    }
+    return { gold: acc * gpd(), p: p };
+  }
+
+  /** Odds, read as odds: down to a hundredth when they are long, so a real chance never rounds to "0%". */
+  function oddsTxt(p) {
+    var v = clamp(num(p, 0), 0, 1) * 100;
+    if (v < 0.1) return "under 0.1%";
+    if (v < 1) return fx(v, 2) + "%";
+    if (v >= 99.95) return "very nearly all";
+    return fx(v, v < 10 ? 1 : 0) + "%";
+  }
+
+  /** The odds half of what a worth figure means, in one sentence. */
+  function worthNote(w) {
+    if (!w) return "";
+    var base = fx(num(S.econ.baseline, 0), 2) + "% baseline";
+    if (w.p <= 0) return "Nothing this bracelet can roll beats your " + base + ", so it is worth nothing.";
+    return oddsTxt(w.p) + " of the outcomes beat your " + base +
+      ". Worth is how far they clear it, on average, at " + gold(gpd()) + " gold per 1%.";
+  }
+  function worthGloss(w) {
+    if (!w) return "What the bracelet is worth over the one you would wear instead. It needs a solve first.";
+    return "What this bracelet is worth over the one you would wear instead. " + worthNote(w) +
+      " It is never negative — a bracelet you would not equip is worth nothing, not a debt.";
+  }
 
   // ------------------------------------------------------------------
   // the shared state, in this file's terms
@@ -549,8 +621,10 @@
     ]);
   }
 
-  // Gold is deliberately NOT in the key: value = (expectedFinal − baseline) × gpd
-  // is arithmetic we redo here, so moving the gold slider never re-solves.
+  // Gold is deliberately NOT in the key, and the solve is sent goldPer1Pct 0 and
+  // baselinePct 0 for the same reason: worth is a sum over the distribution the
+  // solve returns (worthOf), so the gold slider and the baseline both redraw the
+  // number without re-solving. A solve is three seconds; the sum is microseconds.
   function keyOf(profile, granted, rolls) {
     return JSON.stringify([S.grade, S.slots, rolls, fixedLines(), granted, traitValues()]) + "|" + profileSig(profile);
   }
@@ -729,6 +803,8 @@
       "#tab-calculator .bc-profwrap:hover .bc-name a{color:var(--accent)}" +
       // ---- the three headline stats, astrogem's .gr-sum ----
       "#tab-calculator .bc-sum{display:flex;gap:20px;flex-wrap:wrap;align-items:center;margin-top:10px}" +
+      // A figure that belongs to a profile we have just switched away from.
+      "#tab-calculator .bc-stale{opacity:.38;transition:opacity .12s}" +
       "#tab-calculator .bc-sum .stat{display:flex;flex-direction:column}" +
       "#tab-calculator .bc-sum .stat .k{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim)}" +
       "#tab-calculator .bc-sum .stat .v{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums}" +
@@ -840,11 +916,24 @@
       '<div id="bc-loadouts"></div><div id="bc-charhdr"></div><div id="bc-deckhost"></div>';
   }
 
+  /**
+   * The Grader — everything that describes the bracelet being scored.
+   *
+   * #bc-tophost holds grade, granted slots and rolls left. Those three used to be
+   * adopted into the CHARACTER BANNER's control cluster, which was a mistake with
+   * two teeth in it: the banner is rebuilt by renderCharHeader, so moving the
+   * rolls slider destroyed the slider under the hand — and with no character
+   * loaded the banner is not drawn at all, so the three controls vanished from
+   * the page entirely. They belong beside the lines they describe (Shizu,
+   * 2026-08-11: "move that to the grader so it only interacts with the grader"),
+   * and nothing ever rewrites this panel's markup.
+   */
   function braceletMarkup() {
     return '' +
       '<div class="panel" id="bc-braceletpanel">' +
       '  <div class="bc-hdrow"><h2 style="margin:0">Bracelet</h2>' +
       '    <button class="mbtn" id="bc-clear" type="button">Mark as unrolled</button></div>' +
+      '  <div id="bc-tophost"></div>' +
       '  <div class="bc-sub" id="bc-slotnote"></div>' +
       '  <div class="subh">Combat traits — the two fixed lines</div>' +
       '  <div id="bc-traits"></div>' +
@@ -1070,17 +1159,17 @@
   }
 
   function cardsHtml(res, profile) {
-    var baseD = num(S.econ.baseline, 0);
     var curPct = pct(res.currentScore), finPct = pct(res.expectedFinal);
-    var val = valueGold(res.expectedFinal);
+    var w = worthOf(res, 0);
     var h = '<div class="bc-cards">';
     h += '<div class="bc-card"><div class="k">Current score</div><div class="v">' + fx(curPct, 2) +
       '%</div><div class="s">' + (res.unrolled ? "Unrolled — no granted lines yet." : "Damage over no bracelet, all lines combined.") + "</div></div>";
     h += '<div class="bc-card hero"><div class="k">Expected final</div><div class="v acc">' + fx(finPct, 2) +
       '%</div><div class="s">Where it lands after ' + S.rollsLeft + " roll" + (S.rollsLeft === 1 ? "" : "s") +
       ' played perfectly<span data-gloss="Rolls are free, so rolling always beats stopping. This is the average final score under the best lock-and-keep policy — not a promise, an expectation.">*</span>.</div></div>';
-    h += '<div class="bc-card"><div class="k">Worth</div><div class="v gold">' + (val >= 0 ? "" : "−") + gold(Math.abs(val)) +
-      '</div><div class="s">(' + fx(finPct, 2) + "% − " + fx(baseD, 2) + "% baseline) × " + gold(gpd()) + " gold.</div></div>";
+    h += '<div class="bc-card"><div class="k" data-gloss="' + esc(worthGloss(w)) + '">Worth</div>' +
+      '<div class="v gold">' + (w ? gold(w.gold) : "—") + "</div>" +
+      '<div class="s">' + esc(worthNote(w)) + "</div></div>";
     if (freshSolve) h += unrolledCardHtml();
     return h + "</div>";
   }
@@ -1167,39 +1256,24 @@
   }
 
   /**
-   * What a sealed bracelet with this combat-trait total is worth, in gold.
+   * What a sealed bracelet with this combat-trait total is worth, in gold —
+   * worthOf() over the UNROLLED solve, shifted to the trait pair being priced.
    *
-   * E[max(0, final% − baseline%)] × gold-per-1%, taken over the whole solved
-   * distribution — the model's own definition of worth. A bracelet you would not
-   * wear is worth nothing, never a negative number, so the payoff is truncated at
-   * zero rather than read off the mean.
+   * The traits are a constant the solver adds outside the DP, so every outcome in
+   * the solved distribution simply moves by the difference between the pair on
+   * the slider and the pair that was solved. No re-solve, no worker round trip.
    *
-   * Two things the thinned cdf forces. The worker keeps ~400 of some thirty
-   * thousand rungs, so a rung's MASS has to come from the cumulative column
-   * (summing its own p would throw away most of the probability), and that mass
-   * really belongs to the whole interval the dropped rungs covered — charging it
-   * all at the interval's top end prices a maximum-trait bracelet 3.6% too high.
-   * Taking the interval's midpoint instead brings the answer back to within 0.2%
-   * of a full re-solve across the range, which is far inside what a gold figure
-   * can honestly claim.
+   * This function used to carry the truncated expectation itself, including the
+   * thinned-cdf midpoint correction — the one honest worth in the file while the
+   * headline figures ran a difference of means. Both now go through worthOf,
+   * which is where that arithmetic and its reasoning live.
    */
   function unrolledWorthAt(total) {
-    if (!freshSolve || !freshSolve.finalScore || !freshSolve.finalScore.cdf) return null;
-    var cdf = freshSolve.finalScore.cdf;
-    if (!cdf.length) return null;
+    if (!freshSolve) return null;
     var prof = buildProfile();
     var shift = B.traitDamage(traitsForTotal(total), prof) - num(freshSolve.traitDamage, 0);
-    var base = num(S.econ.baseline, 0), acc = 0, prev = 0, prevS = null, i, m, s, over;
-    for (i = 0; i < cdf.length; i++) {
-      m = cdf[i].cum - prev;
-      prev = cdf[i].cum;
-      s = prevS === null ? cdf[i].score : (prevS + cdf[i].score) / 2;
-      prevS = cdf[i].score;
-      if (m <= 0) continue;
-      over = pct(s + shift) - base;
-      if (over > 0) acc += m * over;
-    }
-    return acc * gpd();
+    var w = worthOf(freshSolve, shift);          // the same truncated expectation every worth uses
+    return w ? w.gold : null;
   }
 
   /** Three rungs down from the cap, so the shape of the curve reads at a glance. */
@@ -1476,6 +1550,26 @@
     box.innerHTML = cardsHtml(lastSolve, profile) +
       breakdownHtml(profile, lines, lastSolve);
     paintCharStats();          // the banner's headline stats read the same solve
+    markStale(false);
+  }
+
+  /**
+   * Dim every figure that is about to be replaced.
+   *
+   * Switching between default and character settings re-solves, and a solve is a
+   * second or three. Until it lands, the numbers on screen were computed on the
+   * OTHER profile — so the switch looked like it did nothing at all (Shizu,
+   * 2026-08-11: the toggle "does nothing visible"). It did: it just said so three
+   * seconds later, in numbers that often move only in the second decimal. Dimming
+   * them is the tool admitting they are stale. Every paint clears it.
+   */
+  function markStale(on) {
+    var els = [document.querySelector("#bc-charhdr .bc-sum"), $("bc-results")], i, e;
+    for (i = 0; i < els.length; i++) {
+      e = els[i];
+      if (!e) continue;
+      e.className = String(e.className).replace(/\s*\bbc-stale\b/g, "") + (on ? " bc-stale" : "");
+    }
   }
 
   /**
@@ -1487,11 +1581,37 @@
     if (!lastSolve) return;
     var p = $("bc-sum-pct");
     if (p) p.textContent = fx(pct(lastSolve.currentScore), 2) + "%";
-    var w = $("bc-sum-worth");
-    if (w) {
-      var val = valueGold(lastSolve.expectedFinal);
-      w.textContent = (val >= 0 ? "" : "−") + gold(Math.abs(val));
-    }
+    paintWorthStat(lastSolve);
+  }
+
+  function gradeLabel() { return S.grade === "relic" ? "Relic" : "Ancient"; }
+
+  /**
+   * The banner's two BRACELET chips, refreshed where they stand. The controls
+   * behind them are in the Grader, and a full renderCharHeader on every step of
+   * the rolls slider used to destroy the element being dragged.
+   */
+  function paintCharChips() {
+    var g = $("bc-chip-grade");
+    if (g) g.textContent = gradeLabel();
+    var r = $("bc-chip-rolls");
+    if (r) r.innerHTML = "rolls left <b>" + S.rollsLeft + "</b>";
+  }
+
+  /**
+   * The banner's WORTH figure and the tooltip that says what it means. The number
+   * alone is only half the story — the other half is how often this bracelet ever
+   * clears the baseline — and the banner has no room for a second line, so the
+   * odds ride in the gloss on the label. The card on the Calculator says it in
+   * prose, where there is room.
+   */
+  function paintWorthStat(res) {
+    var el = $("bc-sum-worth");
+    if (!el) return;
+    var w = res ? worthOf(res, 0) : null;
+    el.textContent = w ? gold(w.gold) : "—";
+    var k = $("bc-sum-worthk");
+    if (k) k.setAttribute("data-gloss", worthGloss(w));
   }
 
   // ------------------------------------------------------------------
@@ -1553,12 +1673,16 @@
       keepFocus(renderBracelet);
     } else {
       redrawLive();
-      // Two deck fields also sit in the character header's chips.
-      if (d.path === "rollsLeft" || d.path === "grade") renderCharHeader();
+      // Two of the Grader's settings also READ OUT in the banner's chips. Repaint
+      // those two chips only: renderCharHeader rebuilds the banner wholesale, and
+      // this path runs on every step of a drag.
+      if (d.path === "rollsLeft" || d.path === "grade") paintCharChips();
     }
     // The scoring toggle moved: every number on screen is on a different profile
-    // now, so the banner's figures and the priced pickers both have to follow.
-    if (d.mode) { renderCharHeader(); redrawLive(); }
+    // now, so the banner's figures and the priced pickers both have to follow —
+    // and until the re-solve lands they are dimmed, because they are still the
+    // other profile's answers.
+    if (d.mode) { renderCharHeader(); redrawLive(); markStale(true); }
     if (d.immediate) solveNow(); else schedule();
   }
 
@@ -1829,21 +1953,21 @@
     if (!c || !c.name) { box.innerHTML = ""; box.style.display = "none"; return; }
     box.style.display = "";
 
+    // The grade and rolls-left chips READ the bracelet; the controls that set it
+    // are in the Grader. The duplication is deliberate — and paintCharChips keeps
+    // these two current in place, because rebuilding the whole banner on every
+    // tick of a slider is what used to tear that slider apart.
     var chips = "";
     if (c.region) chips += '<span class="bc-chip">' + esc(c.region) + "</span>";
     if (c["class"]) chips += '<span class="bc-chip">' + esc(c["class"]) + "</span>";
     if (c.itemLevel != null) chips += '<span class="bc-chip">ilvl <b>' + esc(Number(c.itemLevel).toLocaleString("en-US")) + "</b></span>";
-    chips += '<span class="bc-chip">' + (S.grade === "relic" ? "Relic" : "Ancient") + "</span>";
-    chips += '<span class="bc-chip">rolls left <b>' + S.rollsLeft + "</b></span>";
+    chips += '<span class="bc-chip" id="bc-chip-grade">' + gradeLabel() + "</span>";
+    chips += '<span class="bc-chip" id="bc-chip-rolls">rolls left <b>' + S.rollsLeft + "</b></span>";
 
     // The live figures. Before the first solve lands they read "—" rather than a
-    // stale number from the bracelet that was on screen a moment ago.
-    var curTxt = "—", worthTxt = "—";
-    if (lastSolve) {
-      curTxt = fx(pct(lastSolve.currentScore), 2) + "%";
-      var val = valueGold(lastSolve.expectedFinal);
-      worthTxt = (val >= 0 ? "" : "−") + gold(Math.abs(val));
-    }
+    // stale number from the bracelet that was on screen a moment ago. Worth is
+    // written by paintWorthStat below, which owns its tooltip too.
+    var curTxt = lastSolve ? fx(pct(lastSolve.currentScore), 2) + "%" : "—";
 
     // LEFT is everything you read — who this is, and the three figures. RIGHT is
     // everything you press, in one cluster: the scoring toggle, the two resets
@@ -1865,7 +1989,8 @@
       '<div class="stat"><span class="k">Bracelet %</span><span class="v acc" id="bc-sum-pct">' + curTxt + "</span></div>" +
       '<div class="stat"><span class="k" data-gloss="A letter for the whole bracelet on the same ladder the model grades families with: its share of the best bracelet on the board. S is 90% of the best or better, A 70%, B 50%, C 30%, D 10%. Scored on the canonical default profile, like the board itself.">Rank</span>' +
         '<span class="v" id="bc-sum-rank">—</span></div>' +
-      '<div class="stat"><span class="k">Worth</span><span class="v gold" id="bc-sum-worth">' + worthTxt + "</span></div>" +
+      '<div class="stat"><span class="k" id="bc-sum-worthk">Worth</span>' +
+        '<span class="v gold" id="bc-sum-worth">—</span></div>' +
       "</div>" +
       '<div class="bc-fieldrank" id="bc-fieldrank"></div>' +
       "</div>" +
@@ -1873,6 +1998,8 @@
       "</div>" +
       '<div id="bc-pmodenote"></div>' +
       "</div>";
+
+    paintWorthStat(lastSolve);
 
     var star = $("bc-fav-star");
     if (star) {
@@ -1899,10 +2026,10 @@
       };
     }
 
-    // The banner is rebuilt on several paths, and #bc-top is a LIVE element that
-    // moves — so it is re-adopted into the fresh cluster after every repaint
-    // rather than being part of the markup above.
-    P.mountModeControl($("bc-hdrctl"), $("bc-pmodenote"));
+    // The cluster carries the scoring toggle, the two resets and the note. NOT
+    // the bracelet's three settings: withTop false leaves those in the Grader,
+    // where nothing rebuilds them.
+    P.mountModeControl($("bc-hdrctl"), $("bc-pmodenote"), { withTop: false });
 
     fillFieldRank(c);
   }
@@ -1948,16 +2075,16 @@
     recompute();
   }
 
-  // TWO elements move between tabs (see profile.js): the control deck, and
-  // #bc-top inside the header's control cluster. Claim both back whenever the
-  // Calculator is the tab on screen — claiming only the deck left grade, granted
-  // slots and rolls left behind in the Tier List's cluster.
+  // The control deck moves between tabs (see profile.js), so the Calculator
+  // claims it back whenever it is the tab on screen. P.mount also claims the
+  // bracelet's three settings back into the Grader, in case another tab borrowed
+  // them while it held the cluster.
   document.addEventListener("tabselected", function (e) {
     if (!e || !e.detail || e.detail.tab !== "calculator") return;
     var host = $("bc-deckhost");
     if (host) P.mount(host);
     var ctl = $("bc-hdrctl");
-    if (ctl) P.mountModeControl(ctl, $("bc-pmodenote"));
+    if (ctl) P.mountModeControl(ctl, $("bc-pmodenote"), { withTop: false });
   });
 
   /**
@@ -1996,6 +2123,16 @@
       lastSolve = null; lastSolveKey = null; freshSolve = null; freshSolveKey = null;
       if (patch.character) next.char = patch.character;
       P.set(next);                                 // merges, persists, re-renders the deck, notifies
+      // Photograph the bracelet the import just made, AFTER the merge, so "Reset
+      // to imported" can replay the whole thing — rows, traits, grade, slots,
+      // rolls and the padlocks — and not just the left column. The state is the
+      // honest record: the patch may leave keys out, and fitRows may have
+      // reshaped the rows to the slot count.
+      //
+      // Only when a CHARACTER came with it. The Leaderboard and the screenshot
+      // reader push bracelets through this same hook, and "Reset to imported"
+      // means "put my character back", not "put back whatever I last looked at".
+      if (patch.character) P.setImportSnapshot();
       if (patch.character) importProfileValues(patch.character);
       renderCharHeader();
       return true;
