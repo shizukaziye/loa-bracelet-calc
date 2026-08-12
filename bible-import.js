@@ -381,7 +381,7 @@
     var dec = decodeWithGradeCheck(data.stats || []);
     var grade = dec.grade;
     var traits = { crit: { on: false, v: 120 }, spec: { on: false, v: 120 }, swift: { on: false, v: 120 } };
-    var traitOrder = [], rows = [], fixedRows = [], warn = [];
+    var traitOrder = [], rows = [], fixedRows = [], locks = [], warn = [];
     var i, line, r;
 
     for (i = 0; i < dec.lines.length; i++) {
@@ -395,7 +395,14 @@
       r = rowFor(line);
       if (!r) continue;
       if (line.unmatchedValue) warn.push("a special effect whose value matched no tier");
-      if (line.fixed) fixedRows.push(r); else rows.push(r);
+      // `fixed` on a lostark.bible line means LOCKED — the blue padlock the player
+      // set before a reroll — NOT the drop's fixed lines. It is routinely true on
+      // three or four lines, which no drop can produce. Sorting locked lines into
+      // fixedRows put them outside the granted set and left real slots empty, so
+      // the solver refused the bracelet as half-filled. Every non-trait line is a
+      // granted line; the padlock becomes a LOCK, which is what it is.
+      rows.push(r);
+      if (line.fixed) locks.push(rows.length - 1);
     }
 
     // The panel always shows exactly two combat traits. A bracelet that reported
@@ -432,7 +439,8 @@
       traits: traits,
       traitOrder: traitOrder,
       rows: rows,
-      fixedRows: fixedRows
+      fixedRows: fixedRows,
+      lockedIdx: locks
     };
 
     // numRerolls / numTicketRerolls: seen as 4 and 3 on live characters, which is
@@ -716,7 +724,11 @@
       var bits = [];
       if (char["class"] && cTotal >= 5) {
         var p = Math.max(1, Math.ceil(100 * (cBetter + 1) / (cTotal + 1)));
-        bits.push("Top " + p + "% of " + char["class"] + "s (#" + (cBetter + 1) + " of " + cTotal + ")");
+        // "Sorceress" + "s" reads as "Sorceresss". Classes ending in s, x or z take
+        // "es"; the rest take "s".
+        var cls = char["class"] || "";
+        var plural = /[sxz]$/i.test(cls) ? cls + "es" : cls + "s";
+        bits.push("Top " + p + "% of " + plural + " (#" + (cBetter + 1) + " of " + cTotal + ")");
       }
       bits.push("#" + (better + 1) + " of " + total.toLocaleString("en-US") + " tracked characters");
       var share = best > 0 ? mine / best : 0;

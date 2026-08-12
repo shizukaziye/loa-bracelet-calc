@@ -172,6 +172,47 @@
       .replace(/[;,]$/, "");
   }
 
+  /**
+   * The by-family view keeps the placeholders — the row is an average across all
+   * three tiers, so a concrete number would be a lie. "+X%" reads as "some
+   * amount", which is exactly what the row means.
+   */
+  function famTemplateLabel(fam) {
+    return fam.label
+      .replace(/\(1\/party\)/g, "")
+      .replace(/\s+([;,])/g, "$1")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+  }
+
+
+  /**
+   * The family's own wording with the roll substituted in, so a row reads the way
+   * the line reads in game — "Crit Damage +10%; on crit, damage +1.5%" — rather
+   * than a name and a separate column of numbers.
+   *
+   * Placeholders come in order: A then B, or a lone X. Flat stats (weapon power,
+   * main stat) print with a thousands separator and no percent sign.
+   */
+  function namedWithValues(fam, grade, tier) {
+    var vals = fam.values[grade][tier];
+    // Word boundaries matter: without them the A in "ally AP buff" gets eaten and
+    // the row reads "ally 3P buff". Only a standalone A, B or X is a placeholder.
+    return fam.label
+      .replace(/\(1\/party\)/g, "")
+      .replace(/\b([ABX])\b(%?)/g, function (m, letter, pct) {
+        var i = (letter === "B") ? 1 : 0;
+        var v = vals[i];
+        if (v === undefined) return m;
+        return pct ? v + "%" : nf(v);
+      })
+      .replace(/\s+([;,])/g, "$1")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+  }
+
+
+
   /** The tier's actual roll, formatted: percentages as %, flat stats as a count. */
   function tierValueText(fam, grade, tier) {
     var vals = fam.values[grade][tier], parts = [], i, j, c;
@@ -216,13 +257,13 @@
         var avg = TIER_ODDS.low * d[0] + TIER_ODDS.mid * d[1] + TIER_ODDS.high * d[2];
         rows.push({
           key: "f" + fam.id, fam: fam, tier: null, d: avg, tierD: d,
-          odds: famOdds(fam), name: cleanFamLabel(fam)
+          odds: famOdds(fam), name: famTemplateLabel(fam)
         });
       } else {
         for (t = 0; t < TIERS.length; t++) {
           rows.push({
             key: "r" + fam.id + ":" + TIERS[t], fam: fam, tier: TIERS[t], d: d[t], tierD: d,
-            odds: tierOdds(fam, TIERS[t]), name: cleanFamLabel(fam)
+            odds: tierOdds(fam, TIERS[t]), name: namedWithValues(fam, grade, TIERS[t])
           });
         }
       }
@@ -263,7 +304,10 @@
     for (i = 0; i < rows.length; i++) {
       var r = rows[i];
       r.rank = i + 1;
-      r.pct = anchor > 0 ? r.d / anchor * 100 : 0;
+      r.pct = anchor > 0 ? r.d / anchor * 100 : 0;        // the score: best Epic = 100
+      // The BAR stays a share of the #1 line. Drawing it against the Epic anchor
+      // made every Legendary overflow its own track, which just looked broken.
+      r.barPct = best > 0 ? r.d / best * 100 : 0;
       r.band = bandFor(r.d, r.pct);
       r.dmg = B.damagePercent(r.d);
     }
@@ -391,8 +435,8 @@
       '<span class="tl-nm">' + rar + esc(r.name) +
       (r.tier ? ' <em style="color:' + RARITY[r.tier].hue + '">' + RARITY[r.tier].name + "</em>" : "") + "</span>" +
       '<span class="tl-vals">' + esc(vals) + "</span>" +
-      '<span class="tl-odds">' + fmtOdds(r.odds) + "</span>" +
-      '<span class="tl-bar"><i style="width:' + fx(Math.max(0, Math.min(100, r.pct)), 2) + '%;background:' + barHue + '"></i>' + ghost + "</span>" +
+      '<span class="tl-bar"><i style="width:' + fx(Math.max(0, Math.min(100, r.barPct)), 2) + '%;background:' + barHue + '"></i>' + ghost + "</span>" +
+      '<span class="tl-score">' + fx(r.pct, 1) + "</span>" +
       '<span class="tl-pct">' + fx(r.dmg, 2) + "%</span>" +
       "</div>";
   }
@@ -662,8 +706,8 @@
       '<span class="tl-gl" data-gloss="The subrank this row sits in, for your current character: its damage as a percentage of the best line in this view, on the shared S+ to F- ladder.">rank</span>' +
       '<span class="tl-nm">Effect</span>' +
       '<span class="tl-vals">' + (view === "family" ? "Roll (mid)" : "Roll") + "</span>" +
-      '<span class="tl-odds" data-gloss="Chance one granted slot lands this, from the official listed percentages: renormalised by their own sum and scaled to the special category\'s 30 points.">Odds</span>' +
       '<span class="tl-bar">% of the best line</span>' +
+      '<span class="tl-score" data-gloss="Score for this line, with the best EPIC roll set to 100. A Legendary scores above 100 — beating a good Epic is exactly what that should look like.">Score</span>' +
       '<span class="tl-pct">Damage</span>' +
       "</div>";
   }
@@ -792,10 +836,10 @@
       "#tab-tierlist .tlend{font-family:'SF Mono',Menlo,Consolas,monospace;font-size:11px;fill:var(--text)}" +
       "#tab-tierlist .tlrl{font-size:16px;font-weight:800}" +
       // the table
-      "#tab-tierlist .tl-head,#tab-tierlist .tl-row{display:grid;grid-template-columns:26px 26px minmax(140px,1fr) 128px 62px minmax(90px,180px) 60px;" +
+      "#tab-tierlist .tl-head,#tab-tierlist .tl-row{display:grid;grid-template-columns:26px 26px minmax(140px,1fr) 128px minmax(90px,180px) 52px 60px;" +
       "gap:10px;align-items:center}" +
       "#tab-tierlist .tl-head{padding:14px 8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);font-weight:600}" +
-      "#tab-tierlist .tl-head .tl-bar,#tab-tierlist .tl-head .tl-pct,#tab-tierlist .tl-head .tl-odds{background:none;border:0}" +
+      "#tab-tierlist .tl-head .tl-bar,#tab-tierlist .tl-head .tl-pct{background:none;border:0}" +
       "#tab-tierlist .tl-band{display:grid;grid-template-columns:64px 1fr;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)}" +
       "#tab-tierlist .tl-band:last-child{border-bottom:none}" +
       "#tab-tierlist .tl-chip{align-self:start;position:sticky;top:8px}" +
@@ -826,7 +870,8 @@
       "#tab-tierlist .tl-nm em{font-style:normal;font-size:10px;letter-spacing:.04em;text-transform:uppercase;opacity:.85}" +
       "#tab-tierlist .tl-rar{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:6px;vertical-align:1px}" +
       "#tab-tierlist .tl-vals{font-family:'SF Mono',Menlo,Consolas,monospace;font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
-      "#tab-tierlist .tl-odds{font-family:'SF Mono',Menlo,Consolas,monospace;font-size:11px;color:var(--dim);text-align:right}" +
+      "#tab-tierlist .tl-score{font-family:'SF Mono',Menlo,Consolas,monospace;font-size:12px;font-weight:700;text-align:right;color:var(--text)}" +
+      "#tab-tierlist .tl-head .tl-score{background:none;border:0;font-weight:600;color:var(--dim)}" +
       "#tab-tierlist .tl-bar{position:relative;height:9px;background:var(--panel2);border-radius:5px;overflow:visible}" +
       "#tab-tierlist .tl-head .tl-bar{height:auto;background:none}" +
       "#tab-tierlist .tl-bar i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;display:block}" +
@@ -870,11 +915,12 @@
       // column header, which no longer describes anything.
       "@media (max-width:760px){" +
       "#tab-tierlist .tl-head{display:none}" +
-      "#tab-tierlist .tl-row{grid-template-columns:22px 22px minmax(0,1fr) 58px 52px;" +
-      "grid-template-areas:'rank gr nm nm nm' 'bar bar bar odds pct';gap:4px 7px;padding:7px 4px}" +
+      "#tab-tierlist .tl-row{grid-template-columns:22px 22px minmax(0,1fr) 46px 52px;" +
+      "grid-template-areas:'rank gr nm nm nm' 'bar bar bar sc pct';gap:4px 7px;padding:7px 4px}" +
       "#tab-tierlist .tl-row .tl-rank{grid-area:rank}#tab-tierlist .tl-row .tl-gl{grid-area:gr}" +
       "#tab-tierlist .tl-row .tl-nm{grid-area:nm}#tab-tierlist .tl-row .tl-bar{grid-area:bar;align-self:center}" +
-      "#tab-tierlist .tl-row .tl-odds{grid-area:odds}#tab-tierlist .tl-row .tl-pct{grid-area:pct}" +
+      "#tab-tierlist .tl-row .tl-pct{grid-area:pct}" +
+      "#tab-tierlist .tl-row .tl-score{grid-area:sc;text-align:right}" +
       "#tab-tierlist .tl-vals{display:none}" +
       "#tab-tierlist .tl-band{grid-template-columns:44px 1fr;gap:10px}" +
       "#tab-tierlist .tl-chip span{width:44px;height:44px;font-size:18px;border-radius:5px}" +

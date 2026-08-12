@@ -95,7 +95,11 @@
   // the toggle is on screen: a mode nobody can see must not silently change scores.
   var DEFAULT_PROFILE = B.normalizeProfile({});
   var PMODE_KEY = "bc_profile_mode";
-  var profileMode = "character";
+  // Default settings, not the imported character's (Shizu, 2026-08-11): the board
+  // ranks everyone on defaults, so a freshly-loaded character should show the same
+  // number the board shows it. Switching to "character" is one click, and the
+  // choice sticks once made.
+  var profileMode = "default";
   try {
     var pm = localStorage.getItem(PMODE_KEY);
     if (pm === "default" || pm === "character") profileMode = pm;
@@ -696,6 +700,10 @@
       if (mine !== computeSeq) return;                       // a newer edit already landed
       lastSolve = out.res; lastSolveKey = out.key;
       renderResults(profile, null);
+      // The character banner reads its three figures off lastSolve, and it was
+      // painted before the solve existed — so without this it kept showing the
+      // placeholder dashes for ever.
+      renderCharHeader();
       // "What an empty one is worth" — same character, same slots, no lines, full rolls.
       return solveState(profile, [], S.rollsTotal, { keepCtx: false }).then(function (f) {
         if (mine !== computeSeq) return;
@@ -1815,7 +1823,16 @@
       for (i = 0; i < keys.length; i++) {
         if (patch[keys[i]] !== undefined) next[keys[i]] = patch[keys[i]];
       }
-      next.locks = null; next.rolled = null;      // a new bracelet voids the cut in progress
+      next.rolled = null;                          // a new bracelet voids the cut in progress
+      // The padlocks the character is actually wearing, if the import found any.
+      // lostark.bible's `fixed` flag is that padlock, not a drop-fixed line.
+      if (patch.lockedIdx && patch.lockedIdx.length && next.rows) {
+        var lk = [], li;
+        for (li = 0; li < next.rows.length; li++) lk.push(patch.lockedIdx.indexOf(li) >= 0);
+        next.locks = lk;
+      } else {
+        next.locks = null;
+      }
       lastVerdict = null;
       // The banner and the cards read lastSolve. It belongs to the bracelet being
       // replaced, so drop it: "—" for a moment beats the previous character's score.
