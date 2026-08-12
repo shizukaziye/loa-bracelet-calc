@@ -207,10 +207,12 @@
   // scoring — the canonical default profile, recomputed from raw stats
   // ------------------------------------------------------------------
 
-  // A FIXED combat-trait line is one of the two the bracelet came with and scores
-  // through traitDamage(); everything else — granted lines AND fixed effect lines —
-  // scores through setDamage(). A trait rolled into a GRANTED slot scores zero,
-  // which is the model's rule. Same split as worker/bracelet.js's score().
+  // The split is on `cat`, never on `fixed`: EVERY combat-trait line scores
+  // through traitDamage(), every effect line through setDamage(). `fixed` is
+  // bible's lock icon, not the drop's fixed/granted split, so keying on it sent a
+  // trait that had rolled into a granted slot to setDamage(), which scores a trait
+  // line zero. The rule lives in model/bracelet.js's traitDamage() header; same
+  // split as worker/bracelet.js's score() and bible-import.js's defaultScore().
   var TRAIT_TO_APP = { crit: "crit", spec: "spec", swiftness: "swift" };
   var TRAIT_CAP = { relic: 100, ancient: 120 };
 
@@ -270,9 +272,9 @@
     for (i = 0; i < dec.lines.length; i++) {
       l = dec.lines[i];
       k = TRAIT_TO_APP[l.family];
-      if (l.fixed && l.cat === "trait" && k) {
+      if (l.cat === "trait" && k) {
         traits[k] = l.value;
-        traitLines.push({ trait: l.family, value: l.value });
+        traitLines.push({ trait: l.family, value: l.value, fixed: !!l.fixed });
         continue;
       }
       lines.push(l);

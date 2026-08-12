@@ -48,35 +48,55 @@ function ok(name, cond, detail) {
 console.log("\n1. scoring parity against data/leaderboard-seed.json");
 // ---------------------------------------------------------------------------
 const seed = JSON.parse(readFileSync(join(root, "data", "leaderboard-seed.json"), "utf8"));
-const TOL = 1e-6;
-let matched = 0, diverged = [];
+const TOL = 1e-9;
+// EXACT parity, no tolerated exceptions. Until 2026-08-11 this loop allowed two
+// standing excuses — an unmapped type:2 index, and "a combat trait sits in a
+// granted slot" — and six characters lived behind them. Both are now gone: the
+// model maps every index the corpus carries, and the granted trait was a real
+// bug in the Worker's split, not a difference of opinion with the seed. If an
+// entry ever diverges again, that is a regression, so print it and fail.
+let matched = 0;
+const diverged = [];
 for (const e of seed.entries) {
   const s = score(e.rawStats);
-  const d = Math.abs(s.pct - e.damagePct);
-  if (d < TOL) matched++;
-  else diverged.push({
-    name: e.name, seed: e.damagePct, worker: s.pct, delta: s.pct - e.damagePct,
-    unmapped: s.unmapped.map(u => u.index),
-    // The OTHER known reason the two scorers differ: the seed adds a combat
-    // trait that landed in a GRANTED slot at its rolled value, while the Worker
-    // follows the model's rule and scores it zero. Written down in the seed's
-    // own notes[] and in score()'s header — so it is an explanation, not a shrug.
-    grantedTrait: (e.traits || []).some(t => !t.fixed)
-  });
+  const why = [];
+  if (Math.abs(s.pct - e.damagePct) > TOL) why.push("pct " + e.damagePct.toFixed(4) + " -> " + s.pct.toFixed(4));
+  if (Math.abs(s.linesPct - e.linesPct) > TOL) why.push("linesPct " + e.linesPct.toFixed(4) + " -> " + s.linesPct.toFixed(4));
+  if (s.grade !== e.grade) why.push("grade " + e.grade + " -> " + s.grade);
+  if (s.unmapped.length) why.push("unmapped indices: " + s.unmapped.map(u => u.index).join(","));
+  if (!why.length) matched++;
+  else diverged.push({ name: e.name, why: why.join("; ") });
 }
-console.log("     " + matched + "/" + seed.entries.length + " reproduce the seed's damagePct exactly");
-for (const d of diverged) {
-  console.log("     ~ " + d.name.padEnd(12) + " seed " + d.seed.toFixed(3) + "  worker " + d.worker.toFixed(3) +
-    "  (" + d.delta.toFixed(3) + ")  " +
-    (d.unmapped.length ? "unmapped indices: " + d.unmapped.join(",") : d.grantedTrait ? "a combat trait sits in a granted slot" : "UNEXPLAINED"));
-}
-ok("every divergence has a written-down cause (an unmapped index, or a trait in a granted slot)",
-  diverged.every(d => d.unmapped.length > 0 || d.grantedTrait),
-  "an entry differs for a reason nobody has written down");
-ok("no divergence is an INCREASE (an unmapped line can only be missing damage)",
-  diverged.every(d => d.delta <= TOL));
-ok("at least half the seed reproduces exactly", matched * 2 >= seed.entries.length,
-  matched + " of " + seed.entries.length);
+console.log("     " + matched + "/" + seed.entries.length + " reproduce the seed exactly");
+for (const d of diverged) console.log("     ~ " + d.name.padEnd(16) + d.why);
+ok("every seeded character re-scores to the number the seed stored",
+  diverged.length === 0, diverged.length + " diverged");
+
+// linesPct is NOT just "pct minus a bit": it is the effect lines alone, the
+// figure the loadout pick ranks on and the one docs/research/scoring-gap.md
+// compares to bible's "Bracelet Effects +X%". Route a granted combat trait
+// through setDamage() instead of traitDamage() and pct comes out right while
+// this number silently gains ~2.5pp. Four seeded characters carry one, so this
+// check is the one that would catch the fix being reapplied the wrong way.
+const grantedTraitFolk = seed.entries.filter(e => (e.traits || []).some(t => !t.fixed));
+ok("the seed still carries characters with a trait in a granted slot",
+  grantedTraitFolk.length >= 4, String(grantedTraitFolk.length));
+ok("a granted trait scores in pct but NOT in linesPct", grantedTraitFolk.every(e => {
+  const s = score(e.rawStats);
+  return Math.abs(s.linesPct - e.linesPct) < TOL && s.pct > s.linesPct;
+}), grantedTraitFolk.map(e => e.name).join(","));
+ok("a granted trait is reported as a trait, and as still rerollable",
+  grantedTraitFolk.every(e => score(e.rawStats).traits.some(t => t.fixed === false)));
+ok("and it still counts as one of the bracelet's granted slots",
+  grantedTraitFolk.every(e => score(e.rawStats).granted >= 2),
+  JSON.stringify(grantedTraitFolk.map(e => score(e.rawStats).granted)));
+
+// Grade. Every one of the 59 corpus bracelets is Ancient, and 29 of them carry no
+// type:2 special line at all — the only value evidence the decoder ever had. Two
+// of those had four of five lines locked, which made the granted-slot check read
+// them as Relic and score every special line one tier low.
+ok("no seeded bracelet decodes as relic", seed.entries.every(e => score(e.rawStats).grade === "ancient"),
+  seed.entries.filter(e => score(e.rawStats).grade !== "ancient").map(e => e.name).join(","));
 
 // The split the board depends on: trait lines score through traitDamage, effect
 // lines through setDamage, and pct > linesPct whenever a trait is present.

@@ -101,7 +101,14 @@
   var DATA = isNode ? require("../data/bracelet-data.js") : root.BraceletData;
   var GEAR = isNode ? require("../data/gear-data.js") : root.BraceletGearData;
 
-  var VERSION = "0.1.0";
+  // MODEL_SIG names the model; VERSION names the build of it. The Worker stores
+  // MODEL_SIG + "@" + VERSION on every record and re-scores any record whose stamp
+  // no longer matches, so BUMP VERSION whenever a change here can move a stored
+  // number — otherwise every record already in KV keeps its old score forever.
+  // 0.2.0: inferGrade() now reads the line count and the trait/basic bands, and no
+  // longer defaults to relic when the payload carries no special-value evidence.
+  // That moved two of the fifty-nine seeded characters by about 1.2pp.
+  var VERSION = "0.2.0";
   var MODEL_SIG = "bracelet-v1";
 
   // ------------------------------------------------------------------
@@ -590,10 +597,43 @@
   }
 
   /**
-   * traitDamage(traits, profile) -> D, the score of the bracelet's two FIXED
-   * combat-trait lines.
+   * traitDamage(traits, profile) -> D, the score of EVERY combat-trait line the
+   * bracelet carries.
    *
    * traits = { crit, spec, swift } in trait points; an inactive trait is 0.
+   *
+   * THE RULE, and the one every scorer has to follow (2026-08-11):
+   *
+   *   Combat-trait lines score HERE. Effect lines score in setDamage(). A trait
+   *   that rolled into a GRANTED slot is still a combat-trait line — Crit +104 is
+   *   104 points of crit on the character whether the drop handed it over or a
+   *   reroll did — so it belongs in this call, not in setDamage's.
+   *
+   * That split is not a detail. It is what keeps `linesPct` meaning "the effect
+   * lines alone", the figure the board compares to lostark.bible's "Bracelet
+   * Effects +X%" (which scores traits at zero) and the figure the loadout pick
+   * ranks on. Push a granted trait through setDamage instead and the total comes
+   * out right while linesPct silently gains two and a half points, moving
+   * benchmark bands and, on at least one seeded character, the loadout the board
+   * shows.
+   *
+   * The four scorers built on this model (worker/bracelet.js, leaderboard.js,
+   * bible-import.js and the seed pipeline) all split the decoded lines themselves.
+   * Three of them keyed the split on `line.fixed`, which is bible's LOCK icon and
+   * not the drop's fixed/granted split — a player can lock a granted line — so a
+   * granted trait fell through to setDamage and scored nothing. Read `cat`, never
+   * `fixed`: `cat === "trait"` goes here, everything else goes to setDamage.
+   *
+   * WHAT THE DP DOES WITH IT. A granted trait keeps `fixed: false`, still counts
+   * against the granted-slot total and is still rerollable — nothing here makes it
+   * permanent. But solve() folds this whole term into `fixedDamage`, a constant on
+   * every state, and buildAtoms() still gives the six trait draws damage 0. So the
+   * reroll advisor will happily roll a granted trait away and will never roll
+   * towards one. That is a real gap in the ADVISOR, deliberately left: closing it
+   * means giving lineDamage() a non-zero answer for a trait line, and the
+   * calculator's own copy and family picker are built on lineDamage saying zero.
+   * It costs the SCORE nothing, which is what the board ranks on. Written up in
+   * docs/research/scoring-gap.md §7.
    *
    *   Crit   converts exactly: 25 pp of crit rate per 699 trait points, fed
    *          through the per-skill crit model additively with every other
@@ -602,9 +642,8 @@
    *   Spec   scored by the class's own weight, in points per 100 trait points.
    *   Swift  likewise.
    *
-   * Fixed lines never reroll, so this is a CONSTANT offset on every state the
-   * solver can reach. It is added once, into solve()'s fixedDamage, and never
-   * enters the DP alphabet — a trait rolled into a GRANTED slot still scores 0.
+   * The trait term is added once, into solve()'s fixedDamage, and never enters the
+   * DP alphabet.
    */
   function traitDamage(traits, profile) {
     profile = profile && profile.role ? profile : normalizeProfile(profile);
@@ -1501,13 +1540,27 @@
    *   type 4  special effect as an ability: index = 605100000 + 10·(family−10) + grade
    *   grade digit 1 = high (Legendary), 2 = mid (Epic), 3 = low (Heroic)
    *
-   * opts.grade picks the value table; without it both grades are tried and the
-   * one matching more values wins.
+   * opts.grade picks the value table; without it inferGrade() decides.
+   *
+   * A requested grade the payload RULES OUT is not honoured — the decode falls
+   * back to the grade that is left and says so in `gradeOverridden`. Callers ask
+   * for a grade to TEST it (worker/bracelet.js and bible-import.js both decode
+   * against the other grade to see whether it holds the lines better), and the
+   * honest answer to "could this be Relic?" for a five-line bracelet is no, not a
+   * five-line Relic decode. Without this the test always came back clean, because
+   * a type:3 or type:4 line takes its tier from the index and its value from
+   * whichever table it is handed — it can never fail to place.
    */
   function decodeBibleBracelet(stats, opts) {
     opts = opts || {};
-    var grade = opts.grade;
+    var grade = opts.grade, overridden = false;
     if (!grade) grade = inferGrade(stats);
+    else if (gradeRuledOut(stats, grade)) {
+      var other = grade === "relic" ? "ancient" : "relic";
+      // Both ruled out means the payload is a fragment (a one-line test case, a
+      // truncated page): there is nothing better to fall back to, so obey.
+      if (!gradeRuledOut(stats, other)) { grade = other; overridden = true; }
+    }
     var lines = [], unknown = [];
     for (var i = 0; i < stats.length; i++) {
       var st = stats[i], line = null;
@@ -1543,22 +1596,111 @@
       if (line) { line.source = { type: st.type, index: st.index }; lines.push(line); }
       else unknown.push({ type: st.type, index: st.index, value: st.value, fixed: !!st.fixed });
     }
-    return { grade: grade, lines: lines, unknown: unknown };
+    var out = { grade: grade, lines: lines, unknown: unknown };
+    if (overridden) out.gradeOverridden = opts.grade;
+    return out;
   }
 
+  /** The widest value a grade's own bands allow for a basic family or a trait. */
+  function bandSpan(kind, famKey, grade) {
+    var bands = kind === "trait" ? DATA.TRAITS.bands : DATA.BASIC.bands;
+    var lo = Infinity, hi = -Infinity;
+    for (var i = 0; i < bands.length; i++) {
+      var r = kind === "trait" ? bands[i][grade] : bands[i][grade][famKey];
+      if (!r) continue;
+      if (r[0] < lo) lo = r[0];
+      if (r[1] > hi) hi = r[1];
+    }
+    return [lo, hi];
+  }
+
+  /**
+   * gradeRuledOut(stats, grade) — is this grade IMPOSSIBLE for this payload?
+   *
+   * Three hard witnesses, all read straight off the official tables. Each is a
+   * fact about the item, not a preference:
+   *
+   *   LINE COUNT   a bracelet carries 1-2 fixed lines plus its granted slots, and
+   *                LINE_COUNTS says Relic grants 1-2 while Ancient grants 2-3. So
+   *                Relic tops out at FOUR lines and Ancient at five. A five-line
+   *                payload cannot be Relic, whatever else it says. Unlike the
+   *                granted-slot count the callers use, this witness survives the
+   *                lock icon: a player can lock a granted line and make the
+   *                fixed/granted split unreadable, but locking never changes how
+   *                many lines the item has.
+   *   TRAIT BAND   Relic combat traits run 41-100, Ancient 61-120. Either end
+   *                rules a grade out; the callers only ever checked the top.
+   *   BASIC BAND   the same for Str/Dex/Int and Vitality, whose bands do not
+   *                overlap at the bottom either (Relic main stat starts at 6400,
+   *                Ancient at 9600).
+   *
+   * The special-effect VALUE tables are deliberately not used here: Relic and
+   * Ancient are one tier apart on every family (Relic mid = Ancient low), so a
+   * value that fits one usually fits the other too. That evidence is a preference,
+   * counted in inferGrade, never a ruling.
+   */
+  function gradeRuledOut(stats, grade) {
+    var n = 0, i;
+    for (i = 0; i < stats.length; i++) {
+      var t = stats[i].type;
+      if (t === 2 || t === 3 || t === 4) n++;
+    }
+    var maxLines = grade === "relic" ? 4 : 5;      // 2 fixed + 2 granted / 2 fixed + 3 granted
+    var minLines = grade === "relic" ? 2 : 3;      // 1 fixed + 1 granted / 1 fixed + 2 granted
+    if (n > maxLines || n < minLines) return true;
+
+    for (i = 0; i < stats.length; i++) {
+      var st = stats[i];
+      if (st.type !== 2) continue;
+      var map = TYPE2_INDEX[st.index];
+      if (!map) continue;
+      var v = map.centi ? st.value / 100 : st.value, span = null;
+      if (map.cat === "trait") span = bandSpan("trait", null, grade);
+      else if (map.cat === "basic") span = bandSpan("basic", map.family, grade);
+      if (span && (v < span[0] || v > span[1])) return true;
+    }
+    return false;
+  }
+
+  /**
+   * inferGrade(stats) — Relic or Ancient, from the payload alone.
+   *
+   * A grade the payload RULES OUT loses outright. Among the survivors the
+   * special-effect values decide, and when they cannot — because every value sits
+   * in the overlap between the two tables, or because the bracelet carries no
+   * type:2 special at all — the answer is ANCIENT.
+   *
+   * That default is the whole point. Reading an Ancient bracelet as Relic scores
+   * every special line one tier low (Relic low 4.0 where Ancient low is 4.5), and
+   * this function used to do exactly that on any bracelet with no type:2 special
+   * line: `bestHits` started at -1, so the first grade in DATA.GRADES — Relic —
+   * won with zero evidence, and the `best = "ancient"` initialiser was dead code.
+   * Twenty-nine of the fifty-nine seeded characters have no type:2 special; most
+   * were rescued downstream by the granted-slot check, but the two that had locked
+   * four of five lines were not, and scored 1.2pp low on the board.
+   */
   function inferGrade(stats) {
+    var grades = DATA.GRADES, live = [], g;
+    for (g = 0; g < grades.length; g++) if (!gradeRuledOut(stats, grades[g])) live.push(grades[g]);
+    // Every grade ruled out means the payload is malformed or truncated, not that
+    // there is no answer: fall back to judging them all rather than returning none.
+    if (!live.length) live = grades.slice();
+    if (live.length === 1) return live[0];
+
     var best = "ancient", bestHits = -1;
-    var grades = DATA.GRADES;
-    for (var g = 0; g < grades.length; g++) {
+    for (g = 0; g < live.length; g++) {
       var hits = 0;
       for (var i = 0; i < stats.length; i++) {
         var st = stats[i];
         if (st.type !== 2) continue;
         var map = TYPE2_INDEX[st.index];
         if (!map || map.cat !== "special") continue;
-        if (tierFromValue(map.family, map.centi ? st.value / 100 : st.value, grades[g])) hits++;
+        if (tierFromValue(map.family, map.centi ? st.value / 100 : st.value, live[g])) hits++;
       }
-      if (hits > bestHits) { bestHits = hits; best = grades[g]; }
+      // Strictly more evidence wins; a tie — and zero-against-zero is a tie —
+      // leaves the "ancient" default standing.
+      if (hits > bestHits) { bestHits = hits; best = live[g]; }
+      else if (hits === bestHits && live[g] === "ancient") best = "ancient";
     }
     return best;
   }

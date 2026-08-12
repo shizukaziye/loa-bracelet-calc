@@ -368,9 +368,9 @@ function score(stats) {
   const traitLines = [];
   for (const l of dec.lines) {
     const key = TRAIT_TO_APP[l.family];
-    if (l.fixed && l.cat === "trait" && key) {
+    if (l.cat === "trait" && key) {
       traits[key] = l.value;
-      traitLines.push({ trait: l.family, value: l.value });
+      traitLines.push({ trait: l.family, value: l.value, fixed: !!l.fixed });
       continue;
     }
     lines.push(l);
@@ -390,7 +390,10 @@ function score(stats) {
     }),
     D: D, pct: Bracelet.damagePercent(D),
     linesD: linesD, linesPct: Bracelet.damagePercent(linesD),
-    granted: lines.filter(function (l) { return !l.fixed; }).length,
+    // Counted over the WHOLE decode, not over `lines`: a trait sitting in a
+    // granted slot has been routed out to traitDamage() by now, and it is still
+    // one of the bracelet's granted slots.
+    granted: dec.lines.filter(function (l) { return !l.fixed; }).length,
     // Lines the model's TYPE2_INDEX does not map yet (the seed found indices 4,
     // 74 and 151 in the wild). They score 0 and are reported, never silently
     // dropped — an unexplained gap on the board is worse than a visible one.

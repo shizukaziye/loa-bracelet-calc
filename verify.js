@@ -238,10 +238,22 @@ refs.traits.forEach(function (c, i) {
   check("analytic.trait.critCapped",
     r9(B.traitDamage({ crit: 120 }, B.normalizeProfile({ skills: [{ share: 1, critRate: 1, critDamage: 2.8 }] }))), 0);
   check("analytic.trait.none", r9(B.traitDamage({}, P)), 0);
-  // A granted trait roll is still worth nothing — that is what makes the fixed
-  // trait total a constant the DP never has to see.
-  check("analytic.trait.grantedStillZero",
+  // lineDamage() scores a trait line ZERO — and that is the whole point of the
+  // split, not an omission. setDamage() is the EFFECT-line scorer, so `linesPct`
+  // keeps meaning what bible's "Bracelet Effects +X%" means; every trait point on
+  // the bracelet, granted slot included, is scored by traitDamage() instead. A
+  // scorer that hands a trait line to setDamage() loses it. See the rule in
+  // model/bracelet.js's traitDamage() header.
+  check("analytic.trait.setDamageScoresNoTrait",
     r9(B.lineDamage({ cat: "trait", family: "crit", value: 120 }, "ancient", P)), 0);
+  check("analytic.trait.setDamageScoresNoTrait.viaSet",
+    r9(B.setDamage([{ cat: "trait", family: "crit", value: 120 },
+                    { cat: "special", family: 23, tier: "high" }], "ancient", P)),
+    r9(B.lineDamage({ cat: "special", family: 23, tier: "high" }, "ancient", P)));
+  // …and traitDamage does not care whether the line was fixed or granted: it
+  // takes points, so the same 120 is worth the same either way.
+  checkTrue("analytic.trait.grantedWorthTheSame",
+    B.traitDamage({ crit: 120 }, P) > 0);
 
   // The solve shifts by exactly the constant, and the DP is untouched.
   var t = refs.traitSolve;
@@ -410,6 +422,60 @@ refs.decoder.forEach(function (c, i) {
   // The live payload's Int +13888 must land in official band 7 (13441–14080).
   var band = DATA.BASIC.bands[6].ancient.mainStat;
   checkTrue("analytic.decode.intBand", 13888 >= band[0] && 13888 <= band[1]);
+})();
+
+// First principles: grade inference. A type:3 or type:4 line takes its tier from
+// the index and its VALUE from whichever table it is handed, so it can never
+// disagree with a grade — it is no evidence at all. The witnesses that are:
+(function () {
+  var TR = function (v) { return { type: 2, index: 15, value: v, fixed: true }; };     // Crit trait
+  var MS = function (v) { return { type: 2, index: 11, value: v, fixed: true }; };     // Str/Dex/Int
+  var SP = function (n) {                                                             // n type:3 specials
+    var a = [], i;
+    for (i = 0; i < n; i++) a.push({ type: 3, index: 11000 + 10 * (15 - 10) + 3, value: 5, fixed: false });
+    return a;
+  };
+  function gr(stats) { return B.decodeBibleBracelet(stats).grade; }
+
+  // LINE COUNT. LINE_COUNTS: relic grants 1-2 and ancient 2-3, both over 1-2 fixed
+  // lines. So relic tops out at FOUR lines and ancient at five, and a five-line
+  // bracelet cannot be relic however its lines are locked.
+  var LC = DATA.LINE_COUNTS;
+  check("analytic.grade.relicMaxLines",
+    Math.max.apply(null, Object.keys(LC.fixed.relic).map(Number)) +
+    Math.max.apply(null, Object.keys(LC.granted.relic).map(Number)), 4, true);
+  check("analytic.grade.ancientMaxLines",
+    Math.max.apply(null, Object.keys(LC.fixed.ancient).map(Number)) +
+    Math.max.apply(null, Object.keys(LC.granted.ancient).map(Number)), 5, true);
+  check("analytic.grade.fiveLinesIsAncient", gr([TR(83), MS(11000)].concat(SP(3))), "ancient", true);
+
+  // TRAIT BAND. Relic runs 41-100, ancient 61-120; either end rules a grade out,
+  // and the callers only ever checked the top.
+  check("analytic.grade.traitAboveRelicCap", gr([TR(104), MS(11000)].concat(SP(2))), "ancient", true);
+  check("analytic.grade.traitBelowAncientFloor", gr([TR(45), MS(7000)].concat(SP(2))), "relic", true);
+
+  // BASIC BAND. Relic main stat stops at 12800, ancient starts at 9600.
+  check("analytic.grade.mainStatAboveRelic", gr([TR(80), MS(13760)].concat(SP(2))), "ancient", true);
+  check("analytic.grade.mainStatBelowAncient", gr([TR(80), MS(7000)].concat(SP(2))), "relic", true);
+
+  // NO EVIDENCE AT ALL is ancient, not relic. This is the bug that cost two of the
+  // fifty-nine seeded characters 1.2pp: `bestHits` started below zero, so the first
+  // grade in DATA.GRADES won unopposed and DATA.GRADES starts at "relic".
+  check("analytic.grade.noEvidenceIsAncient", gr([TR(80), TR(80)].concat(SP(2))), "ancient", true);
+  check("analytic.grade.gradesStartAtRelic", DATA.GRADES[0], "relic", true);
+
+  // A FORCED grade the payload rules out is not honoured: callers force a grade to
+  // TEST it, and the honest answer for a five-line bracelet is "not relic".
+  var forced = B.decodeBibleBracelet([TR(83), MS(11000)].concat(SP(3)), { grade: "relic" });
+  check("analytic.grade.forcedImpossibleRefused", forced.grade, "ancient", true);
+  check("analytic.grade.forcedImpossibleSaysSo", forced.gradeOverridden, "relic", true);
+  // A forced grade the payload allows is obeyed, and says nothing.
+  var okForced = B.decodeBibleBracelet([TR(80), MS(11000)].concat(SP(2)), { grade: "relic" });
+  check("analytic.grade.forcedPossibleObeyed", okForced.grade, "relic", true);
+  check("analytic.grade.forcedPossibleQuiet", String(okForced.gradeOverridden), "undefined", true);
+  // A fragment rules BOTH grades out; there is nothing to fall back to, so obey.
+  var frag = B.decodeBibleBracelet([{ type: 2, index: 76, value: 840 }], { grade: "relic" });
+  check("analytic.grade.fragmentObeyed", frag.grade, "relic", true);
 })();
 
 // ================= 7. tiny DP vs brute force =================

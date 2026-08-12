@@ -234,8 +234,17 @@ check("analytic.trait.critCapped",
       r9(B.trait_damage({"crit": 120},
                         B.normalize_profile({"skills": [{"share": 1, "critRate": 1, "critDamage": 2.8}]}))), 0)
 check("analytic.trait.none", r9(B.trait_damage({}, P)), 0)
-check("analytic.trait.grantedStillZero",
+# line_damage() scores a trait line ZERO by design: set_damage() is the EFFECT-line
+# scorer, so lines_pct keeps meaning what bible's "Bracelet Effects +X%" means, and
+# every trait point on the bracelet — granted slot included — goes through
+# trait_damage() instead. See model/bracelet.js's traitDamage() header.
+check("analytic.trait.setDamageScoresNoTrait",
       r9(B.line_damage({"cat": "trait", "family": "crit", "value": 120}, "ancient", P)), 0)
+check("analytic.trait.setDamageScoresNoTrait.viaSet",
+      r9(B.set_damage([{"cat": "trait", "family": "crit", "value": 120},
+                       {"cat": "special", "family": 23, "tier": "high"}], "ancient", P)),
+      r9(B.line_damage({"cat": "special", "family": 23, "tier": "high"}, "ancient", P)))
+check_true("analytic.trait.grantedWorthTheSame", B.trait_damage({"crit": 120}, P) > 0)
 
 _t = refs["traitSolve"]
 _plain = B.solve({"grade": _t["grade"], "profile": {}, "slots": _t["slots"], "rollsLeft": _t["rollsLeft"],
@@ -368,6 +377,49 @@ check("analytic.decode.unknown", len(_o7["unknown"]), 1, exact=True)
 check("analytic.decode.unknown.index", _o7["unknown"][0]["index"], 4242, exact=True)
 _band = DATA.BASIC["bands"][6]["ancient"]["mainStat"]
 check_true("analytic.decode.intBand", _band[0] <= 13888 <= _band[1])
+
+
+# First principles: grade inference. Mirrors verify.js's block of the same name —
+# a type:3/4 line takes its tier from the index and its value from whichever table
+# it is handed, so it is no evidence at all. The witnesses that are:
+def _TR(v):
+    return {"type": 2, "index": 15, "value": v, "fixed": True}
+
+
+def _MS(v):
+    return {"type": 2, "index": 11, "value": v, "fixed": True}
+
+
+def _SP(n):
+    return [{"type": 3, "index": 11000 + 10 * (15 - 10) + 3, "value": 5, "fixed": False}
+            for _ in range(n)]
+
+
+def _gr(stats):
+    return B.decode_bible_bracelet(stats)["grade"]
+
+
+_LC = DATA.LINE_COUNTS
+check("analytic.grade.relicMaxLines",
+      max(int(k) for k in _LC["fixed"]["relic"]) + max(int(k) for k in _LC["granted"]["relic"]), 4, exact=True)
+check("analytic.grade.ancientMaxLines",
+      max(int(k) for k in _LC["fixed"]["ancient"]) + max(int(k) for k in _LC["granted"]["ancient"]), 5, exact=True)
+check("analytic.grade.fiveLinesIsAncient", _gr([_TR(83), _MS(11000)] + _SP(3)), "ancient", exact=True)
+check("analytic.grade.traitAboveRelicCap", _gr([_TR(104), _MS(11000)] + _SP(2)), "ancient", exact=True)
+check("analytic.grade.traitBelowAncientFloor", _gr([_TR(45), _MS(7000)] + _SP(2)), "relic", exact=True)
+check("analytic.grade.mainStatAboveRelic", _gr([_TR(80), _MS(13760)] + _SP(2)), "ancient", exact=True)
+check("analytic.grade.mainStatBelowAncient", _gr([_TR(80), _MS(7000)] + _SP(2)), "relic", exact=True)
+check("analytic.grade.noEvidenceIsAncient", _gr([_TR(80), _TR(80)] + _SP(2)), "ancient", exact=True)
+check("analytic.grade.gradesStartAtRelic", DATA.GRADES[0], "relic", exact=True)
+
+_forced = B.decode_bible_bracelet([_TR(83), _MS(11000)] + _SP(3), {"grade": "relic"})
+check("analytic.grade.forcedImpossibleRefused", _forced["grade"], "ancient", exact=True)
+check("analytic.grade.forcedImpossibleSaysSo", _forced.get("gradeOverridden"), "relic", exact=True)
+_okForced = B.decode_bible_bracelet([_TR(80), _MS(11000)] + _SP(2), {"grade": "relic"})
+check("analytic.grade.forcedPossibleObeyed", _okForced["grade"], "relic", exact=True)
+check("analytic.grade.forcedPossibleQuiet", str(_okForced.get("gradeOverridden")), "None", exact=True)
+_frag = B.decode_bible_bracelet([{"type": 2, "index": 76, "value": 840}], {"grade": "relic"})
+check("analytic.grade.fragmentObeyed", _frag["grade"], "relic", exact=True)
 
 # ================= 7. tiny DP vs brute force =================
 for i, c in enumerate(refs["tinyDP"]):

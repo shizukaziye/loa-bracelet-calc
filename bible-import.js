@@ -462,8 +462,8 @@
   // ------------------------------------------------------------------
   // the board figure — the bracelet on the CANONICAL DEFAULT profile
   //
-  // Same split as leaderboard.js's score() and worker/bracelet.js's: the two fixed
-  // combat traits are scored by traitDamage, every other line by setDamage. The
+  // Same split as leaderboard.js's score() and worker/bracelet.js's: EVERY
+  // combat-trait line is scored by traitDamage, every effect line by setDamage. The
   // duplication is deliberate and matches astrogem's own house pattern — the
   // leaderboard is lazy-loaded and this panel is eager, so neither may depend on
   // the other. The MODEL is the single source; only the call sequence repeats.
@@ -479,7 +479,9 @@
     for (i = 0; i < dec.lines.length; i++) {
       l = dec.lines[i];
       k = TRAIT_TO_APP[l.family];
-      if (l.fixed && l.cat === "trait" && k) { traits[k] = l.value; continue; }
+      // On `cat`, never on `fixed` — a trait that rolled into a granted slot is
+      // still a combat trait. See model/bracelet.js's traitDamage() header.
+      if (l.cat === "trait" && k) { traits[k] = l.value; continue; }
       lines.push(l);
     }
     var d = B.traitDamage(traits, DEFAULT_PROFILE) + B.setDamage(lines, dec.grade, DEFAULT_PROFILE);

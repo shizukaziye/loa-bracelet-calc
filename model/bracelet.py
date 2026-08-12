@@ -19,7 +19,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import bracelet_data as DATA      # noqa: E402
 import gear_data as GEAR          # noqa: E402
 
-VERSION = "0.1.0"
+# Bump VERSION whenever a change here can move a stored number: the Worker stamps
+# MODEL_SIG + "@" + VERSION on every record and re-scores anything that no longer
+# matches. See bracelet.js for what 0.2.0 changed.
+VERSION = "0.2.0"
 MODEL_SIG = "bracelet-v1"
 
 ADD_DMG_ASTROGEM_LV60 = 0.0484
@@ -412,15 +415,21 @@ def line_info(line, grade, profile):
 
 
 def trait_damage(traits, profile):
-    """Score of the bracelet's two FIXED combat-trait lines.
+    """Score of EVERY combat-trait line the bracelet carries.
 
     traits = {"crit", "spec", "swift"} in trait points; inactive trait = 0.
     Crit converts exactly (25 pp of crit rate per 699 points) and runs through
     the per-skill crit model, additive with every other crit source and capped
     at 100%. Spec and Swiftness use the class's own weight.
 
-    Fixed lines never reroll, so this is a constant on every reachable state:
-    it rides inside solve()'s fixed_damage and never enters the DP alphabet.
+    THE RULE (see bracelet.js for the long version): combat-trait lines score
+    here, effect lines score in set_damage(). A trait that rolled into a GRANTED
+    slot is still a combat-trait line and belongs here, so that lines_pct keeps
+    meaning "the effect lines alone". Split the decoded lines on `cat`, never on
+    `fixed` — `fixed` is bible's lock icon, and players lock granted lines.
+
+    The trait term rides inside solve()'s fixed_damage and never enters the DP
+    alphabet.
     """
     profile = profile if (profile and profile.get("role")) else normalize_profile(profile)
     traits = traits or {}
@@ -1155,10 +1164,62 @@ def tier_from_value(family_id, value, grade):
     return None
 
 
+def band_span(kind, fam_key, grade):
+    """Widest value a grade's own bands allow for a basic family or a trait."""
+    bands = DATA.TRAITS["bands"] if kind == "trait" else DATA.BASIC["bands"]
+    lo, hi = float("inf"), float("-inf")
+    for b in bands:
+        r = b[grade] if kind == "trait" else b[grade].get(fam_key)
+        if not r:
+            continue
+        lo = min(lo, r[0])
+        hi = max(hi, r[1])
+    return [lo, hi]
+
+
+def grade_ruled_out(stats, grade):
+    """Is this grade IMPOSSIBLE for this payload? See bracelet.js for the reasons.
+
+    Three hard witnesses: the LINE COUNT (Relic tops out at four lines, Ancient
+    at five, and locking never changes how many lines an item has), the TRAIT
+    band (Relic 41-100, Ancient 61-120) and the BASIC bands.
+    """
+    n = sum(1 for st in stats if st.get("type") in (2, 3, 4))
+    max_lines = 4 if grade == "relic" else 5
+    min_lines = 2 if grade == "relic" else 3
+    if n > max_lines or n < min_lines:
+        return True
+    for st in stats:
+        if st.get("type") != 2:
+            continue
+        m = TYPE2_INDEX.get(st.get("index"))
+        if not m:
+            continue
+        v = st["value"] / 100.0 if m.get("centi") else st["value"]
+        span = None
+        if m["cat"] == "trait":
+            span = band_span("trait", None, grade)
+        elif m["cat"] == "basic":
+            span = band_span("basic", m["family"], grade)
+        if span and (v < span[0] or v > span[1]):
+            return True
+    return False
+
+
 def infer_grade(stats):
+    """Relic or Ancient from the payload alone; a tie, or no evidence, is ANCIENT.
+
+    See bracelet.js for why the default matters: reading an Ancient bracelet as
+    Relic scores every special line one tier low.
+    """
+    live = [g for g in DATA.GRADES if not grade_ruled_out(stats, g)]
+    if not live:
+        live = list(DATA.GRADES)
+    if len(live) == 1:
+        return live[0]
     best = "ancient"
     best_hits = -1
-    for g in DATA.GRADES:
+    for g in live:
         hits = 0
         for st in stats:
             if st.get("type") != 2:
@@ -1172,12 +1233,23 @@ def infer_grade(stats):
         if hits > best_hits:
             best_hits = hits
             best = g
+        elif hits == best_hits and g == "ancient":
+            best = "ancient"
     return best
 
 
 def decode_bible_bracelet(stats, opts=None):
     opts = opts or {}
-    grade = opts.get("grade") or infer_grade(stats)
+    grade = opts.get("grade")
+    overridden = False
+    if not grade:
+        grade = infer_grade(stats)
+    elif grade_ruled_out(stats, grade):
+        other = "ancient" if grade == "relic" else "relic"
+        # Both ruled out means the payload is a fragment; obey the caller.
+        if not grade_ruled_out(stats, other):
+            grade = other
+            overridden = True
     lines = []
     unknown = []
     for st in stats:
@@ -1217,4 +1289,7 @@ def decode_bible_bracelet(stats, opts=None):
         else:
             unknown.append({"type": t, "index": st.get("index"), "value": st.get("value"),
                             "fixed": bool(st.get("fixed"))})
-    return {"grade": grade, "lines": lines, "unknown": unknown}
+    out = {"grade": grade, "lines": lines, "unknown": unknown}
+    if overridden:
+        out["gradeOverridden"] = opts.get("grade")
+    return out

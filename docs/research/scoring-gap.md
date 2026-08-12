@@ -219,3 +219,201 @@ The scoring pipeline lives in the 2026-08-11 session scratchpad
 weights, `gap3.js` checks that they are identified and attributes the gap, and `gap4.js`
 holds the hand-written emulation and the step-by-step table above. Nothing in this document
 touched the network.
+
+---
+
+# 7. The seed-versus-Worker gap: two bugs, both ours
+
+Written 2026-08-11, after `node tools/test-worker.mjs` had reported 92 passed / 1 failed for
+long enough that two sessions had written it off as "pre-existing, cause not written down".
+
+Nothing above this line changes. Sections 1–6 are about us against lostark.bible. This one is
+about us against ourselves — `data/leaderboard-seed.json` against the scorers that are
+supposed to reproduce it.
+
+Six of the fifty-nine seeded characters did not reproduce. All six came out **low**, by 1.2pp
+to 3.2pp. There were **two** independent causes, not one, and the seed was right both times.
+
+| character | seed | Worker | delta | cause |
+|---|---|---|---|---|
+| Hamoi | 15.541 | 14.370 | −1.171 | decoded as Relic |
+| Guynamedcharlie | 13.629 | 12.413 | −1.216 | decoded as Relic |
+| Linkuriboh | 15.080 | 11.902 | −3.178 | granted trait scored zero |
+| Mylaela | 12.942 | 10.236 | −2.706 | granted trait scored zero |
+| Kayamix | 12.258 | 9.461 | −2.797 | granted trait scored zero |
+| Komyosanzo | 11.764 | 9.557 | −2.207 | granted trait scored zero |
+
+## 7.1 Bug A — a combat trait in a granted slot scored nothing
+
+Four bracelets carry a combat trait that rolled into a **granted** slot rather than arriving
+as one of the two the drop hands over. Kayamix's, as bible renders it:
+
+```
+Dexterity +12352      locked
+Specialization +78    locked
+Outgoing Damage +2.5%
+Crit +104                       <- a combat trait, in a granted slot
+Crit Rate +3.4%. Crit Hit Damage +1.5%.
+```
+
+Every scorer built on this model splits the decoded lines in two and adds the halves: combat
+traits through `traitDamage()`, effect lines through `setDamage()`. Three of the four copies
+of that split — `worker/bracelet.js`, `leaderboard.js`, `bible-import.js` — wrote the test as
+
+```js
+if (l.fixed && l.cat === "trait" && key) { /* …traits… */ }
+lines.push(l);
+```
+
+**`l.fixed` is bible's lock icon.** It is not the drop's fixed/granted split, and the seed's
+own notes have said so since it was built: *"Players can lock granted lines, so the drop's
+fixed/granted split cannot be read off this payload."* So the `l.fixed &&` clause sent
+Kayamix's Crit +104 down to `setDamage()`, which scores a trait line **0**, and 104 points of
+crit vanished. The seed pipeline, the fourth copy, split on `cat` alone and was right.
+
+### The semantics, and why
+
+> **Combat-trait lines score in `traitDamage()`. Effect lines score in `setDamage()`. The
+> split is on `cat`, never on `fixed`.** A trait that rolled into a granted slot is still a
+> combat-trait line, so it scores its rolled value — Crit +104 is 104 points of crit on the
+> character whether the drop handed it over or a reroll did.
+>
+> It stays a **granted slot**: it keeps `fixed: false`, it counts toward the granted-slot
+> total, and it is rerollable like any other granted line. Scoring it and locking it are
+> different questions, and the answer to the second is still no.
+
+The tempting alternative — make `lineDamage()` return a trait's value so `setDamage()` picks
+it up and every caller is fixed for free without editing any of them — was measured and
+rejected. It gets `pct` right and quietly corrupts `linesPct`:
+
+| | linesPct, traits out | linesPct, traits through setDamage |
+|---|---|---|
+| Linkuriboh | 8.24 | 11.31 |
+| Mylaela | 7.68 | 10.33 |
+| Kayamix | 6.24 | 8.96 |
+| Komyosanzo | 6.18 | 8.32 |
+
+`linesPct` is the effect lines alone. It is the number section 2 above compares against
+bible's "Bracelet Effects +X%" — and bible scores combat traits at zero, so folding a trait
+into it makes that comparison meaningless for exactly the characters this section is about.
+It is also what `pickBestLoadout()` ranks on: at those numbers **Komyosanzo's board row
+switches to a different loadout**, and all four cross a benchmark band. On top of which
+`app.js`'s own help text and family picker are built on `lineDamage()` answering zero for a
+trait. So `setDamage()` stays the effect-line scorer and the callers do the routing.
+
+### What the DP does with it
+
+Nothing — a known gap rather than an oversight. `solve()` folds the whole trait term into
+`fixedDamage`, a constant on every reachable state, and `buildAtoms()` still gives the six
+trait draws `damage: 0`. So the reroll advisor will happily roll a granted trait away and
+will never roll towards one.
+
+Closing it means giving `lineDamage()` a non-zero answer for a trait line, which is the change
+rejected just above, plus counting the bracelet's own traits against `CAPS.trait` inside
+`solve()` — they live in `opts.traitValues`, outside `lines`, so the DP currently thinks a
+two-trait bracelet has both trait slots free. That is a change to the **advisor**, worth doing
+on its own merits, and it costs the **score** — which is what the board ranks on — nothing.
+Left undone deliberately.
+
+## 7.2 Bug B — Ancient bracelets decoding as Relic
+
+Hamoi and Guynamedcharlie have no granted trait. They were decoding as **Relic**, and the two
+value tables sit exactly one tier apart:
+
+| family | tier | Relic | Ancient |
+|---|---|---|---|
+| 15 cdUpDmgUp | low | 4.0 | **4.5** |
+| 12 critDmgOnCrit | low | 5.2 | **6.8** |
+| 11 critRateOnCrit | mid | 3.4 | **4.2** |
+
+so a Relic reading scores every special line one tier low. Bible's rendered text on both pages
+— *"Skill cooldown +2%. Outgoing Damage +4.5%."* — says Ancient outright, and the seed
+validated it word for word. The payload does not carry that text.
+
+The root cause was three lines of `inferGrade()`:
+
+```js
+var best = "ancient", bestHits = -1;
+for (var g = 0; g < grades.length; g++) {
+  /* … */ if (hits > bestHits) { bestHits = hits; best = grades[g]; }
+}
+```
+
+`bestHits` starts **below zero**, so the first grade always wins with zero evidence, and
+`DATA.GRADES` starts at `"relic"`. The `best = "ancient"` initialiser was dead code. Worse,
+the only evidence the loop counted came from **type:2** special lines, and **29 of the 59**
+seeded bracelets carry none: their specials are type:3 / type:4, which take their tier from
+the index and their value from whichever table they are handed, so they can never disagree
+with a grade. Twenty-nine coin flips, all landing on Relic.
+
+Most were rescued downstream, because the callers check the granted-slot count and Ancient
+grants 2–3 where Relic grants 1–2. Hamoi and Guynamedcharlie had **locked four of their five
+lines**, which reads as one granted slot, which fits Relic — so the rescue confirmed the error
+instead of catching it. Both `unplaced()` guards were powerless for the same reason a type:3
+line is no evidence: it always places.
+
+### The fix
+
+`inferGrade()` now weighs every witness the payload actually carries, and a grade the payload
+**rules out** loses outright:
+
+1. **Line count.** `LINE_COUNTS` gives 1–2 fixed lines plus 1–2 granted on Relic and 2–3 on
+   Ancient, so Relic tops out at **four** lines and Ancient at five. A five-line bracelet
+   cannot be Relic. This is the witness that beats the lock icon: a player can lock a granted
+   line, but locking never changes how many lines an item has. It settles both characters.
+2. **Trait bands.** Relic 41–100, Ancient 61–120. Either end rules a grade out; the callers
+   only ever checked the top.
+3. **Basic bands.** Relic main stat 6400–12800, Ancient 9600–16000; likewise Vitality.
+
+Special *values* stay a preference rather than a ruling, because Relic mid = Ancient low on
+every family, so a value fitting one usually fits the other. When the survivors tie — or when
+there is no evidence at all — the answer is now **Ancient**, which is also the safe direction:
+reading an Ancient bracelet as Relic loses damage, and every bracelet in the corpus is Ancient.
+
+`decodeBibleBracelet()` also stops honouring an `opts.grade` the payload rules out, reporting
+`gradeOverridden` instead. Callers force a grade in order to *test* it, and the honest answer
+to "could this five-line bracelet be Relic?" is no — not a five-line Relic decode.
+
+## 7.3 What moved
+
+Only the six characters above; the other fifty-three were already exact. All six go **up**, to
+the number the seed had stored all along, so `data/leaderboard-seed.json` needed no numeric
+edit — only its notes. That is the strongest evidence that the seed pipeline had the semantics
+right and the three client scorers had drifted away from it.
+
+| character | before | after | delta |
+|---|---|---|---|
+| Linkuriboh | 11.902 | 15.080 | +3.178 |
+| Kayamix | 9.461 | 12.258 | +2.797 |
+| Mylaela | 10.236 | 12.942 | +2.706 |
+| Komyosanzo | 9.557 | 11.764 | +2.207 |
+| Guynamedcharlie | 12.413 | 13.629 | +1.216 |
+| Hamoi | 14.370 | 15.541 | +1.171 |
+
+`Bracelet.VERSION` goes **0.1.0 → 0.2.0**. That is not cosmetic: the Worker re-scores any
+stored record whose `modelSig` (`MODEL_SIG@VERSION`) no longer matches, so without the bump
+every row already in KV would have kept its old score forever.
+
+## 7.4 Still open
+
+- **The three copies of `decodeWithGradeCheck` are not identical.** `leaderboard.js` says
+  `slotChoices("ancient") === [1,2,3]`; `worker/bracelet.js` and `bible-import.js` say
+  `[2,3]`. `bible-import.js` has no `unplaced()` guard at all. All 59 characters agree across
+  all three today, but only because the model now refuses the impossible re-decode underneath
+  them. The duplication is deliberate; the drift is not.
+- **`buildAtoms()` still values a trait draw at zero.** See 7.1.
+- **`parseVersion` against `modelSig`.** They answer different questions and both are worth
+  keeping: `modelSig` says which scoring model produced `score`, `parseVersion` says which
+  parse generation produced `stats`. `MODEL_SIG` is *not* a substitute for `parseVersion`.
+  The hole — a fresh pull carrying no `parseVersion`, because only `/admin/rescore` stamped it
+  — was closed separately on the same day; every path that builds or re-scores stats now
+  stamps both.
+
+## 7.5 Reproducing this
+
+`node tools/test-worker.mjs` § 1 now asserts **exact** parity on all 59 characters with no
+tolerated exceptions, plus that a granted trait scores in `pct` and not in `linesPct`, that it
+is still reported as rerollable, and that no seeded bracelet decodes as Relic. `verify.js` and
+`verify.py` carry a matching *grade inference* block of first-principles checks — line count,
+trait band, basic band, the Ancient default, and the forced-grade refusal. Both batteries run
+1629 checks.
