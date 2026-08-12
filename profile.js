@@ -191,8 +191,17 @@
     // v2 reshaped the panel (per-piece honing, accessory/gem controls, fight
     // and trait blocks), so a v1 blob has nothing worth migrating: start clean.
     if (!got || got.v !== 2) return;
+    // WHO WAS LOADED IS NOT RESTORED. The settings and the bracelet are worth
+    // keeping across a reload; the character is not. Opening the site and
+    // finding someone else's name already in the banner reads as a bug — you did
+    // not ask for them, and every number on screen is about a character you have
+    // not chosen (Shizu, 2026-08-12). The site opens with nobody selected, and
+    // the provenance maps go with them: a "Noa suggests +21" label under no
+    // character is nonsense.
+    var SESSION_ONLY = { char: 1, prov: 1, provWas: 1, provNote: 1 };
     var d = defaults(), k;
     for (k in d) if (Object.prototype.hasOwnProperty.call(d, k)) {
+      if (SESSION_ONLY[k]) continue;
       if (got[k] === undefined || got[k] === null) continue;
       if (NESTED[k]) {
         for (var a in d[k]) if (got[k][a] !== undefined && got[k][a] !== null) d[k][a] = got[k][a];
