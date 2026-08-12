@@ -60,28 +60,27 @@
   // bands and palettes
   // ------------------------------------------------------------------
 
-  // The tier list uses its OWN, more lenient ladder than the Leaderboard's flat
-  // five-point steps (Shizu, 2026-08-11). Two reasons it has to differ:
+  // The tier list has its OWN ladder, anchored differently from the Leaderboard's
+  // (Shizu, 2026-08-11).
   //
-  //   The yardsticks differ. The board scores a whole bracelet against a perfect
-  //   one; this ranks a single line against the best single line. A line at 85%
-  //   of the best line in the game is excellent, not an A.
+  // THE ANCHOR IS THE BEST EPIC ROLL, NOT THE BEST ROLL. Set that to 100 and the
+  // scale reads the way a player already thinks: the five best families' Legendary
+  // rolls clear 100 and take S+, their Epics land S (the best Epic is exactly
+  // 100.0 by construction), and their Rares land S-. A Legendary is meant to look
+  // better than full marks, because it is.
   //
-  //   The data clusters. The same five families supply the top fifteen rolls at
-  //   Legendary / Epic / Rare, landing at ~95-100%, ~84-86% and ~74-76%. Flat
-  //   five-point bands cut through the middle cluster, so two rolls of the same
-  //   family one tier apart could read S- and A+. These cuts sit in the gaps
-  //   between clusters instead, so a cluster is never split.
-  //
-  // The top five rolls are S+ and carry the rainbow outright — they are the five
-  // Legendary crit / shred lines and there is no honest way to separate them.
+  // Everything below S+ is a flat five-point step. S- comes out EMPTY on the
+  // default profile — the gap between the Epic cluster (~98-100) and the Rare one
+  // (~87-89) is real, and Shizu would rather see the gap than bend the ladder to
+  // hide it. Empty bands are simply not drawn.
   var TL_BANDS = [
-    { key: "S",  pct: 80 }, { key: "S-", pct: 70 }, { key: "A+", pct: 62 },
-    { key: "A",  pct: 54 }, { key: "A-", pct: 46 }, { key: "B+", pct: 38 },
-    { key: "B",  pct: 30 }, { key: "B-", pct: 22 }, { key: "C+", pct: 14 },
-    { key: "C",  pct: 0.0001 }, { key: "F", pct: 0 }
+    { key: "S+", pct: 100.1 }, { key: "S",  pct: 95 }, { key: "S-", pct: 90 },
+    { key: "A+", pct: 85 },    { key: "A",  pct: 80 }, { key: "A-", pct: 75 },
+    { key: "B+", pct: 70 },    { key: "B",  pct: 65 }, { key: "B-", pct: 60 },
+    { key: "C+", pct: 55 },    { key: "C",  pct: 50 }, { key: "C-", pct: 45 },
+    { key: "D+", pct: 40 },    { key: "D",  pct: 35 }, { key: "D-", pct: 30 },
+    { key: "F+", pct: 20 },    { key: "F",  pct: 0.0001 }, { key: "F-", pct: 0 }
   ];
-  var TOP_RAINBOW = 5;
   var BANDS = SR.BANDS;
   var BOTTOM = SR.BOTTOM;
 
@@ -91,13 +90,16 @@
     // `hue`, the chips and pills read `bg`.
     return { key: key, bg: c.bg, hue: c.bg, fg: c.fg, cls: c.cls, glow: key === "S+" };
   }
-  /** rank is 1-based within the current view; the first TOP_RAINBOW are S+. */
-  function bandFor(d, pct, rank) {
-    if (d <= 0) return tlBand("F");
-    if (rank && rank <= TOP_RAINBOW) return tlBand("S+");
+  /**
+   * pct is a percentage of the anchor (the best Epic roll = 100). A line worth no
+   * damage is F- outright, never a band it could reach on arithmetic alone.
+   */
+  function bandFor(d, pct) {
+    if (d <= 0) return tlBand("F-");
     for (var i = 0; i < TL_BANDS.length; i++) if (pct >= TL_BANDS[i].pct) return tlBand(TL_BANDS[i].key);
-    return tlBand("F");
+    return tlBand("F-");
   }
+
 
   // The six letter GROUPS, for the strip: eighteen dashed cuts and eighteen
   // letters on one 1000-unit axis is a picket fence. The strip draws one cut per
@@ -245,15 +247,27 @@
     })();
 
     rows.sort(function (a, b) { return b.d - a.d || a.fam.id - b.fam.id; });
-    var best = rows.length ? rows[0].d : 0;
+
+    // THE ANCHOR IS THE BEST EPIC (mid-tier) ROLL, set to 100 — not the best row.
+    // A Legendary then scores above 100, which is the point: full marks is what a
+    // good Epic gets, and beating it should look like beating it. Computed from the
+    // family table rather than from `rows`, so both views share one scale and the
+    // by-family averages sit against the same yardstick.
+    var anchor = 0;
+    for (i = 0; i < DATA.SPECIALS.length; i++) {
+      var mid = B.lineDamage({ cat: "special", family: DATA.SPECIALS[i].id, tier: "mid" }, grade, prof);
+      if (mid > anchor) anchor = mid;
+    }
+    var best = rows.length ? rows[0].d : 0;          // still the top row, for the bars
+    if (anchor <= 0) anchor = best;
     for (i = 0; i < rows.length; i++) {
       var r = rows[i];
       r.rank = i + 1;
-      r.pct = best > 0 ? r.d / best * 100 : 0;
-      r.band = bandFor(r.d, r.pct, r.rank);
+      r.pct = anchor > 0 ? r.d / anchor * 100 : 0;
+      r.band = bandFor(r.d, r.pct);
       r.dmg = B.damagePercent(r.d);
     }
-    return { rows: rows, best: best, bestRow: rows[0] || null };
+    return { rows: rows, best: best, anchor: anchor, bestRow: rows[0] || null };
   }
 
   /**
@@ -464,7 +478,7 @@
     for (var t = 0; t < TIERS.length; t++) {
       var tr = TIERS[t], d = r.tierD[t];
       var dmg = B.damagePercent(d);
-      var p = res.best > 0 ? d / res.best * 100 : 0;
+      var p = res.anchor > 0 ? d / res.anchor * 100 : 0;   // same anchor as the rows
       // Find this tier's own rank in the current ranking so the card cannot show a
       // different band than the row it came from (the top five are S+ by rank, not
       // by percentage, so a rank-blind lookup here would read S).
@@ -472,7 +486,7 @@
       for (var tq = 0; tq < res.rows.length; tq++) {
         if (res.rows[tq].key === tKey) { tRank = res.rows[tq].rank; break; }
       }
-      var bd = bandFor(d, p, tRank);
+      var bd = bandFor(d, p);
       var isMe = r.tier === tr;                       // the row's own tier, in the by-roll view
       h += '<tr class="' + (isMe ? "tp-best" : "") + '">' +
         '<td><span class="tp-rar" style="background:' + RARITY[tr].hue + '"></span>' +
