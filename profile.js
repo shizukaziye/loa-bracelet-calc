@@ -465,12 +465,11 @@
   function modeControlHtml() {
     if (!hasCharacter()) return "";
     var def = onDefaults(), who = esc(S.char.name);
-    var h = '<div class="bc-pmode">' +
-      '<span class="lab">Scoring on</span>' +
+    var h = '<div class="bc-modeline"><span class="lab">Scoring on</span>' +
       '<button type="button" class="bc-pmodebtn' + (def ? " def" : "") + '" data-pmode="' +
       (def ? "character" : "default") + '">' +
-      (def ? "Default settings" : "Character settings") + "</button>" +
-      '<span class="bc-pmodegap"></span>';
+      (def ? "Default settings" : "Character settings") + "</button></div>";
+    h += '<div class="bc-modeline">';
     if (provWasCount()) {
       h += '<button type="button" class="mbtn" data-bcreset="imported"' +
         ' data-gloss="Put every value ' + who + "'s character page suggested back, marks and all." +
@@ -479,15 +478,27 @@
     h += '<button type="button" class="mbtn" data-bcreset="defaults"' +
       ' data-gloss="Clears BOTH columns back to the calculator\'s defaults — the imported gear on the left and' +
       ' the fight, trait, skill and economy settings you chose on the right. The bracelet itself is left alone.">' +
-      "Reset to defaults</button>";
-    h += '<span class="bc-pmodenote">' +
+      "Reset to defaults</button></div>";
+    return h;
+  }
+
+  /**
+   * The prose half of the control row: which side is live, and the one line
+   * about what an import actually fills. It goes FULL WIDTH under the header
+   * rather than inside the cluster — two sentences squeezed into a control
+   * column would wrap to eight lines and push the buttons around.
+   */
+  function modeNoteHtml() {
+    if (!hasCharacter()) return "";
+    var def = onDefaults(), who = esc(S.char.name);
+    return '<div class="bc-pmode">' +
+      '<span class="bc-pmodenote">' +
       (def
         ? "Every number is on the canonical default profile — the one the leaderboard ranks everyone on. " +
-          "The control deck is ignored until you switch back."
+          "The Character deck stays editable; nothing reads it until you switch back."
         : "Every number is on the settings in the deck, which " + who + "'s character page filled in and you can edit. " +
           "Switch to the defaults to see the figure the leaderboard ranks.") +
       "</span>" + DISCLAIMER_HTML + "</div>";
-    return h;
   }
 
   /** How many values a character page ever suggested — "Reset to imported" needs one. */
@@ -935,14 +946,15 @@
       // the parser threw away too — so the rolls slider, still sized for a grid
       // cell it no longer had, sat on top of its neighbours. That is the overlap
       // Shizu photographed (2026-08-11).
-      ".bc-brachdr{margin:0 0 12px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--panel2)}" +
-      ".bc-toprow{display:grid;grid-template-columns:auto auto minmax(140px,1fr);gap:8px 18px;align-items:end}" +
+      // In the header cluster they read as a short stacked list, one label above
+      // its control, so grade lines up with the scoring toggle beside it and
+      // granted slots with the resets.
+      ".bc-brachdr{min-width:150px}" +
+      ".bc-toprow{display:flex;flex-direction:column;gap:9px}" +
       ".bc-toprow .bc-segrow,.bc-toprow .bc-sl{display:block;margin:0;min-width:0}" +
       ".bc-toprow .lb{display:block;margin-bottom:4px}" +
       ".bc-toprow .bc-sl .tk{display:inline-block;width:calc(100% - 56px);vertical-align:middle}" +
       ".bc-toprow .bc-sl .chip{display:inline-block;width:52px;text-align:right;vertical-align:middle}" +
-      // Phones: three controls will not share 375px. Stack them.
-      "@media(max-width:560px){.bc-toprow{grid-template-columns:minmax(0,1fr);gap:10px}}" +
       ".bc-seg{display:flex;gap:4px}" +
       ".bc-seg button{flex:1 1 0;min-width:0;background:var(--panel2);border:1px solid var(--border);color:var(--dim);" +
         "border-radius:6px;padding:5px 2px;font-size:11.5px;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap}" +
@@ -972,22 +984,30 @@
       // went too far — Shizu, 2026-08-11).
       ".bc-slot{display:grid;grid-template-columns:44px 168px minmax(0,430px) 120px;gap:8px;align-items:end;margin-bottom:8px;justify-content:start}" +
       ".bc-slot .sn{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;padding-bottom:7px}" +
-      // ---- the character header's control row (ROW 3), on every tab ----
-      // Scoring toggle on the left, the two resets pushed to the right by a
-      // flexible gap, then the note and the disclaimer each on their own full
-      // line beneath. The two spans take the whole row so nothing can ever share
-      // a line with the buttons and overlap them.
-      ".bc-pmode{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;padding-top:11px;border-top:1px solid var(--border)}" +
-      ".bc-pmode .lab{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--dim);font-weight:700}" +
-      ".bc-pmode .bc-pmodegap{flex:1 1 24px;min-width:0}" +
-      ".bc-pmode .bc-pmodebtn{background:var(--panel2);border:1px solid var(--border);border-radius:99px;" +
-        "padding:5px 14px;font-size:12px;font-weight:700;font-family:inherit;color:var(--text);cursor:pointer;white-space:nowrap}" +
-      ".bc-pmode .bc-pmodebtn:hover{border-color:var(--accent);color:var(--accent)}" +
-      ".bc-pmode .bc-pmodebtn.def{background:var(--accent);color:#06121f;border-color:var(--accent)}" +
-      ".bc-pmode .bc-pmodenote,.bc-pmode .bc-pmodedisc{flex:1 0 100%;font-size:11px;color:var(--dim);line-height:1.5;max-width:78ch}" +
-      ".bc-pmode .bc-pmodedisc{margin-top:-4px}" +
-      ".bc-pmode .bc-pmodedisc b{color:var(--text);font-weight:700}" +
-      "@media(max-width:560px){.bc-pmode .bc-pmodegap{flex-basis:100%}}" +
+      // ---- the character header's right-hand CONTROL CLUSTER ----
+      //
+      // Everything you press, in one place, to the right of everything you read
+      // (Shizu's mock-up, 2026-08-11). Two columns: the scoring toggle over the
+      // two resets, and grade over granted slots over rolls left. The prose goes
+      // in its own full-width element under the whole header, because two
+      // sentences in a control column wrap to eight lines and shove the buttons.
+      ".bc-hdrctl{display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;" +
+        "padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--panel2)}" +
+      ".bc-modestack{display:flex;flex-direction:column;gap:9px}" +
+      ".bc-modeline{display:flex;align-items:center;gap:8px;flex-wrap:wrap}" +
+      ".bc-modeline .lab{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--dim);font-weight:700}" +
+      ".bc-pmodebtn{background:var(--panel);border:1px solid var(--border);border-radius:99px;" +
+        "padding:5px 14px;font-size:12px;font-weight:700;font-family:inherit;color:var(--text);cursor:pointer;white-space:nowrap;" +
+        "transition:border-color .12s,color .12s,background .12s}" +
+      ".bc-pmodebtn:hover{border-color:var(--accent);color:var(--accent)}" +
+      ".bc-pmodebtn.def{background:var(--accent);color:#06121f;border-color:var(--accent)}" +
+      ".bc-pmode{margin-top:10px}" +
+      ".bc-pmodenote,.bc-pmodedisc{display:block;font-size:11px;color:var(--dim);line-height:1.5;max-width:92ch}" +
+      ".bc-pmodedisc{margin-top:3px}" +
+      ".bc-pmodedisc b{color:var(--text);font-weight:700}" +
+      // Phones: the cluster's two columns become one, full width.
+      "@media(max-width:560px){.bc-hdrctl{gap:12px}" +
+      ".bc-hdrctl .bc-modestack,.bc-hdrctl .bc-brachdr{flex:1 1 100%;min-width:0}}" +
       "@media(max-width:640px){.bc-slot{grid-template-columns:1fr;gap:5px}.bc-slot .sn{padding-bottom:0}}" +
       "@media(max-width:900px) and (min-width:641px){.bc-slot{grid-template-columns:44px 150px minmax(0,1fr) 110px}}";
   }
@@ -1145,17 +1165,17 @@
   // ------------------------------------------------------------------
 
   /**
-   * Grade, granted slots and rolls left — the BRACELET's own three settings.
+   * Grade, granted slots and rolls left.
    *
    * They render into #bc-top, which is not in the deck any more: it is one
-   * element this file builds and re-parents into the Bracelet panel's header,
-   * beside the rows they describe (see buildTop / adoptBraceletPanel). In the
-   * deck they sat under the provenance strip, overlapped it, and repeated what
-   * the banner's chips already said.
+   * element this file builds and re-parents into the CHARACTER HEADER's
+   * right-hand control cluster, beside the scoring toggle and the two resets
+   * (Shizu's mock-up, 2026-08-11 — everything you press lives in one place, to
+   * the right of everything you read).
    *
    * Grade and slot count are two-option choices, so they read as left/right
    * pills like the loadout switch. Rolls left keeps a tight track because it
-   * genuinely has eight positions, and all three sit on one line.
+   * genuinely has eight positions.
    */
   function renderTop() {
     var ch = slotChoices();
@@ -1512,21 +1532,52 @@
     modeRepaint();
   }
 
-  // Every host that has drawn a copy of the control row, so a mode flip or a
-  // reset repaints all of them without each tab wiring its own subscription.
+  /**
+   * Every cluster that has drawn a copy of the control row, so a mode flip or a
+   * reset repaints all of them without each tab wiring its own subscription.
+   * Entries whose element has left the document are dropped on the next pass —
+   * both tabs rebuild their host markup wholesale, so stale ones are normal.
+   */
   var modeHosts = [];
-  function modeRepaint() {
+  function pruneModeHosts() {
     for (var i = modeHosts.length - 1; i >= 0; i--) {
-      var el = modeHosts[i];
-      if (!el || !el.parentNode) { modeHosts.splice(i, 1); continue; }
-      el.innerHTML = modeControlHtml();
+      var e = modeHosts[i];
+      if (!e.host || !e.host.parentNode) modeHosts.splice(i, 1);
     }
   }
-  /** A tab hands over the element its control row lives in; we keep it painted. */
-  function mountModeControl(hostEl) {
+  function paintModeHost(e) {
+    var row = e.host.getElementsByClassName("bc-modestack")[0];
+    if (!row) {
+      // Only the mode row is ever rewritten. #bc-top is a LIVE element that
+      // moves between clusters, so it must not be inside anything we innerHTML.
+      row = document.createElement("div");
+      row.className = "bc-modestack";
+      e.host.insertBefore(row, e.host.firstChild);
+    }
+    row.innerHTML = modeControlHtml();
+    if (e.note) e.note.innerHTML = modeNoteHtml();
+  }
+  function modeRepaint() {
+    pruneModeHosts();
+    for (var i = 0; i < modeHosts.length; i++) paintModeHost(modeHosts[i]);
+  }
+
+  /**
+   * A tab hands over its right-hand control cluster (and, optionally, the
+   * full-width element the note goes in). The tab that calls this LAST owns
+   * #bc-top, exactly as the tab that calls mount() last owns the deck — a
+   * repaint of the other tab's cluster never steals it back.
+   */
+  function mountModeControl(hostEl, noteEl) {
     if (!hostEl) return null;
-    if (modeHosts.indexOf(hostEl) === -1) modeHosts.push(hostEl);
-    hostEl.innerHTML = modeControlHtml();
+    pruneModeHosts();
+    var i, e = null;
+    for (i = 0; i < modeHosts.length; i++) if (modeHosts[i].host === hostEl) { e = modeHosts[i]; break; }
+    if (!e) { e = { host: hostEl, note: noteEl || null }; modeHosts.push(e); }
+    else e.note = noteEl || e.note;
+    paintModeHost(e);
+    var top = buildTop();
+    if (top.parentNode !== hostEl) hostEl.appendChild(top);
     return hostEl;
   }
 
@@ -1693,20 +1744,26 @@
       if (t && t.className && String(t.className).indexOf("chip") >= 0) chip = t;
 
       if ((seg = t.getAttribute && t.getAttribute("data-seg"))) {
+        // Slot counts are numbers and grade is a string, so the coercion has to
+        // look at the value rather than assume either.
         var raw = t.getAttribute("data-v");
         setPath(S, seg, (raw !== "" && !isNaN(Number(raw))) ? Number(raw) : raw);
-        clearProv(seg);
-        save();
-        keepFocus(function () { renderProvStrip(); renderKit(); renderAdvanced(); markProvenance(); });
-        notify({ path: seg, immediate: true });
+        // Through the SHARED tail, not a shortened copy of it: grade and slots
+        // are shape fields, and a shape change has to void the cut, re-fit the
+        // traits and the rows, and rebuild the pills so the slot counts on
+        // offer are the ones the new grade allows.
+        afterPathChange(seg, {
+          immediate: true,
+          also: function () { renderProvStrip(); renderKit(); renderAdvanced(); markProvenance(); }
+        });
         return;
       }
       if ((tgl = t.getAttribute && t.getAttribute("data-tgl"))) {
         setPath(S, tgl, !getPath(S, tgl));
-        clearProv(tgl);
-        save();
-        keepFocus(function () { renderProvStrip(); renderKit(); renderFight(); renderAdvanced(); markProvenance(); });
-        notify({ path: tgl, immediate: true });
+        afterPathChange(tgl, {
+          immediate: true,
+          also: function () { renderProvStrip(); renderKit(); renderFight(); renderAdvanced(); markProvenance(); }
+        });
         return;
       }
       if (chip && chip.getAttribute("data-editk")) {
@@ -1776,14 +1833,6 @@
     if (!hdr) return;
     var h2 = hdr.getElementsByTagName("h2")[0];
     if (h2 && h2.firstChild && h2.textContent === "Bracelet") h2.textContent = "Grader — score a bracelet";
-
-    // Grade / granted slots / rolls left belong to the bracelet, so they ride
-    // directly under its header. appendChild on a node already in the document
-    // re-parents it, listeners and all — the same trick the deck itself uses, so
-    // there is still only ONE of each control and #bc-top never goes missing.
-    var top = buildTop();
-    if (top.parentNode !== panel) panel.insertBefore(top, hdr.nextSibling);
-
     if (document.getElementById("bc-resetbracelet")) return;
     var b = document.createElement("button");
     b.type = "button";

@@ -711,12 +711,6 @@
       '<button type="button" class="mbtn' + (view === "family" ? " active" : "") + '" data-view="family">By family <span class="tl-n">33</span></button>' +
       '<button type="button" class="mbtn' + (view === "roll" ? " active" : "") + '" data-view="roll">By roll <span class="tl-n">99</span></button>' +
       "</div>" +
-      // Grade came out of the control deck when it moved to the Bracelet panel
-      // (profile.js), and this table is ranked per grade — so it needs its own.
-      '<div class="tl-seg" role="group" aria-label="Bracelet grade">' +
-      '<button type="button" class="mbtn' + (S.grade === "ancient" ? " active" : "") + '" data-grade="ancient">Ancient</button>' +
-      '<button type="button" class="mbtn' + (S.grade === "relic" ? " active" : "") + '" data-grade="relic">Relic</button>' +
-      "</div>" +
       '<div class="tl-presets"><span class="tl-plabel">Presets</span>' +
       '<button type="button" class="mbtn' + (fight.supportEffects ? " active" : "") + '" data-preset="support"' + off +
       ' data-gloss="On: you are the one bringing the party debuffs, so the four party lines score in full. Off: your support already applies them — they apply once per party, so a copy on your bracelet is worth nothing.">' +
@@ -724,9 +718,13 @@
       '<button type="button" class="mbtn' + (fight.demon ? " active" : "") + '" data-preset="demon"' + off +
       ">Demon boss · " + (fight.demon ? "on" : "off") + "</button>" +
       "</div>" +
-      // ROW 3 of the character header, the same element app.js's banner shows:
-      // one toggle, two resets and the left-column disclaimer, from profile.js.
-      '<div class="tl-pmodehost" id="bctl-pmodehost"></div>' +
+      // The SAME control cluster app.js's banner shows, from the same code in
+      // profile.js: the scoring toggle, the two resets, and the bracelet's grade
+      // / granted slots / rolls left. Grade matters here — this table is ranked
+      // per grade — and mounting the shared cluster is how this tab gets it
+      // without a second control for the same state.
+      '<div class="bc-hdrctl" id="bctl-hdrctl"></div>' +
+      '<div id="bctl-pmodenote"></div>' +
       "</div>";
   }
 
@@ -767,7 +765,7 @@
     REG = {}; SEQ = 0;
 
     $("bctl-controls").innerHTML = controlsHTML();
-    P.mountModeControl($("bctl-pmodehost"));
+    P.mountModeControl($("bctl-hdrctl"), $("bctl-pmodenote"));
     $("bctl-strip").innerHTML = stripSVG(res, grade);
     $("bctl-bands").innerHTML = headHTML() + bandsHTML(res, grade);
     $("bctl-foot").innerHTML = footHTML(res, grade);
@@ -813,8 +811,6 @@
       if (!t.closest) return;
       var vb = t.closest("[data-view]");
       if (vb) { view = vb.getAttribute("data-view"); hidePop(); render(); return; }
-      var gb = t.closest("[data-grade]");
-      if (gb) { hidePop(); P.set({ grade: gb.getAttribute("data-grade") }); return; }
       var pb = t.closest("[data-preset]");
       if (pb) {
         var k = pb.getAttribute("data-preset");
@@ -845,10 +841,9 @@
       "#tab-tierlist .tl-plabel{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-right:2px}" +
       "#tab-tierlist .tl-n{opacity:.6;font-weight:400;font-size:11px;margin-left:3px}" +
       "#tab-tierlist .tl-ctl .mbtn[disabled]{opacity:.45;cursor:default}" +
-      // The shared control row takes the whole width under the buttons, so its
-      // note and disclaimer can never share a line with them.
-      "#tab-tierlist .tl-pmodehost{flex:1 0 100%}" +
-      "#tab-tierlist .tl-pmodehost .bc-pmode{margin-top:4px}" +
+      // The shared cluster and its note each take the whole width under the
+      // view and preset buttons, rather than competing with them for a line.
+      "#tab-tierlist .tl-ctl>.bc-hdrctl,#tab-tierlist .tl-ctl>#bctl-pmodenote{flex:1 0 100%}" +
       // the spread strip
       "#tab-tierlist .tl-strip{margin:16px 0 4px;padding-bottom:8px;border-bottom:1px solid var(--border)}" +
       "#tab-tierlist .tl-strip svg{width:100%;height:auto;display:block}" +

@@ -737,6 +737,12 @@
       "#tab-calculator .bc-rankbadge{display:inline-block;padding:2px 10px;border-radius:99px;font-weight:800;" +
         "font-size:18px;line-height:1.4;color:#fff}" +
       "#tab-calculator .bc-fieldrank{margin-top:6px;font-size:12px;opacity:.75;min-height:15px}" +
+      // Read on the left, press on the right (Shizu's mock-up). The cluster keeps
+      // its natural width and the identity block takes the rest; under 900px the
+      // two stack, because three pill pairs and a name will not share a phone.
+      "#tab-calculator .bc-hdrgrid{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px;align-items:start}" +
+      "#tab-calculator .bc-hdrleft{min-width:0}" +
+      "@media(max-width:900px){#tab-calculator .bc-hdrgrid{grid-template-columns:minmax(0,1fr)}}" +
       // The character / default settings toggle is styled by profile.js, with the
       // rest of the control row it sits in: the Tier List draws the same row, and
       // a "#tab-calculator …" prefix here would have left that copy unstyled.
@@ -763,6 +769,20 @@
       "#tab-calculator .bc-card.hero{border-color:var(--accent)}" +
       "#tab-calculator .bc-card .v.gold{color:var(--high)}" +
       "#tab-calculator .bc-card .v.acc{color:var(--accent)}" +
+      // ---- the unrolled card's combat-trait pricing ----
+      // It carries a control, so it takes two columns where there is room and
+      // keeps the slider on its own line under the sentence.
+      "#tab-calculator .bc-unrolled{grid-column:span 2}" +
+      "@media(max-width:640px){#tab-calculator .bc-unrolled{grid-column:auto}}" +
+      "#tab-calculator .bc-ttrow{display:flex;align-items:center;gap:9px;margin-top:9px}" +
+      "#tab-calculator .bc-ttrow label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim);" +
+        "font-weight:700;white-space:nowrap}" +
+      "#tab-calculator .bc-ttrow input[type=range]{flex:1 1 auto;min-width:0;accent-color:var(--accent)}" +
+      "#tab-calculator .bc-ttrow .chip{flex:0 0 auto;min-width:34px;text-align:right;font-variant-numeric:tabular-nums;" +
+        "font-weight:700;font-size:12.5px;color:var(--text)}" +
+      "#tab-calculator .bc-ttrefs{margin-top:6px;font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}" +
+      "#tab-calculator .bc-ttrefs b{color:var(--text);font-weight:700}" +
+      "#tab-calculator .bc-ttrefs .sep{opacity:.5;margin:0 2px}" +
       // quantile strip
       "#tab-calculator .bc-strip{position:relative;height:34px;margin:12px 0 4px}" +
       "#tab-calculator .bc-strip .track{position:absolute;left:0;right:0;top:13px;height:8px;border-radius:4px;background:var(--panel2);border:1px solid var(--border)}" +
@@ -1061,13 +1081,182 @@
       ' played perfectly<span data-gloss="Rolls are free, so rolling always beats stopping. This is the average final score under the best lock-and-keep policy — not a promise, an expectation.">*</span>.</div></div>';
     h += '<div class="bc-card"><div class="k">Worth</div><div class="v gold">' + (val >= 0 ? "" : "−") + gold(Math.abs(val)) +
       '</div><div class="s">(' + fx(finPct, 2) + "% − " + fx(baseD, 2) + "% baseline) × " + gold(gpd()) + " gold.</div></div>";
-    if (freshSolve) {
-      var fval = valueGold(freshSolve.expectedFinal);
-      h += '<div class="bc-card"><div class="k" data-gloss="What a sealed bracelet of this grade and slot count is worth before anyone opens it: the average final score over every set it could roll, with all its rolls still to spend. This is the number a buyer is actually paying for. Slot count moves it a long way.">Unrolled, ' + S.slots + ' slots</div><div class="v">' + gold(fval) +
-        '</div><div class="s">What an empty ' + S.grade + " bracelet with " + S.slots + " granted slots and " +
-        S.rollsTotal + " rolls is worth: " + fx(pct(freshSolve.expectedFinal), 2) + "%.</div></div>";
-    }
+    if (freshSolve) h += unrolledCardHtml();
     return h + "</div>";
+  }
+
+  // ------------------------------------------------------------------
+  // pricing an unrolled bracelet by its combat traits
+  //
+  // The two combat traits are the one part of a bracelet a buyer CANNOT change:
+  // they never reroll. So 120/120 and 80/80 are two very different things at the
+  // same asking price, and the card used to quote both the same number — the
+  // question the whole tool exists to answer, answered wrong (Shizu, 2026-08-11;
+  // docs/design/ui-overhaul.md).
+  //
+  // Repricing is free. traitDamage is a CONSTANT offset the solver adds outside
+  // the DP (model/bracelet.js: "a constant on every reachable state"), so every
+  // outcome in the solved distribution simply shifts by the difference between
+  // the trait pair you are pricing and the one that was solved. No re-solve, no
+  // worker round trip, and the slider stays live under the hand.
+  // ------------------------------------------------------------------
+
+  // null means "follow the bracelet's own traits"; a number is the user's pick.
+  var traitTotalUI = null;
+
+  /** The legal span of the two-trait sum for this grade, and its active count. */
+  function traitTotalRange() {
+    var band = traitBand(), n = 0, i;
+    for (i = 0; i < TRAIT_KEYS.length; i++) if (S.traits[TRAIT_KEYS[i]] && S.traits[TRAIT_KEYS[i]].on) n++;
+    if (!n) n = 2;
+    return { lo: band[0] * n, hi: band[1] * n, n: n };
+  }
+  /** What the bracelet on screen actually carries. */
+  function traitTotalNow() {
+    var v = traitValues(), s = 0, i;
+    for (i = 0; i < TRAIT_KEYS.length; i++) s += num(v[TRAIT_KEYS[i]], 0);
+    return s;
+  }
+  function traitTotalValue() {
+    var r = traitTotalRange();
+    var v = traitTotalUI === null ? traitTotalNow() : traitTotalUI;
+    return clamp(Math.round(v), r.lo, r.hi);
+  }
+
+  /**
+   * Spread `total` over the ACTIVE traits, keeping whatever ratio they are in.
+   * Equal values split evenly, which is the ordinary case; a player who has typed
+   * 120 crit and 90 spec keeps that shape as the total moves.
+   *
+   * Then CLAMP each line to the grade's own band and push what will not fit onto
+   * the lines that still have room. A plain ratio split does not respect the cap
+   * — 116/95 scaled to 240 asks for Crit 132 on a band that stops at 120 — and a
+   * bracelet the game cannot produce must not be priced as if it could.
+   */
+  function traitsForTotal(total) {
+    var out = { crit: 0, spec: 0, swift: 0 }, keys = [], sum = 0, i, k, v, cur = {};
+    for (i = 0; i < TRAIT_KEYS.length; i++) {
+      k = TRAIT_KEYS[i];
+      if (!S.traits[k] || !S.traits[k].on) continue;
+      v = num(S.traits[k].v, 0);
+      keys.push(k); cur[k] = v; sum += v;
+    }
+    if (!keys.length) return out;
+    var band = traitBand(), lo = band[0], hi = band[1], pass, got, room, left, r;
+    for (i = 0; i < keys.length; i++) {
+      k = keys[i];
+      out[k] = sum > 0 ? total * (cur[k] / sum) : total / keys.length;
+    }
+    // A handful of passes is plenty: the slider's own range is lo*n .. hi*n, so
+    // every reachable total has a legal split and this converges onto it.
+    for (pass = 0; pass < 5; pass++) {
+      got = 0;
+      for (i = 0; i < keys.length; i++) { k = keys[i]; out[k] = clamp(out[k], lo, hi); got += out[k]; }
+      left = total - got;
+      if (Math.abs(left) < 1e-9) break;
+      room = 0;
+      for (i = 0; i < keys.length; i++) { k = keys[i]; room += left > 0 ? (hi - out[k]) : (out[k] - lo); }
+      if (room <= 1e-9) break;
+      for (i = 0; i < keys.length; i++) {
+        k = keys[i];
+        r = left > 0 ? (hi - out[k]) : (out[k] - lo);
+        out[k] += left * (r / room);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * What a sealed bracelet with this combat-trait total is worth, in gold.
+   *
+   * E[max(0, final% − baseline%)] × gold-per-1%, taken over the whole solved
+   * distribution — the model's own definition of worth. A bracelet you would not
+   * wear is worth nothing, never a negative number, so the payoff is truncated at
+   * zero rather than read off the mean.
+   *
+   * Two things the thinned cdf forces. The worker keeps ~400 of some thirty
+   * thousand rungs, so a rung's MASS has to come from the cumulative column
+   * (summing its own p would throw away most of the probability), and that mass
+   * really belongs to the whole interval the dropped rungs covered — charging it
+   * all at the interval's top end prices a maximum-trait bracelet 3.6% too high.
+   * Taking the interval's midpoint instead brings the answer back to within 0.2%
+   * of a full re-solve across the range, which is far inside what a gold figure
+   * can honestly claim.
+   */
+  function unrolledWorthAt(total) {
+    if (!freshSolve || !freshSolve.finalScore || !freshSolve.finalScore.cdf) return null;
+    var cdf = freshSolve.finalScore.cdf;
+    if (!cdf.length) return null;
+    var prof = buildProfile();
+    var shift = B.traitDamage(traitsForTotal(total), prof) - num(freshSolve.traitDamage, 0);
+    var base = num(S.econ.baseline, 0), acc = 0, prev = 0, prevS = null, i, m, s, over;
+    for (i = 0; i < cdf.length; i++) {
+      m = cdf[i].cum - prev;
+      prev = cdf[i].cum;
+      s = prevS === null ? cdf[i].score : (prevS + cdf[i].score) / 2;
+      prevS = cdf[i].score;
+      if (m <= 0) continue;
+      over = pct(s + shift) - base;
+      if (over > 0) acc += m * over;
+    }
+    return acc * gpd();
+  }
+
+  /** Three rungs down from the cap, so the shape of the curve reads at a glance. */
+  function traitRefPoints() {
+    var r = traitTotalRange(), out = [], v, i;
+    for (i = 0; i < 3; i++) {
+      v = r.hi - i * 40;
+      if (v < r.lo) break;
+      out.push(v);
+    }
+    return out;
+  }
+
+  function unrolledCardHtml() {
+    var r = traitTotalRange(), t = traitTotalValue();
+    var w = unrolledWorthAt(t);
+    var refs = traitRefPoints(), rh = "", i;
+    for (i = 0; i < refs.length; i++) {
+      var rw = unrolledWorthAt(refs[i]);
+      rh += (i ? ' <span class="sep">·</span> ' : "") + '<b>' + refs[i] + "</b> " +
+        (rw == null ? "—" : gold(rw));
+    }
+    var band = traitBand();
+    return '<div class="bc-card bc-unrolled">' +
+      '<div class="k" data-gloss="What a sealed bracelet of this grade and slot count is worth before anyone opens it, at the combat-trait total below. The two combat traits never reroll, so they are the part of the bracelet a buyer cannot change — and most of what is being bought. Worth is the expected payoff over the baseline across every set it could roll, truncated at zero.">Unrolled, ' +
+      S.slots + " slots</div>" +
+      '<div class="v gold" id="bc-tt-val">' + (w == null ? "—" : gold(w)) + "</div>" +
+      '<div class="s" id="bc-tt-say">' + unrolledSayHtml(t) + "</div>" +
+      '<div class="bc-ttrow">' +
+      '<label for="bc-tt" data-gloss="The two fixed combat traits, added together. ' +
+      (S.grade === "relic" ? "Relic" : "Ancient") + " lines run " + band[0] + "&ndash;" + band[1] +
+      " points each, so " + r.n + ' of them span ' + r.lo + "&ndash;" + r.hi +
+      '.">Combat traits, total</label>' +
+      '<input id="bc-tt" type="range" min="' + r.lo + '" max="' + r.hi + '" step="1" value="' + t + '">' +
+      '<span class="chip" id="bc-tt-chip">' + t + "</span></div>" +
+      '<div class="bc-ttrefs" id="bc-tt-refs">' + rh + "</div>" +
+      "</div>";
+  }
+
+  function unrolledSayHtml(t) {
+    var tv = traitsForTotal(t), parts = [], i, k;
+    for (i = 0; i < TRAIT_KEYS.length; i++) {
+      k = TRAIT_KEYS[i];
+      if (tv[k] > 0) parts.push(TRAIT_LABELS[k] + " " + Math.round(tv[k]));
+    }
+    return "An empty " + (S.grade === "relic" ? "Relic" : "Ancient") + " bracelet, " + S.slots +
+      " granted slot" + (S.slots === 1 ? "" : "s") + ", " + S.rollsTotal + " rolls, with " +
+      (parts.length ? esc(parts.join(" / ")) : "no combat traits") + "." +
+      (traitTotalUI === null ? " That is what this bracelet carries." : "");
+  }
+
+  /** Slider moved: repaint the three numbers, never the card under the cursor. */
+  function paintTraitTotal() {
+    var t = traitTotalValue(), w = unrolledWorthAt(t);
+    var c = $("bc-tt-chip"); if (c) c.textContent = t;
+    var v = $("bc-tt-val"); if (v) v.textContent = (w == null ? "—" : gold(w));
+    var s = $("bc-tt-say"); if (s) s.innerHTML = unrolledSayHtml(t);
   }
 
   function advisorHtml(res, profile, lines) {
@@ -1356,6 +1545,9 @@
     }
     if (d.shape || d.reset) {
       lastVerdict = null;
+      // Grade moves the trait band, so a total picked under the old one is not a
+      // legal total any more: go back to following the bracelet's own traits.
+      traitTotalUI = null;
       keepFocus(renderBracelet);
     } else {
       redrawLive();
@@ -1419,6 +1611,10 @@
     root.addEventListener("input", function (e) {
       var id = e.target.id || "", tr;
       if (/^bc-[rfn]-val-\d+$/.test(id)) { handleRowEvent(e.target); save(); schedule(); return; }
+      // The unrolled card's trait-total slider. It changes NOTHING in the state
+      // and needs no solve — it reprices the distribution already in hand — so
+      // it repaints three numbers and stops there.
+      if (id === "bc-tt") { traitTotalUI = num(e.target.value, traitTotalNow()); paintTraitTotal(); return; }
       if ((tr = e.target.getAttribute && e.target.getAttribute("data-tr"))) {
         // Clamp what the MODEL sees to the official band, but leave the box
         // alone while it is being typed in.
@@ -1647,7 +1843,14 @@
       worthTxt = (val >= 0 ? "" : "−") + gold(Math.abs(val));
     }
 
+    // LEFT is everything you read — who this is, and the three figures. RIGHT is
+    // everything you press, in one cluster: the scoring toggle, the two resets
+    // and the bracelet's grade / slots / rolls. profile.js fills the two hosts
+    // (#bc-hdrctl and #bc-pmodenote) and owns what goes in them, because the Tier
+    // List draws the same cluster from the same code.
     box.innerHTML = '<div class="panel">' +
+      '<div class="bc-hdrgrid">' +
+      '<div class="bc-hdrleft">' +
       '<div class="bc-prof bc-profwrap" id="bc-profwrap" title="Load ' + esc(c.name) + ' again — bracelet and character settings">' +
       '<button type="button" class="bc-star" id="bc-fav-star"></button>' +
       classIconHtml(c["class"]) +
@@ -1663,7 +1866,10 @@
       '<div class="stat"><span class="k">Worth</span><span class="v gold" id="bc-sum-worth">' + worthTxt + "</span></div>" +
       "</div>" +
       '<div class="bc-fieldrank" id="bc-fieldrank"></div>' +
-      '<div id="bc-pmodehost"></div>' +
+      "</div>" +
+      '<div class="bc-hdrctl" id="bc-hdrctl"></div>' +
+      "</div>" +
+      '<div id="bc-pmodenote"></div>' +
       "</div>";
 
     var star = $("bc-fav-star");
@@ -1691,10 +1897,10 @@
       };
     }
 
-    // ROW 3: the scoring toggle, the two resets and the left-column disclaimer.
-    // profile.js builds and repaints it — the Tier List shows the same row from
-    // the same source, so the wording cannot drift apart.
-    P.mountModeControl($("bc-pmodehost"));
+    // The banner is rebuilt on several paths, and #bc-top is a LIVE element that
+    // moves — so it is re-adopted into the fresh cluster after every repaint
+    // rather than being part of the markup above.
+    P.mountModeControl($("bc-hdrctl"), $("bc-pmodenote"));
 
     fillFieldRank(c);
   }
@@ -1740,12 +1946,16 @@
     recompute();
   }
 
-  // The deck is a single element that MOVES between tabs (see profile.js): claim
-  // it back whenever the Calculator is the tab on screen.
+  // TWO elements move between tabs (see profile.js): the control deck, and
+  // #bc-top inside the header's control cluster. Claim both back whenever the
+  // Calculator is the tab on screen — claiming only the deck left grade, granted
+  // slots and rolls left behind in the Tier List's cluster.
   document.addEventListener("tabselected", function (e) {
     if (!e || !e.detail || e.detail.tab !== "calculator") return;
     var host = $("bc-deckhost");
     if (host) P.mount(host);
+    var ctl = $("bc-hdrctl");
+    if (ctl) P.mountModeControl(ctl, $("bc-pmodenote"));
   });
 
   /**
