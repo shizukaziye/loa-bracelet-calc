@@ -1313,8 +1313,8 @@
 
   /**
    * Decode the selected loadout and hand it to app.js. The character block carries
-   * everything the banner draws AND everything the deck can honestly auto-fill;
-   * app.js decides what of the profile it will accept.
+   * everything the banner draws AND everything the deck could honestly fill —
+   * but filling it is the user's press, not this function's.
    */
   function applyLoadout() {
     var rec = state.record;
@@ -1361,25 +1361,19 @@
       grade: l.grade,
       loadoutLabel: rec.loadouts.length > 1 ? (l.label || l.classification) : null,
       // ARCHITECTURE §1.1: THIS loadout's grader profile, falling back to the
-      // record's. app.js reads a couple of fields off it; profile.js reads the
-      // rest, below.
+      // record's. It is carried, not applied — profile.js reads it when the user
+      // presses "Import Character Stats".
       profile: l.profile || rec.profile || null
     };
     app.applyImport(built.patch);
 
-    // The whole left column, from the same loadout the bracelet came from: six
-    // honing levels, the necklace's additional damage, both earrings' weapon
-    // power, the gem level, the 9/7 stone and Master. app.applyImport has just
-    // put item level in as a uniform honing guess; this replaces it with what
-    // the page actually says, field by field, and only where the page said
-    // anything. Every one lands marked, editable and reversible.
-    var filled = 0;
-    if (root.Profile && root.Profile.applyCharacterProfile) {
-      try {
-        filled = root.Profile.applyCharacterProfile(
-          built.patch.character.profile, built.patch.character) || 0;
-      } catch (e) { filled = 0; }     // a shape change upstream must not cost the bracelet
-    }
+    // THE LEFT COLUMN IS NOT FILLED HERE. The six honing levels, the necklace,
+    // both earrings, the gem level, the 9/7 stone and Master all ride on
+    // built.patch.character.profile, and the deck takes them only when the user
+    // presses "Import Character Stats" (Shizu, 2026-08-12). Loading someone
+    // gives you their bracelet and their banner; the settings stay the
+    // calculator's defaults, which is what the board ranks them on.
+    var canImport = !!(root.Profile && root.Profile.canImportStats && root.Profile.canImportStats());
 
     // LAST, because both of its numbers depend on the finished deck: the gold
     // rate off the character's combat power, and the baseline off the bracelet
@@ -1397,10 +1391,10 @@
       (built.patch.character.loadoutLabel ? " (" + built.patch.character.loadoutLabel + " loadout)" : "") +
       " — " + (built.patch.grade === "relic" ? "Relic" : "Ancient") + ", " +
       n + " granted slot" + (n === 1 ? "" : "s") + ".";
-    if (filled) {
-      note += " " + filled + " gear setting" + (filled === 1 ? "" : "s") +
-        " came off the page too — honing, accessories, gems and the two nodes. " +
-        "Each is marked in the Character panel; hover one to see what the page said, edit it to drop the mark.";
+    if (canImport) {
+      note += " The settings are the calculator's defaults, which is what the board ranks everyone on — " +
+        "press Import Character Stats in the banner to put " + rec.name +
+        "'s own honing, accessories, gems and the two nodes in the panel instead.";
     }
     // The loadout/score commentary that used to live here is gone (Shizu,
     // 2026-08-11): the pills already show each loadout and its score, and the

@@ -82,8 +82,8 @@
 // they exist: a missing file fails its <script> and the loader skips it, so each
 // pane simply keeps the placeholder until the file lands.
 var LAZY_TABS = {
-  advisor: ['advisor-capture.js?v=1', 'advisor.js?v=3', 'advisor-glue.js?v=1'],
-  tierlist: ['tierlist.js?v=16'],
+  advisor: ['advisor-capture.js?v=1', 'advisor.js?v=4', 'advisor-glue.js?v=1'],
+  tierlist: ['tierlist.js?v=17'],
   leaderboard: ['leaderboard.js?v=6'],
   method: ['method.js?v=3'],
   feedback: ['feedback.js?v=2']
@@ -134,15 +134,15 @@ function selectTab(name){
 <!-- The shared character lookup + ★ strip. EAGER, though it mounts lazily: the
      Advisor and the Tier List both mount it, and neither should have to know
      whether the other has already loaded it. -->
-<script src="char-picker.js?v=1"></script>
-<script src="profile.js?v=8"></script>
+<script src="char-picker.js?v=2"></script>
+<script src="profile.js?v=9"></script>
 <script src="subrank.js?v=2"></script>
-<script src="app.js?v=24"></script>
+<script src="app.js?v=25"></script>
 <!-- lostark.bible import. AFTER app.js: bible-import.js mounts into the Bracelet
      panel app.js has just built, and hands what it decodes to
      window.BraceletApp.applyImport. Both degrade to nothing if the site is down. -->
 <script src="bible-oauth.js?v=1"></script>
-<script src="bible-import.js?v=13"></script>
+<script src="bible-import.js?v=14"></script>
 <script src="https://www.loseii.com/nav.js" defer></script>
 <script src="https://www.loseii.com/social-bar.js" defer></script>
 </body></html>

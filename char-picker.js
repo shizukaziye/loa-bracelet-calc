@@ -27,10 +27,10 @@
  * is the point, not a leak. Profile notifies, each tab re-renders, and every
  * mounted picker repaints its own selected line.
  *
- * IT DOES NOT TOUCH THE SCORING MODE. Loading a character fills the deck with
- * their settings; whether the numbers are computed on those settings or on the
- * canonical defaults stays the user's own choice, on the "Scoring on" toggle. A
- * host that wants to point at that toggle passes `note`.
+ * IT DOES NOT TOUCH THE DECK. Loading a character brings their BRACELET and
+ * their banner; the settings stay the calculator's defaults until the user
+ * presses "Import Character Stats". A host that wants to point at that button
+ * passes `note`.
  *
  * WHAT IT TALKS TO
  *   window.BraceletImport   bible-import.js — seed() and loadCharacter()

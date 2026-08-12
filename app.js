@@ -154,18 +154,13 @@
   function traitValues() { return P.traitValues(); }
   function traitBand() { return P.traitBand(); }
 
-  // ---- character settings vs default settings ----
+  // ---- the one profile ----
   //
-  // Two ways to score the same bracelet: the deck (this character, as imported
-  // and then edited) and the CANONICAL DEFAULT profile, the one the leaderboard
-  // ranks everyone on. The choice, the persistence and the control all live in
-  // profile.js now — the Tier List scores on the same toggle, and a mode that
-  // moved only this tab was a setting that lied about its own reach.
-  //
-  // Everything here reads P.scoringProfile(), which honours it.
+  // There is no default-vs-character toggle any more (Shizu, 2026-08-12). The
+  // deck starts at the canonical defaults and holds whatever the user has made
+  // of them; P.profile() is the single answer, and every tab asks it.
   function hasCharacter() { return !!(S.char && S.char.name); }
-  function onDefaults() { return P.onDefaults(); }
-  function buildProfile() { return P.scoringProfile(); }
+  function buildProfile() { return P.profile(); }
   function famGrades(grade) { return P.famGrades(grade); }
   function letterOf(val, grade) { return P.letterOf(val, grade); }
   var TRAIT_KEYS = P.TRAIT_KEYS, TRAIT_LABELS = P.TRAIT_LABELS;
@@ -905,7 +900,7 @@
    *                       its preset pills
    *   #bc-charhdr         the character banner: ★, class icon, name, cache pill,
    *                       chips, the three headline stats, the field rank and the
-   *                       character/default settings toggle
+   *                       character's two buttons
    *   #bc-deckhost        the control deck (profile.js builds and owns it)
    *
    * The banner sits ABOVE the deck on purpose: it is who the deck is describing.
@@ -963,14 +958,6 @@
     var note = $("bc-slotnote");
     if (!note) return;
     var base = P.baseStats(), p = buildProfile();
-    // Defaults mode: the deck's own numbers are not what anything below is scored
-    // on, so printing them here would be a lie of arrangement.
-    if (onDefaults()) {
-      note.textContent = "Scoring on the canonical default profile — the same one the leaderboard ranks everyone on. " +
-        "The Character deck stays editable; nothing below reads it until you switch back. " +
-        "Leave every granted slot empty for an unrolled bracelet.";
-      return;
-    }
     var msg = S.useOverride
       ? "Main stat " + nf(base.mainStatRaw) + " raw · weapon power " + nf(base.weaponPowerRaw) + " raw"
       : "Item level " + fx(P.ilvl(), 2) + " · main stat " + nf(base.mainStatRaw) + " raw · weapon power " + nf(base.weaponPowerRaw) + " raw";
@@ -1043,8 +1030,13 @@
 
     // Rarity first, family second: the rarity is the short, high-signal box and
     // the family name is long, so the eye reads left to right without hopping.
+    // The advice, on the row it applies to. The mask table below says the same
+    // thing in aggregate, but a KEEP/ROLL badge beside the line you are looking
+    // at is what people actually read (Shizu, 2026-08-12).
     var h = '<div class="bc-slot">' +
-      '<div class="sn">' + esc(label) + "</div>";
+      '<div class="sn" id="' + prefix + "-sn-" + idx + '">' + esc(label) +
+      (prefix === "bc-r" ? advBadge(slotAdvice(idx)) : "") +
+      "</div>";
     if (isSpecial) {
       var fam = DATA.SPECIAL_BY_ID[Number(row.fam.slice(3))];
       h += '<div class="fld">' + (fam ? tierHtml(prefix + "-tier-" + idx, fam, grade, row.tier || "mid") : "") + "</div>";
@@ -1060,6 +1052,48 @@
       h += "<div></div>";
     }
     return h + "</div>";
+  }
+
+  /**
+   * KEEP or ROLL for one granted slot, from the solver's best lock mask.
+   *
+   * Null when there is nothing to advise: no solve yet, no rolls left, or an
+   * empty slot. Silence beats a confident badge on a bracelet the solver has
+   * not looked at.
+   */
+  function slotAdvice(idx) {
+    if (!lastSolve || !S.rollsLeft) return null;
+    var row = S.rows[idx];
+    if (!row || !row.fam || row.fam === "none") return null;
+    if (!lastSolve.bestLockMask) return null;
+    var flags = locksFromKeys(lastSolve.bestLockMask.lockedKeys, grantedLines(), S.grade, buildProfile());
+    if (!flags || flags.length <= idx) return null;
+    return flags[idx]
+      ? { txt: "KEEP", cls: "keep", tip: "Lock this slot before your next roll — the solver keeps it under the best mask." }
+      : { txt: "ROLL", cls: "roll", tip: "Leave this one unlocked. One attempt rerolls every unlocked slot together." };
+  }
+
+  /** The badge itself, or "" for a slot with nothing to advise. */
+  function advBadge(adv) {
+    if (!adv) return "";
+    return ' <span class="bc-adv ' + adv.cls + '" data-gloss="' + esc(adv.tip) + '">' + adv.txt + "</span>";
+  }
+
+  /**
+   * The badges, repainted in place.
+   *
+   * renderSlots draws them, but it runs when the BRACELET changes and the solve
+   * that decides them lands a second or three later — so drawn once and never
+   * again they simply never appeared. This rewrites the label cell alone, so the
+   * pickers under the cursor are not rebuilt, and it is honest in every state:
+   * with no solve, no rolls or an empty slot, slotAdvice returns null and the
+   * badge comes off.
+   */
+  function paintSlotAdvice() {
+    for (var i = 0; i < S.slots; i++) {
+      var el = $("bc-r-sn-" + i);
+      if (el) el.innerHTML = esc("Slot " + (i + 1)) + advBadge(slotAdvice(i));
+    }
   }
 
   function renderSlots() {
@@ -1162,9 +1196,12 @@
     var curPct = pct(res.currentScore), finPct = pct(res.expectedFinal);
     var w = worthOf(res, 0);
     var h = '<div class="bc-cards">';
-    h += '<div class="bc-card"><div class="k">Current score</div><div class="v">' + fx(curPct, 2) +
+    // Current score is the hero card: it is what the bracelet IS. Expected final
+    // is a projection, and leading with a projection made people read it as the
+    // number they already had (Shizu, 2026-08-12).
+    h += '<div class="bc-card hero"><div class="k">Current score</div><div class="v acc">' + fx(curPct, 2) +
       '%</div><div class="s">' + (res.unrolled ? "Unrolled — no granted lines yet." : "Damage over no bracelet, all lines combined.") + "</div></div>";
-    h += '<div class="bc-card hero"><div class="k">Expected final</div><div class="v acc">' + fx(finPct, 2) +
+    h += '<div class="bc-card"><div class="k">Expected final</div><div class="v">' + fx(finPct, 2) +
       '%</div><div class="s">Where it lands after ' + S.rollsLeft + " roll" + (S.rollsLeft === 1 ? "" : "s") +
       ' played perfectly<span data-gloss="Rolls are free, so rolling always beats stopping. This is the average final score under the best lock-and-keep policy — not a promise, an expectation.">*</span>.</div></div>';
     h += '<div class="bc-card"><div class="k" data-gloss="' + esc(worthGloss(w)) + '">Worth</div>' +
@@ -1530,6 +1567,7 @@
   function renderResults(profile, err) {
     var box = $("bc-results");
     if (!box) return;
+    paintSlotAdvice();         // the solve this paint is reporting is what decides them
     if (err) {
       box.innerHTML = '<div class="panel"><div class="bc-warn">' + esc(err) + "</div></div>";
       return;
@@ -1678,11 +1716,11 @@
       // this path runs on every step of a drag.
       if (d.path === "rollsLeft" || d.path === "grade") paintCharChips();
     }
-    // The scoring toggle moved: every number on screen is on a different profile
-    // now, so the banner's figures and the priced pickers both have to follow —
-    // and until the re-solve lands they are dimmed, because they are still the
-    // other profile's answers.
-    if (d.mode) { renderCharHeader(); redrawLive(); markStale(true); }
+    // "Import Character Stats" just rewrote the left column: every number on
+    // screen is on a different profile now, so the banner's figures and the
+    // priced pickers both have to follow — and until the re-solve lands they are
+    // dimmed, because they are still the old profile's answers.
+    if (d.imported) { renderCharHeader(); redrawLive(); markStale(true); }
     if (d.immediate) solveNow(); else schedule();
   }
 
@@ -1935,16 +1973,16 @@
    *   chips: region · class · ilvl · bracelet grade · rolls left
    *   three headline stats: BRACELET % · RANK · WORTH
    *   the field rank ("Top 11% of Reapers (#3 of 24) · #9 of 30 tracked")
-   *   the character / default settings toggle
+   *   the character's two buttons — Import Character Stats, Reset to Default
    *
    * The whole block is clickable and reloads its own character, so the banner and
-   * a saved chip do exactly the same thing. The ★, the name link and the toggle
+   * a saved chip do exactly the same thing. The ★, the name link and the buttons
    * stop that click, because each of them means something else.
    *
-   * BRACELET % and WORTH come from the live solve, so they follow the settings
-   * toggle. RANK and the field line come from the character's DEFAULT-profile
-   * score against the board — the board's number against the board's numbers, or
-   * the comparison would be ranking gear.
+   * BRACELET % and WORTH come from the live solve, so they follow the deck. RANK
+   * and the field line come from the character's DEFAULT-profile score against
+   * the board — the board's number against the board's numbers, or the
+   * comparison would be ranking gear.
    */
   function renderCharHeader() {
     var box = $("bc-charhdr");
@@ -1970,10 +2008,10 @@
     var curTxt = lastSolve ? fx(pct(lastSolve.currentScore), 2) + "%" : "—";
 
     // LEFT is everything you read — who this is, and the three figures. RIGHT is
-    // everything you press, in one cluster: the scoring toggle, the two resets
-    // and the bracelet's grade / slots / rolls. profile.js fills the two hosts
-    // (#bc-hdrctl and #bc-pmodenote) and owns what goes in them, because the Tier
-    // List draws the same cluster from the same code.
+    // everything you press, in one cluster: the character's two buttons and the
+    // bracelet's grade / slots / rolls. profile.js fills #bc-hdrctl and owns what
+    // goes in it, because the Advisor and the Tier List draw the same cluster
+    // from the same code.
     box.innerHTML = '<div class="panel">' +
       '<div class="bc-hdrgrid">' +
       '<div class="bc-hdrleft">' +
@@ -1996,7 +2034,6 @@
       "</div>" +
       '<div class="bc-hdrctl" id="bc-hdrctl"></div>' +
       "</div>" +
-      '<div id="bc-pmodenote"></div>' +
       "</div>";
 
     paintWorthStat(lastSolve);
@@ -2026,10 +2063,10 @@
       };
     }
 
-    // The cluster carries the scoring toggle, the two resets and the note. NOT
-    // the bracelet's three settings: withTop false leaves those in the Grader,
-    // where nothing rebuilds them.
-    P.mountModeControl($("bc-hdrctl"), $("bc-pmodenote"), { withTop: false });
+    // The cluster carries the character's two buttons. NOT the bracelet's three
+    // settings: withTop false leaves those in the Grader, where nothing rebuilds
+    // them.
+    P.mountCharControls($("bc-hdrctl"), { withTop: false });
 
     fillFieldRank(c);
   }
@@ -2051,7 +2088,7 @@
       if (rk) {
         rk.innerHTML = '<span class="bc-rankbadge" style="background:' +
           (GRADE_COLOR[r.letter] || GRADE_COLOR.F) + '">' + esc(r.letter) + "</span>";
-        rk.title = "Worth " + fx(c.defaultPct, 2) + "% on default settings — " +
+        rk.title = "Worth " + fx(c.defaultPct, 2) + "% on the canonical default profile — " +
           Math.round(r.share * 100) + "% of the best bracelet on the board.";
       }
     });
@@ -2084,7 +2121,7 @@
     var host = $("bc-deckhost");
     if (host) P.mount(host);
     var ctl = $("bc-hdrctl");
-    if (ctl) P.mountModeControl(ctl, $("bc-pmodenote"), { withTop: false });
+    if (ctl) P.mountCharControls(ctl, { withTop: false });
   });
 
   /**
@@ -2095,9 +2132,10 @@
    * import never disturbs the character or economy settings.
    *
    * `patch.character` is optional: {name, region, class, itemLevel, source,
-   * pulledAt, cached}. When it is there the profile header appears, and anything
-   * the page told us about the character's GEAR is applied as a marked, editable
-   * suggestion — never silently.
+   * pulledAt, cached, profile}. When it is there the banner appears and the two
+   * buttons with it. What the page said about the character's GEAR is carried on
+   * that object and applied only when the user asks for it — profile.js's
+   * importCharacterStats() is the one path, and it runs on a press.
    */
   window.BraceletApp = {
     applyImport: function (patch) {
@@ -2123,17 +2161,12 @@
       lastSolve = null; lastSolveKey = null; freshSolve = null; freshSolveKey = null;
       if (patch.character) next.char = patch.character;
       P.set(next);                                 // merges, persists, re-renders the deck, notifies
-      // Photograph the bracelet the import just made, AFTER the merge, so "Reset
-      // to imported" can replay the whole thing — rows, traits, grade, slots,
-      // rolls and the padlocks — and not just the left column. The state is the
-      // honest record: the patch may leave keys out, and fitRows may have
-      // reshaped the rows to the slot count.
-      //
-      // Only when a CHARACTER came with it. The Leaderboard and the screenshot
-      // reader push bracelets through this same hook, and "Reset to imported"
-      // means "put my character back", not "put back whatever I last looked at".
-      if (patch.character) P.setImportSnapshot();
-      if (patch.character) importProfileValues(patch.character);
+      // THE LEFT COLUMN IS NOT TOUCHED. An import used to fill the deck with the
+      // character's own gear the moment they loaded, which meant the number on
+      // screen was not the number the board shows them and nobody could tell
+      // which they were reading. The settings stay ours until the user presses
+      // "Import Character Stats" (Shizu, 2026-08-12); everything that button
+      // needs is on patch.character, which P.set has just stored.
       renderCharHeader();
       return true;
     },
@@ -2166,13 +2199,13 @@
     /**
      * The two economy defaults, once the whole import has landed.
      *
-     * Called LAST by bible-import.js, after applyCharacterProfile has filled the
-     * left column, because both numbers depend on what the deck ended up holding:
+     * Called LAST by bible-import.js, after the bracelet has landed, because the
+     * baseline is that bracelet's own score:
      *
      *   gold per 1%   from the character's combat power, on the astrogem
      *                 calculator's own ladder — the same rate a gem is priced at
      *   baseline %    the score of the bracelet this character is ALREADY
-     *                 wearing, under the profile the numbers are on
+     *                 wearing, on the deck as it stands
      *
      * With that baseline, "worth" stops meaning "against no bracelet at all" and
      * starts meaning "what upgrading from what they wear would be worth" — for an
@@ -2200,66 +2233,6 @@
       });
     }
   };
-
-  /**
-   * What of a character page's own numbers we can honestly put in the deck.
-   *
-   * ITEM LEVEL is always there: the roster and the page both carry an average, and
-   * the six honing sliders are what the model reads. An average maps to a uniform
-   * honing level (Serca 0 is 1675, every level is +5), which is a derivation and
-   * not a measurement — so every slider it sets is MARKED, editable, and reverts to
-   * a "suggests" note the moment it is touched.
-   *
-   * THE REST arrives only when the Worker reads the character page directly and
-   * sends the `profile` block of ARCHITECTURE §1.1. Each field is applied only if
-   * the record actually carries it — nothing here invents a number:
-   *
-   *   weaponPower + mainStat  -> the raw override pair, and the override switch
-   *                              with them, because a raw main stat that the honing
-   *                              sliders then overwrite would be worse than none
-   *   gemLevels               -> the one gem-level control
-   *   critRate / critDamage   -> the first skill row's crit numbers
-   *
-   * Everything else the deck holds — fight shares, weights, the economy knobs — is
-   * judgment, not data, and is never imported. Nothing about the bracelet itself
-   * comes through here; that is the patch.
-   */
-  function importProfileValues(c) {
-    if (!c) return;
-    var vals = {}, i, any = false;
-    var G = window.BraceletGearData;
-
-    if (G && c.itemLevel != null) {
-      var lvl = clamp(Math.round((Number(c.itemLevel) - G.ILVL0) / G.ILVL_STEP), 0, 25);
-      if (isFinite(lvl)) {
-        var keys = ["head", "shoulder", "chest", "pants", "gloves", "weapon"];
-        for (i = 0; i < keys.length; i++) vals["gear." + keys[i]] = lvl;
-        any = true;
-      }
-    }
-
-    var pr = c.profile;
-    if (pr) {
-      var wp = num(pr.weaponPower, NaN), ms = num(pr.mainStat, NaN);
-      // Both or neither: the override pair is one setting, and half of it is worse
-      // than none — the model would then read one raw number and one derived one.
-      if (isFinite(wp) && wp > 0 && isFinite(ms) && ms > 0) {
-        vals["ov.weaponPowerRaw"] = Math.round(wp);
-        vals["ov.mainStatRaw"] = Math.round(ms);
-        vals.useOverride = true;
-        any = true;
-      }
-      var gl = num(pr.gemLevels, NaN);
-      if (isFinite(gl) && gl >= 6 && gl <= 10) { vals["kit.gems"] = Math.round(gl); any = true; }
-      var cr = num(pr.critRate, NaN);
-      if (isFinite(cr) && cr > 0 && cr <= 100) { vals["skills.0.cr"] = cr; any = true; }
-      var cd = num(pr.critDamage, NaN);
-      if (isFinite(cd) && cd > 0) { vals["skills.0.cd"] = cd; any = true; }
-    }
-
-    if (!any) { P.setCharacter(c); return; }
-    P.applyImported(vals, c);
-  }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();

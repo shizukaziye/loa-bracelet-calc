@@ -12,15 +12,19 @@
  *                         identity never changes, not even across reset(), so a module
  *                         may hold the reference forever. Read it freely; write through
  *                         set(), or mutate and call save() (nothing is notified then).
- *   profile()          -> the model's view of that state: Bracelet.normalizeProfile(...)
+ *   profile()          -> the model's view of that state: Bracelet.normalizeProfile(...).
+ *                         The ONE profile every tab scores on — there is no second.
  *   set(patch)         -> merge (one level deep for the nested blocks), persist, notify
  *   mount(hostEl)      -> put the control deck inside hostEl and render it
  *   onChange(cb)       -> unsubscribe fn; cb(detail) after every change the deck makes
  *   reset()            -> back to defaults, wiping the stored state
  *   resetCharacter()   -> the gear / accessory / fight / skill / economy half only
  *   resetBracelet()    -> the granted rows, fixed lines, locks, rolls and traits only
- *   applyCharacterProfile(profileBlock, char)
- *                      -> fill the WHOLE left column from a lostark.bible page
+ *   importCharacterStats()
+ *                      -> "Import Character Stats": fill the WHOLE left column from
+ *                         the loaded character's lostark.bible page. Pressed, never
+ *                         automatic — loading someone fills the bracelet and the
+ *                         banner, and leaves the settings at our defaults.
  *
  * ONE DECK, RE-PARENTED — the multi-mount decision.
  * Every control in the deck carries a stable id derived from its state path
@@ -137,7 +141,6 @@
       deckOpen: false,               // the deck starts COLLAPSED; the results come first
       // ---- import provenance (see the header) ----
       char: null,                    // { name, region, class, itemLevel, source, pulledAt, cached }
-      importSnap: null,              // the BRACELET an import applied, whole — "Reset to imported" replays it
       prov: {},                      // state path -> the character name it came from, while untouched
       provWas: {},                   // state path -> the value that character suggested, kept after
       provNote: {}                   // state path -> what the page ACTUALLY said, in words
@@ -391,146 +394,97 @@
   }
 
   // ------------------------------------------------------------------
-  // character settings vs default settings
+  // the character's two buttons
   //
-  // Two ways to score the same thing: the deck (this character, as imported and
-  // then edited) and the CANONICAL DEFAULT profile, Bracelet.normalizeProfile({}),
-  // the one the leaderboard ranks everyone on. It lived in app.js and moved the
-  // Calculator alone, which meant the Tier List quietly ignored a choice the user
-  // had made — so it lives here now, with the rest of the shared state, and every
-  // tab reads scoringProfile().
+  // There is ONE profile: whatever the deck holds. The Calculator, the Advisor
+  // and the Tier List all score on it, and Profile.profile() is the single
+  // answer. The scoring toggle that used to live here — default settings vs
+  // character settings, with its own key in localStorage — is gone (Shizu,
+  // 2026-08-12). Two ways to read the same screen is one way too many: every
+  // number on it had to be captioned with which profile it was on, and every
+  // tab had to remember to ask.
   //
-  // The choice is persisted under its old key: it is a way of reading the tool,
-  // not a per-visit accident.
+  // What replaces it is a deck that ALWAYS STARTS AT OUR DEFAULTS, plus two
+  // buttons the user presses when they mean it:
   //
-  // Defaults mode only bites while a character is loaded, because that is when
-  // the control is on screen. A mode nobody can see must not change scores, and
-  // with no character the deck IS the user's own settings.
+  //   Import Character Stats   overwrite the left column with what the
+  //                            character page actually says — honing per piece,
+  //                            the neck, both earrings, the gem level, the 9/7
+  //                            stone and Master. Every value lands marked and
+  //                            editable, exactly as an import always did.
+  //   Reset to Default         the left column back to the calculator's own
+  //                            defaults. The character stays loaded and the
+  //                            bracelet is not touched.
+  //
+  // So loading a character fills the BRACELET and the banner and nothing else.
+  // The board ranks everyone on the canonical defaults, so a freshly loaded
+  // character shows the number the board shows it until the user asks for their
+  // own gear — and asking is one click.
   // ------------------------------------------------------------------
 
-  var DEFAULT_PROFILE = B.normalizeProfile({});
-  var PMODE_KEY = "bc_profile_mode";
-  // Default settings, not the imported character's (Shizu, 2026-08-11): the board
-  // ranks everyone on defaults, so a freshly-loaded character should show the same
-  // number the board shows it. Switching is one click, and the choice sticks.
-  var scoringMode = "default";
-  try {
-    var pm0 = localStorage.getItem(PMODE_KEY);
-    if (pm0 === "default" || pm0 === "character") scoringMode = pm0;
-  } catch (e) { /* private mode */ }
-
   function hasCharacter() { return !!(S.char && S.char.name); }
-  function onDefaults() { return scoringMode === "default" && hasCharacter(); }
-  /** The profile every tab scores on. The one call that honours the toggle. */
-  function scoringProfile() { return onDefaults() ? DEFAULT_PROFILE : buildProfile(); }
 
-  function setScoringMode(mode) {
-    mode = mode === "default" ? "default" : "character";
-    if (mode === scoringMode) return;
-    scoringMode = mode;
-    try { localStorage.setItem(PMODE_KEY, mode); } catch (e) { /* private mode */ }
-    modeRepaint();                             // every copy of the control row says which side is live
-    renderAll();
-    notify({ mode: true, immediate: true });
+  /** Is there anything on this record to import? */
+  function canImportStats() {
+    var c = S.char;
+    return !!(c && c.name && (c.profile || c.itemLevel != null));
   }
 
-  // The deck is NOT dimmed or disabled on the defaults side (Shizu, 2026-08-11:
-  // "the character board should still work even if we're working with default
-  // settings — those should be editable"). Setting a character up and then
-  // flipping to Character settings is the normal way round, and a dead panel
-  // blocks it. The mode decides which profile the SCORING reads, nothing else;
-  // the note beside the toggle is what says so.
-
-
   /**
-   * ROW 3 of the character header: which settings the numbers are on, the two
-   * resets, and the one line about what an import actually fills.
+   * ROW 3 of the character header: the two buttons.
    *
-   * Rendered by BOTH tabs from here so the wording cannot drift apart, and the
+   * Rendered by EVERY tab from here so the wording cannot drift apart, and the
    * clicks are caught by one delegated listener on the document, so there are no
    * ids to collide when two panes each hold a copy.
    *
-   * The resets used to sit in the provenance strip INSIDE the deck, which starts
-   * collapsed — so the pair a user reaches for most were behind a click. They
-   * live here now, on the same line as the toggle.
-   *
    * Returns "" with no character loaded: the banner is hidden then, and the
-   * deck's own "Reset character" button covers that state.
+   * deck's own "Reset to defaults" button covers that state.
+   *
+   * The dead half of the pair is aria-disabled rather than disabled, because a
+   * disabled button fires no mouse events and would swallow the tooltip that
+   * says WHY it is dead.
    */
-  function modeControlHtml() {
+  function charControlsHtml() {
     if (!hasCharacter()) return "";
-    var def = onDefaults(), who = esc(S.char.name);
-    // TWO PILLS, one pressed — the same segmented control Grade and Granted slots
-    // use, and the same shape as the loadout pills above. It was one button that
-    // rewrote its own label, and a label like "Character settings" reads as the
-    // state you are in to half the room and the state you would move to for the
-    // other half (Shizu, 2026-08-11). A pressed pill cannot be read two ways.
-    var h = '<div class="bc-modeline"><span class="lab">Scoring on</span>' +
-      '<div class="bc-seg bc-modeseg" role="group" aria-label="Scoring on">' +
-      '<button type="button" data-pmode="default" aria-pressed="' + (def ? "true" : "false") +
-        '" data-gloss="Score on the canonical default profile — the one the leaderboard ranks everyone on. ' +
-        'The deck stays editable; nothing reads it while this is pressed.">Default settings</button>' +
-      '<button type="button" data-pmode="character" aria-pressed="' + (def ? "false" : "true") +
-        '" data-gloss="Score on the settings in the deck, which ' + who +
-        '\'s character page filled in and you can edit.">Character settings</button>' +
-      "</div></div>";
-    h += '<div class="bc-modeline">';
-    if (hasImport()) {
-      h += '<button type="button" class="mbtn" data-bcreset="imported"' +
-        ' data-gloss="Puts the import back, both halves: the bracelet ' + who + " was wearing — granted lines," +
-        ' combat traits, grade, granted slots, rolls left and the padlocks — and every value the character page' +
-        ' filled in on the left. The fight, trait, skill and economy settings on the right are yours and are left' +
-        ' alone; a cut you were part-way through is dropped, because it was judged against the other bracelet.">' +
-        "Reset to imported</button>";
-    }
+    var who = esc(S.char.name), can = canImportStats();
+    var h = '<div class="bc-ctlrow">';
+    h += '<button type="button" class="mbtn"' + (can ? "" : ' aria-disabled="true"') +
+      ' data-bcimport="1" data-gloss="' + (can
+        ? "Overwrite the left column with what " + who + "'s character page says: the six honing levels, the " +
+          "necklace's additional damage, both earrings' weapon power, the gem level, the 9/7 stone and Master. " +
+          "Each value lands marked and editable, and editing one drops its mark. The bracelet is not touched."
+        : "Nothing to import: this record carries no gear from " + who +
+          "'s character page. Re-pull them and the button comes back.") +
+      '">Import Character Stats</button>';
     h += '<button type="button" class="mbtn" data-bcreset="defaults"' +
-      ' data-gloss="Puts the SETTINGS back to the calculator\'s defaults — gear, accessories, gems and the two nodes' +
-      ' on the left, the fight, trait, skill and economy settings on the right, and the bracelet\'s grade, granted' +
-      ' slots and rolls left in the Grader. It keeps ' + who + ' loaded, and it leaves the lines you typed alone.">' +
-      "Reset to defaults</button></div>";
-    return h;
+      ' data-gloss="Puts the settings back to the calculator\'s defaults — gear, accessories, gems and the two' +
+      ' nodes on the left, the fight, trait, skill and economy settings on the right. ' + who +
+      ' stays loaded, and the bracelet — its lines, its traits, its grade, its slots and its padlocks — is left' +
+      ' exactly as it is.">Reset to Default</button>';
+    return h + "</div>";
   }
 
-  /**
-   * The prose half of the control row: which side is live, and the one line
-   * about what an import actually fills. It goes FULL WIDTH under the header
-   * rather than inside the cluster — two sentences squeezed into a control
-   * column would wrap to eight lines and push the buttons around.
-   */
-  function modeNoteHtml() {
-    if (!hasCharacter()) return "";
-    // The prose that used to sit here (which profile the numbers are on, and the
-    // left-column/right-column note) is gone — Shizu, 2026-08-11. The toggle
-    // beside it already says which mode is active, and the provenance markers
-    // already show which fields an import filled; saying it again in two
-    // paragraphs was noise. The empty wrapper went with it: a div with a margin
-    // and nothing in it is a gap nobody asked for. The function stays because
-    // three tabs call it, and each of them writes the answer into its own host.
-    return "";
-  }
-
-  /** How many values a character page ever suggested — "Reset to imported" needs one. */
+  /** How many values a character page ever suggested — the provenance strip needs it. */
   function provWasCount() {
     var n = 0, k;
     for (k in S.provWas) if (Object.prototype.hasOwnProperty.call(S.provWas, k)) n++;
     return n;
   }
 
-  // One listener for every copy of the control, on the document, because the
-  // Calculator's banner and the Tier List's control row are two different panes
-  // and either may be rebuilt at any moment.
+  // One listener for every copy of the row, on the document, because the
+  // Calculator's banner, the Advisor's header and the Tier List's control row
+  // are three different panes and any of them may be rebuilt at any moment.
   document.addEventListener("click", function (e) {
     var t = e.target, btn;
     if (!t || !t.closest) return;
-    if ((btn = t.closest("[data-pmode]"))) {
+    if ((btn = t.closest("[data-bcimport]"))) {
       e.stopPropagation();                     // the banner behind it reloads the character on click
-      setScoringMode(btn.getAttribute("data-pmode"));
+      if (btn.getAttribute("aria-disabled") !== "true") importCharacterStats();
       return;
     }
     if ((btn = t.closest("[data-bcreset]"))) {
       e.stopPropagation();
-      if (btn.getAttribute("data-bcreset") === "imported") resetToImported();
-      else resetCharacter();
+      resetCharacter();
     }
   });
 
@@ -649,19 +603,14 @@
    * parseCharacterProfile in worker/bracelet.js) into the deck's own paths.
    *
    * ONE RULE, and it is the whole design: a field the page did not carry is a
-   * field this function does not touch. Item level already gives app.js a
-   * uniform honing guess, and leaving that guess standing beats overwriting it
-   * with a zero. So every branch below is `if we actually read it`.
-   *
-   * Everything it sets is MARKED, editable, and reverts to a "suggests" note the
-   * moment the user drags the control — the same contract item level has had.
+   * field this function does not put in the map. The item-level guess below it
+   * has already filled every honing slider, and leaving that guess standing
+   * beats overwriting it with a zero. So every branch is `if we actually read
+   * it`, and the caller merges this over the guess.
    */
-  function applyCharacterProfile(pr, character) {
-    if (!pr) {
-      if (character) { S.char = character; save(); renderProvStrip(); }
-      return 0;
-    }
-    var vals = {}, n = 0, i, k, raw = pr.raw || {};
+  function profileValues(pr) {
+    var vals = {}, i, k, raw = (pr && pr.raw) || {};
+    if (!pr) return vals;
 
     // ---- the six honing sliders, exact rather than derived ----
     if (pr.honing) {
@@ -674,22 +623,18 @@
             (pr.advancedHoning && pr.advancedHoning[k] != null
               ? " (advanced honing " + pr.advancedHoning[k] + ", which this model does not use)" : "")
         };
-        n++;
       }
     }
 
     // ---- the necklace and the two earrings ----
     if (pr.neckAddDmg != null) {
       vals["kit.neck"] = { value: pr.neckAddDmg, note: accNote(raw.neckAddDmg, pr.neckAddDmg, "the neck") };
-      n++;
     }
     if (pr.earring1Wp != null) {
       vals["kit.ear1"] = { value: pr.earring1Wp, note: accNote(raw.earring1Wp, pr.earring1Wp, "earring 1") };
-      n++;
     }
     if (pr.earring2Wp != null) {
       vals["kit.ear2"] = { value: pr.earring2Wp, note: accNote(raw.earring2Wp, pr.earring2Wp, "earring 2") };
-      n++;
     }
 
     // ---- the one gem slider, out of eleven gems ----
@@ -702,7 +647,6 @@
           ? "gems are " + spread + " — the deck holds one level, so it is set to " + lv
           : "all " + (pr.gemLevels ? pr.gemLevels.length : 11) + " gems are level " + lv
       };
-      n++;
     }
 
     // ---- the two on/off nodes ----
@@ -715,7 +659,6 @@
             (pr.stone97 ? " — 9/7 or better" : " — short of 9/7")
           : (pr.stone97 ? "the ability stone is 9/7 or better" : "the ability stone is short of 9/7")
       };
-      n++;
     }
     if (pr.master != null) {
       vals["kit.master"] = {
@@ -724,15 +667,9 @@
           ? "the Master node is on the character's Evolution ark passive"
           : "the character's Evolution ark passive does not have Master"
       };
-      n++;
     }
 
-    if (!n) {
-      if (character) { S.char = character; save(); renderProvStrip(); }
-      return 0;
-    }
-    applyImported(vals, character);
-    return n;
+    return vals;
   }
 
   /** "read 2.60% from the neck", plus the snap when the page is off the pills. */
@@ -744,82 +681,84 @@
   }
 
   // ------------------------------------------------------------------
-  // the import snapshot
+  // "Import Character Stats"
   //
-  // An import lands in two halves. The LEFT COLUMN arrives through
-  // applyImported, path by path, and each path is remembered in provWas. The
-  // BRACELET arrives through app.js's applyImport as one patch — the granted
-  // rows, the two combat traits, the grade, the granted-slot count, rolls left
-  // and the padlocks the character is wearing — and none of that has a path in
-  // provWas, so "Reset to imported" used to put the character settings back and
-  // leave the bracelet exactly as the user had rerolled it (Shizu, 2026-08-11:
-  // "when i click reset to imported the bracelet itself doesn't reset").
-  //
-  // So the whole applied patch is kept here, taken from the state AFTER it
-  // landed — that is the honest record of what the import made the bracelet,
-  // fitted rows and all. It is part of the saved blob, so it survives a reload.
+  // The one path from a character page into the left column, and it runs when
+  // the user presses the button — never on load. Loading someone fills the
+  // bracelet and the banner; the settings stay ours until asked, so the number
+  // on screen is the number the board shows them.
   // ------------------------------------------------------------------
 
-  var SNAP_KEYS = ["grade", "slots", "rollsLeft", "traits", "rows", "fixedRows", "locks"];
+  /**
+   * What a record says about the character's gear, before the §1.1 profile
+   * block is merged over it.
+   *
+   * ITEM LEVEL is always there: the roster and the page both carry an average,
+   * and the six honing sliders are what the model reads. An average maps to a
+   * uniform honing level (Serca 0 is 1675, every level is +5), which is a
+   * derivation and not a measurement — so profileValues' exact per-piece
+   * numbers overwrite it wherever the page carried them.
+   *
+   * THE REST arrives only when the Worker read the character page directly:
+   *
+   *   weaponPower + mainStat  -> the raw override pair, and the override switch
+   *                              with them, because a raw main stat that the
+   *                              honing sliders then overwrite would be worse
+   *                              than none
+   *   gemLevels               -> the one gem-level control
+   *   critRate / critDamage   -> the first skill row's crit numbers
+   *
+   * Everything else the deck holds — fight shares, weights, the economy knobs —
+   * is judgment, not data, and is never imported. Nothing about the bracelet
+   * itself comes through here; that is the patch app.js applies on load.
+   */
+  function recordValues(c) {
+    var vals = {}, i, G = window.BraceletGearData;
+    if (!c) return vals;
 
-  function clone(v) {
-    if (v === null || typeof v !== "object") return v;
-    try { return JSON.parse(JSON.stringify(v)); } catch (e) { return null; }
+    if (G && c.itemLevel != null) {
+      var lvl = clamp(Math.round((num(c.itemLevel, NaN) - G.ILVL0) / G.ILVL_STEP), 0, 25);
+      if (isFinite(lvl)) for (i = 0; i < PIECES.length; i++) vals["gear." + PIECES[i][0]] = lvl;
+    }
+
+    var pr = c.profile;
+    if (pr) {
+      var wp = num(pr.weaponPower, NaN), ms = num(pr.mainStat, NaN);
+      // Both or neither: the override pair is one setting, and half of it is
+      // worse than none — the model would then read one raw number and one
+      // derived one.
+      if (isFinite(wp) && wp > 0 && isFinite(ms) && ms > 0) {
+        vals["ov.weaponPowerRaw"] = Math.round(wp);
+        vals["ov.mainStatRaw"] = Math.round(ms);
+        vals.useOverride = true;
+      }
+      var gl = num(pr.gemLevels, NaN);
+      if (isFinite(gl) && gl >= 6 && gl <= 10) vals["kit.gems"] = Math.round(gl);
+      var cr = num(pr.critRate, NaN);
+      if (isFinite(cr) && cr > 0 && cr <= 100) vals["skills.0.cr"] = cr;
+      var cd = num(pr.critDamage, NaN);
+      if (isFinite(cd) && cd > 0) vals["skills.0.cd"] = cd;
+    }
+    return vals;
   }
-
-  /** Record the bracelet an import just applied. app.js calls this. */
-  function setImportSnapshot() {
-    var snap = { charKey: charKey() }, i, k;
-    for (i = 0; i < SNAP_KEYS.length; i++) { k = SNAP_KEYS[i]; snap[k] = clone(S[k]); }
-    S.importSnap = snap;
-    save();
-    modeRepaint();               // the "Reset to imported" button appears with it
-    return snap;
-  }
-
-  /** The snapshot, if it belongs to the character currently loaded. */
-  function importSnapshot() {
-    var s = S.importSnap;
-    if (!s) return null;
-    // A snapshot from an earlier character must not be replayed onto this one.
-    // Both keys null (a bracelet imported with no character attached) still match.
-    return (s.charKey || null) === (charKey() || null) ? s : null;
-  }
-
-  /** Is there anything for "Reset to imported" to go back to? */
-  function hasImport() { return !!(provWasCount() || importSnapshot()); }
 
   /**
-   * Put the import back — BOTH halves. Every value the character page suggested,
-   * marks and all, and the bracelet exactly as the import left it.
+   * The whole left column, from the character the banner is showing. Returns how
+   * many paths it wrote, 0 if there was nothing to write.
    *
-   * The cut in progress goes with it: a rolled set, and the verdict the Advisor
-   * is showing, were computed against the bracelet being replaced. Leaving a
-   * keep-or-replace answer on screen beside a different bracelet is the same
-   * class of bug as judging a cut against a stale solve, and the `reset` in the
-   * notification is what tells app.js and advisor.js to drop theirs.
+   * The profile block wins over the item-level guess wherever it read a piece,
+   * so the two maps merge in that order and land as ONE applyImported — one
+   * render, one notification, one mark per field.
    */
-  function resetToImported() {
-    var k, any = false, i, snap = importSnapshot();
-    for (k in S.provWas) if (Object.prototype.hasOwnProperty.call(S.provWas, k)) {
-      try { setPath(S, k, S.provWas[k]); } catch (e) { continue; }
-      S.prov[k] = provWho() || "the character page";
-      any = true;
-    }
-    if (snap) {
-      for (i = 0; i < SNAP_KEYS.length; i++) {
-        k = SNAP_KEYS[i];
-        if (snap[k] !== undefined) S[k] = clone(snap[k]);
-      }
-      S.rolled = null;           // the cut in progress described the bracelet being replaced
-      S.history = [];            // and so does every undo entry behind it
-      any = true;
-    }
-    if (!any) return;
-    fitRows();
-    save();
-    renderAll();
-    notify({ shape: true, immediate: true, imported: true, reset: "imported" });
+  function importCharacterStats() {
+    var c = S.char;
+    if (!c || !c.name) return 0;
+    var vals = recordValues(c), got = profileValues(c.profile), k, n = 0;
+    for (k in got) if (Object.prototype.hasOwnProperty.call(got, k)) vals[k] = got[k];
+    for (k in vals) if (Object.prototype.hasOwnProperty.call(vals, k)) n++;
+    if (!n) return 0;
+    applyImported(vals, c);
+    return n;
   }
 
   /**
@@ -876,7 +815,7 @@
     var n = provCount(), who = esc(provWho() || "the character page");
     var txt = n
       ? "Loaded from <b>" + who + "</b> — " + n + " value" + (n === 1 ? "" : "s") + " came from the character page."
-      : "Loaded from <b>" + who + "</b> — every imported value has been edited since.";
+      : "Loaded from <b>" + who + "</b> — nothing on screen still holds what the page said.";
     // The two resets are NOT here any more: they moved up to the character
     // header's control row, which is on screen whether or not the deck is open.
     box.innerHTML = '<span class="bc-provtxt" data-gloss="Marked fields hold a number read off the character page rather than one you chose. Editing a field drops its mark for good; the label then says what the page had, as a suggestion.">' +
@@ -896,10 +835,8 @@
   // must not forget who you are.
   // ------------------------------------------------------------------
 
-  /** Everything that describes the PLAYER. The bracelet's LINES are untouched. */
+  /** Everything that describes the PLAYER. Nothing about the bracelet. */
   var CHARACTER_BLOCKS = ["gear", "ov", "kit", "fight", "adv", "econ"];
-  /** The three settings that ride in the Grader, beside the lines they describe. */
-  var GRADER_SETTINGS = ["grade", "slots", "rollsLeft"];
 
   function resetCharacter() {
     var d = defaults(), i, k;
@@ -909,18 +846,18 @@
     }
     S.useOverride = d.useOverride;
     S.skills = d.skills;
-    // Grade, granted slots and rolls left come back to their defaults too
-    // (Shizu, 2026-08-11, when the three moved into the Grader). The LINES you
-    // typed stay — "Reset bracelet" is the button for those — but a cut in
-    // progress described a bracelet with a different shape, so it goes.
-    for (i = 0; i < GRADER_SETTINGS.length; i++) { k = GRADER_SETTINGS[i]; S[k] = d[k]; }
-    S.locks = null; S.rolled = null;
+    // THE BRACELET IS NOT A SETTING EITHER. Grade, granted slots and rolls left
+    // used to come back to their defaults here, taking the padlocks and the cut
+    // in progress with them — so "Reset to Default" reshaped the bracelet the
+    // user had just imported (Shizu, 2026-08-12: "it keeps their profile pulled
+    // up and their bracelet unchanged"). "Reset bracelet" is the button for
+    // those. This one touches the left column and the right, and nothing else.
+    //
     // WHO IS LOADED IS NOT A SETTING. This used to null S.char and wipe every
-    // provenance map with it, so "Reset to defaults" quietly forgot the
-    // character: the banner painted itself empty, the name, the chips, the three
-    // stats and the field rank all went, and "Reset to imported" had nothing left
-    // to go back to (Shizu, 2026-08-11). The character, and everything a page
-    // ever suggested for it, survive a reset of the settings.
+    // provenance map with it, so the reset quietly forgot the character: the
+    // banner painted itself empty, and the name, the chips, the three stats and
+    // the field rank all went (Shizu, 2026-08-11). The character, and everything
+    // a page ever suggested for it, survive a reset of the settings.
     //
     // The live MARKS do come off, because the fields now hold the calculator's
     // defaults rather than the page's numbers — so each label goes back to
@@ -1098,25 +1035,36 @@
       // went too far — Shizu, 2026-08-11).
       ".bc-slot{display:grid;grid-template-columns:44px 168px minmax(0,430px) 120px;gap:8px;align-items:end;margin-bottom:8px;justify-content:start}" +
       ".bc-slot .sn{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;padding-bottom:7px}" +
+      // KEEP / ROLL beside the slot number (app.js's slotAdvice). It rides IN
+      // the label cell rather than taking a column of its own, so the grid is
+      // the same four columns it was — including the phone breakpoint below,
+      // where the whole row becomes one column and the label loses its padding.
+      // inline-block, so a narrow cell wraps the badge under the number instead
+      // of stretching the row.
+      ".bc-slot .sn .bc-adv{display:inline-block;margin-left:5px;padding:1px 6px;border-radius:99px;" +
+        "font-size:9px;font-weight:800;letter-spacing:.06em;line-height:1.6;vertical-align:baseline;" +
+        "border:1px solid transparent}" +
+      ".bc-slot .sn .bc-adv.keep{color:var(--good);border-color:var(--good);background:rgba(110,231,168,.13)}" +
+      ".bc-slot .sn .bc-adv.roll{color:var(--dim);border-color:var(--border);background:var(--panel2)}" +
       // ---- the character header's right-hand CONTROL CLUSTER ----
       //
       // Everything you press, in one place, to the right of everything you read
-      // (Shizu's mock-up, 2026-08-11). Two columns: the scoring toggle over the
-      // two resets, and grade over granted slots over rolls left. The prose goes
-      // in its own full-width element under the whole header, because two
-      // sentences in a control column wrap to eight lines and shove the buttons.
+      // (Shizu's mock-up, 2026-08-11). Two columns: the character's two buttons,
+      // and grade over granted slots over rolls left.
       ".bc-hdrctl{display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;" +
         "padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--panel2)}" +
-      ".bc-modestack{display:flex;flex-direction:column;gap:9px}" +
-      ".bc-modeline{display:flex;align-items:center;gap:8px;flex-wrap:wrap}" +
-      ".bc-modeline .lab{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--dim);font-weight:700}" +
-      // The scoring pills size to their own words rather than splitting the row
-      // evenly — "Default settings" and "Character settings" are not the same
-      // length, and a squashed pill wraps mid-word.
-      ".bc-modeseg button{flex:0 0 auto;white-space:nowrap}" +
+      ".bc-ctlstack{display:flex;flex-direction:column;gap:9px}" +
+      ".bc-ctlrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}" +
+      // Each button sizes to its own words rather than splitting the row evenly:
+      // "Import Character Stats" and "Reset to Default" are not the same length,
+      // and a squashed button wraps mid-word.
+      ".bc-ctlrow button{flex:0 0 auto;white-space:nowrap}" +
+      // A button that has nothing to do still answers a hover, because the
+      // tooltip is where the reason lives.
+      ".bc-ctlrow button[aria-disabled=true]{opacity:.5;cursor:not-allowed}" +
       // Phones: the cluster's two columns become one, full width.
       "@media(max-width:560px){.bc-hdrctl{gap:12px}" +
-      ".bc-hdrctl .bc-modestack,.bc-hdrctl .bc-brachdr{flex:1 1 100%;min-width:0}}" +
+      ".bc-hdrctl .bc-ctlstack,.bc-hdrctl .bc-brachdr{flex:1 1 100%;min-width:0}}" +
       "@media(max-width:640px){.bc-slot{grid-template-columns:1fr;gap:5px}.bc-slot .sn{padding-bottom:0}}" +
       "@media(max-width:900px) and (min-width:641px){.bc-slot{grid-template-columns:44px 150px minmax(0,1fr) 110px}}";
   }
@@ -1652,58 +1600,55 @@
     // deck's own copy would be the third button doing the same thing.
     var rb = $("bc-reset");
     if (rb) rb.style.display = hasCharacter() ? "none" : "";
-    modeRepaint();
+    ctlRepaint();
   }
 
   /**
-   * Every cluster that has drawn a copy of the control row, so a mode flip or a
+   * Every cluster that has drawn a copy of the control row, so an import or a
    * reset repaints all of them without each tab wiring its own subscription.
    * Entries whose element has left the document are dropped on the next pass —
-   * both tabs rebuild their host markup wholesale, so stale ones are normal.
+   * every tab rebuilds its host markup wholesale, so stale ones are normal.
    */
-  var modeHosts = [];
-  function pruneModeHosts() {
-    for (var i = modeHosts.length - 1; i >= 0; i--) {
-      var e = modeHosts[i];
-      if (!e.host || !e.host.parentNode) modeHosts.splice(i, 1);
+  var ctlHosts = [];
+  function pruneCtlHosts() {
+    for (var i = ctlHosts.length - 1; i >= 0; i--) {
+      var e = ctlHosts[i];
+      if (!e.host || !e.host.parentNode) ctlHosts.splice(i, 1);
     }
   }
-  function paintModeHost(e) {
-    var row = e.host.getElementsByClassName("bc-modestack")[0];
+  function paintCtlHost(e) {
+    var row = e.host.getElementsByClassName("bc-ctlstack")[0];
     if (!row) {
-      // Only the mode row is ever rewritten. #bc-top is a LIVE element that
-      // moves between clusters, so it must not be inside anything we innerHTML.
+      // Only this row is ever rewritten. #bc-top is a LIVE element that moves
+      // between clusters, so it must not be inside anything we innerHTML.
       row = document.createElement("div");
-      row.className = "bc-modestack";
+      row.className = "bc-ctlstack";
       e.host.insertBefore(row, e.host.firstChild);
     }
-    row.innerHTML = modeControlHtml();
-    if (e.note) e.note.innerHTML = modeNoteHtml();
+    row.innerHTML = charControlsHtml();
   }
-  function modeRepaint() {
-    pruneModeHosts();
-    for (var i = 0; i < modeHosts.length; i++) paintModeHost(modeHosts[i]);
+  function ctlRepaint() {
+    pruneCtlHosts();
+    for (var i = 0; i < ctlHosts.length; i++) paintCtlHost(ctlHosts[i]);
   }
 
   /**
-   * A tab hands over its right-hand control cluster (and, optionally, the
-   * full-width element the note goes in): the scoring toggle, the two resets and
-   * the line that says what an import fills.
+   * A tab hands over its right-hand control cluster: the character's two
+   * buttons, and — unless it says otherwise — the bracelet's three settings.
    *
-   * `opts.withTop === false` leaves the bracelet's three settings where they are.
-   * The Calculator passes it, because those three live in its Grader panel now
-   * (see adoptBraceletPanel) and a cluster repaint must never drag them back into
-   * the banner. Every other tab has no Grader to put them in, so they still ride
+   * `opts.withTop === false` leaves those three where they are. The Calculator
+   * passes it, because they live in its Grader panel now (see
+   * adoptBraceletPanel) and a cluster repaint must never drag them back into the
+   * banner. Every other tab has no Grader to put them in, so they still ride
    * along with the cluster and the tab that asked last keeps them.
    */
-  function mountModeControl(hostEl, noteEl, opts) {
+  function mountCharControls(hostEl, opts) {
     if (!hostEl) return null;
-    pruneModeHosts();
+    pruneCtlHosts();
     var i, e = null;
-    for (i = 0; i < modeHosts.length; i++) if (modeHosts[i].host === hostEl) { e = modeHosts[i]; break; }
-    if (!e) { e = { host: hostEl, note: noteEl || null }; modeHosts.push(e); }
-    else e.note = noteEl || e.note;
-    paintModeHost(e);
+    for (i = 0; i < ctlHosts.length; i++) if (ctlHosts[i].host === hostEl) { e = ctlHosts[i]; break; }
+    if (!e) { e = { host: hostEl }; ctlHosts.push(e); }
+    paintCtlHost(e);
     if ((!opts || opts.withTop !== false) && onScreen(hostEl)) {
       var top = buildTop();
       if (top.parentNode !== hostEl) { hostEl.appendChild(top); renderTop(); }
@@ -1935,8 +1880,7 @@
       } else if (t.id === "bc-advtoggle") { S.advOpen = !S.advOpen; save(); renderAdvanced(); markProvenance(); }
       else if (t.id === "bc-addfixed") {
         if (S.fixedRows.length < 2) { S.fixedRows.push(blankRow()); save(); renderAdvanced(); notify({ path: "fixedRows", immediate: false }); }
-      } else if (t.id === "bc-prov-reimport") { resetToImported(); }
-      else if (t.id === "bc-reset") { resetCharacter(); }
+      } else if (t.id === "bc-reset") { resetCharacter(); }
     });
 
     // The whole header row collapses the panel, not just the little arrow.
@@ -1977,7 +1921,7 @@
     // The bracelet's own three settings live HERE, in the panel that grades the
     // bracelet — not in the character banner, which is rebuilt on every repaint
     // and is not drawn at all until a character is loaded. Another tab may have
-    // borrowed the element (see mountModeControl); this claims it back, so it
+    // borrowed the element (see mountCharControls); this claims it back, so it
     // runs before the early return below rather than after it.
     var host = document.getElementById("bc-tophost");
     if (host && onScreen(host)) {
@@ -2046,18 +1990,15 @@
 
   var Profile = {
     get: function () { return S; },
+    /**
+     * The model's view of the deck — the ONE profile every tab scores on. There
+     * is no second answer any more: the default/character toggle is gone, and
+     * the deck simply starts at the canonical defaults.
+     */
     profile: function () { return buildProfile(); },
 
-    // ---- character settings vs default settings, shared by every tab ----
-    /** The profile to SCORE on. Honours the toggle; use this, not profile(). */
-    scoringProfile: scoringProfile,
-    /** "default" | "character" — the raw choice, whether or not it bites. */
-    scoringMode: function () { return scoringMode; },
-    setScoringMode: setScoringMode,
-    /** True when the numbers are on the canonical default profile right now. */
-    onDefaults: onDefaults,
-    /** Put the header's control row (toggle + resets + disclaimer) in hostEl. */
-    mountModeControl: mountModeControl,
+    /** Put the character's two buttons in hostEl. Every tab draws the same row. */
+    mountCharControls: mountCharControls,
 
     /** Merge a patch (one level deep for the nested blocks), persist, notify. */
     set: function (patch) {
@@ -2109,11 +2050,12 @@
       renderAll();
       notify({ reset: true, shape: true, immediate: true });
     },
-    /** The two scoped resets the panel's buttons call. Neither asks first. */
+    /**
+     * The two scoped resets the panel's buttons call. Neither asks first, and
+     * neither crosses the line between the character and the bracelet.
+     */
     resetCharacter: resetCharacter,
     resetBracelet: resetBracelet,
-    /** Put the whole import back — the bracelet as well as the left column. */
-    resetToImported: resetToImported,
 
     // ---- state maintenance the other modules need ----
     save: save,                 // after a direct mutation (the cut flow rewrites rows)
@@ -2142,15 +2084,14 @@
 
     // ---- provenance ----
     applyImported: applyImported,
-    /** The Worker's §1.1 `profile` block -> every control in the left column. */
-    applyCharacterProfile: applyCharacterProfile,
     /**
-     * Remember the bracelet an import has just applied, so "Reset to imported"
-     * can put it back. Call it AFTER the patch has landed: it photographs the
-     * state, not the patch, so what it keeps is what the bracelet actually
-     * became — rows fitted to the slot count and all.
+     * "Import Character Stats": the loaded character's own gear into the whole
+     * left column, marked and editable. Returns how many paths it wrote. Nobody
+     * calls this on load — that is the point of the button.
      */
-    setImportSnapshot: setImportSnapshot,
+    importCharacterStats: importCharacterStats,
+    /** Is there anything on the loaded record to import? */
+    canImportStats: canImportStats,
 
     // ---- the two economy defaults ----
     /** Seed gold-per-1% and the baseline from a character. Once per character. */

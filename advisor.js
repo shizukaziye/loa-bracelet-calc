@@ -213,12 +213,8 @@
   };
   // ---- end fallback -------------------------------------------------------
 
-  /** The profile every tab scores on — it honours the character/default toggle. */
-  function scoringProfile() {
-    if (typeof P.scoringProfile === "function") return P.scoringProfile();
-    return P.profile();                          // a Profile without the shared toggle
-  }
-  function onDefaults() { return typeof P.onDefaults === "function" ? P.onDefaults() : false; }
+  /** The one profile every tab scores on: whatever the deck holds. */
+  function buildProfile() { return P.profile(); }
 
   var GRADE_COLOR = P.GRADE_COLOR, JUNK = P.JUNK;
 
@@ -589,7 +585,7 @@
     var api = solverApi();
     if (!api) { lastSolve = null; lastErr = null; render(); return; }
 
-    var profile = scoringProfile();
+    var profile = buildProfile();
     var granted = grantedLines();
 
     if (isPartial()) { lastSolve = null; lastKey = null; lastErr = null; render(); return; }
@@ -728,9 +724,10 @@
       "#tab-advisor .av-empty{border:1px dashed var(--border);border-radius:10px;background:var(--panel2);color:var(--dim);" +
         "font-size:13px;padding:22px 16px;line-height:1.6}" +
       "#tab-advisor .av-empty b{color:var(--text)}" +
-      // The shared mode cluster takes its own line under the deck, as on the Tier List.
+      // The character's two buttons take their own line under the deck, as on
+      // the Tier List.
       "#tab-advisor .av-hdr{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0 6px}" +
-      "#tab-advisor .av-hdr>.bc-hdrctl,#tab-advisor .av-hdr>#av-pmodenote{flex:1 0 100%}" +
+      "#tab-advisor .av-hdr>.bc-hdrctl{flex:1 0 100%}" +
       // Phones: the tables scroll inside their own wrapper, never the page.
       "@media(max-width:420px){" +
       "#tab-advisor .av-card .v{font-size:21px}" +
@@ -1059,7 +1056,6 @@
   function leadHtml() {
     return '<div class="av-lead">The Calculator says what this bracelet <b>is</b>. This tab says what to <b>do</b> with it: ' +
       "which slots to lock before the next roll, how the remaining rolls are likely to land, and whether the set you just rolled beats the one you are holding." +
-      (onDefaults() ? " Scoring on the <b>canonical default profile</b> — switch to character settings above to advise on your own build." : "") +
       "</div>";
   }
 
@@ -1084,7 +1080,7 @@
       return '<div class="av-empty">' + (solving ? "Solving — a three-slot, seven-roll bracelet takes a few seconds…" : "Nothing solved yet.") + "</div>";
     }
 
-    var profile = scoringProfile();
+    var profile = buildProfile();
     var lines = grantedLines();
     var res = lastSolve;
 
@@ -1124,7 +1120,7 @@
     if (!body) return;
     if (lead) lead.innerHTML = leadHtml();
     body.innerHTML = bodyHtml();
-    if (typeof P.mountModeControl === "function") P.mountModeControl($("av-hdrctl"), $("av-pmodenote"));
+    if (typeof P.mountCharControls === "function") P.mountCharControls($("av-hdrctl"));
   }
 
   /** Rebuild, then put the cursor back where it was. */
@@ -1151,7 +1147,7 @@
   function checkRoll() {
     var api = solverApi();
     if (!api) return;
-    var profile = scoringProfile(), lines = grantedLines();
+    var profile = buildProfile(), lines = grantedLines();
     var locks = cutLocks(lastSolve, lines, profile);
     var newSet = rolledSet(locks), i;
     for (i = 0; i < newSet.length; i++) {
@@ -1269,7 +1265,7 @@
         return;
       }
       if ((lk = t.getAttribute && t.getAttribute("data-avlock")) !== null && lk !== undefined && lk !== "") {
-        var locks = cutLocks(lastSolve, grantedLines(), scoringProfile()).slice();
+        var locks = cutLocks(lastSolve, grantedLines(), buildProfile()).slice();
         locks[Number(lk)] = !!t.checked;
         S.locks = locks; lastVerdict = null; P.save();
         render();
@@ -1467,7 +1463,7 @@
     injectStyle();
     pane.innerHTML =
       '<div id="' + DECK_HOST + '"></div>' +
-      '<div class="av-hdr" id="av-hdrctl"></div><div id="av-pmodenote"></div>' +
+      '<div class="av-hdr" id="av-hdrctl"></div>' +
       '<div id="av-lead"></div>' +
       intakeMarkup() +
       '<div id="av-body"></div>';

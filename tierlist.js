@@ -36,12 +36,10 @@
  *
  * THE CHARACTER PICKER. One line above the controls, mounted from char-picker.js
  * — the same control the Advisor mounts, over the same board snapshot, so the two
- * cannot drift. Picking someone loads them into the shared state: their bracelet,
- * their gear, everywhere. It does NOT change what this table is RANKED on. That
- * stays the user's own choice on the "Scoring on" toggle in the controls below,
- * and the default is the canonical default profile whether or not anyone is
- * loaded. The picker's one-line note says which side you are on and where the
- * switch is.
+ * cannot drift. Picking someone loads their BRACELET into the shared state, and
+ * nothing else: the deck keeps the calculator's defaults, which is what this
+ * table is ranked on, until the user presses Import Character Stats in the
+ * controls below. The picker's one-line note says where that button is.
  *
  * NO NETWORK OF ITS OWN. This file opens no connection. The picker's board
  * snapshot and its character lookups both go through bible-import.js, which owns
@@ -467,10 +465,6 @@
    */
   function bandsHTML(res, grade) {
     var dr = defaultRank(grade);
-    // The tick means "where this line sits for the DEFAULT character". Scoring on
-    // the default settings, that IS the row — so the tick would land at the end
-    // of every bar and say nothing. Hide it rather than draw ninety-nine of them.
-    var showGhost = !P.onDefaults();
     var out = "", i, j;
     for (i = 0; i < BANDS.length; i++) {
       var b = BANDS[i];
@@ -483,7 +477,7 @@
         // The tick has to be on the BAR's scale (share of the #1 line), not the
         // score's (best Epic = 100). Reading dref.pct put every tick in the wrong
         // place and pinned anything over 100 to the far right.
-        var gp = (showGhost && dref && dr.best > 0) ? dref.barPct : null;
+        var gp = (dref && dr.best > 0) ? dref.barPct : null;
         body += rowHTML(mine[j], grade, gp);
       }
       out += '<section class="tl-band">' +
@@ -585,9 +579,10 @@
           r.band.min + "%</span>") + "</span>";
     h += '<div class="tp-sec"><div class="tp-sec-h">Worth to your character</div><div class="tp-grid">' + kv + "</div></div>";
 
-    // How your build differs from the canonical default — dropped when the table
-    // IS the default, where both columns would carry the same three numbers.
-    if (dref && !P.onDefaults()) {
+    // How your build differs from the canonical default — dropped while the deck
+    // still holds those defaults, where both columns would carry the same three
+    // numbers and the section would say nothing.
+    if (dref && (r.rank !== dref.rank || Math.abs(r.pct - dref.pct) >= 0.05)) {
       var dd = r.pct - dref.pct;
       var word = Math.abs(dd) < 0.05 ? "the same place" : (dd > 0 ? "higher" : "lower");
       h += '<div class="tp-sec"><div class="tp-sec-h">Compared to the default character</div><div class="tp-grid">' +
@@ -708,16 +703,14 @@
       "The faint tick on each bar is where the line sits for the " +
       '<span data-gloss="The canonical default character the leaderboard scores on — Bracelet.normalizeProfile({}), every setting untouched.">default character</span>' +
       ": bar past the tick means the line is worth more to you than to the average build. " +
-      "Scoring on the default settings there is nothing to compare, so the tick is not drawn.</p>" +
+      "The deck starts at those defaults, so until you change a setting the tick sits under the end of " +
+      "every bar — that is the two profiles agreeing, not a fault.</p>" +
       "</details>";
   }
 
   function controlsHTML() {
     var S = P.get();
-    var fight = S.fight, def = P.onDefaults();
-    // On the defaults side the presets write to a deck nothing is reading, so
-    // they would look broken. They stay live but say why they do nothing.
-    var off = def ? ' disabled title="Scoring on the default settings — switch to Character settings to use the presets"' : "";
+    var fight = S.fight, off = "";
     return '<div class="tl-ctl">' +
       '<div class="tl-seg" role="group" aria-label="View">' +
       '<button type="button" class="mbtn' + (view === "family" ? " active" : "") + '" data-view="family">By family <span class="tl-n">33</span></button>' +
@@ -731,12 +724,11 @@
       ">Demon boss · " + (fight.demon ? "on" : "off") + "</button>" +
       "</div>" +
       // The SAME control cluster app.js's banner shows, from the same code in
-      // profile.js: the scoring toggle, the two resets, and the bracelet's grade
-      // / granted slots / rolls left. Grade matters here — this table is ranked
+      // profile.js: the character's two buttons, and the bracelet's grade /
+      // granted slots / rolls left. Grade matters here — this table is ranked
       // per grade — and mounting the shared cluster is how this tab gets it
       // without a second control for the same state.
       '<div class="bc-hdrctl" id="bctl-hdrctl"></div>' +
-      '<div id="bctl-pmodenote"></div>' +
       "</div>";
   }
 
@@ -746,7 +738,7 @@
       '<span class="tl-gl" data-gloss="The subrank this row sits in, for your current character: its damage as a percentage of the best line in this view, on the shared S+ to F- ladder.">rank</span>' +
       '<span class="tl-nm">Effect</span>' +
       '<span class="tl-vals">' + (view === "family" ? "Roll (mid)" : "Roll") + "</span>" +
-      '<span class="tl-bar" data-gloss="The bar is this line as a share of the #1 line. The vertical tick is where the SAME line sits for the default character — bar past the tick means the line is worth more to you than to an average build. Scoring on the default settings the two are the same line, so no tick is drawn.">% of the best line</span>' +
+      '<span class="tl-bar" data-gloss="The bar is this line as a share of the #1 line. The vertical tick is where the SAME line sits for the default character — bar past the tick means the line is worth more to you than to an average build. The deck starts at those defaults, so the tick sits under the end of every bar until you change a setting.">% of the best line</span>' +
       '<span class="tl-score" data-gloss="Score for this line, with the best EPIC roll set to 100. A Legendary scores above 100 — beating a good Epic is exactly what that should look like.">Score</span>' +
       '<span class="tl-pct">Damage</span>' +
       "</div>";
@@ -772,12 +764,12 @@
     var S = P.get(), grade = S.grade;
     // The SHARED toggle, not the deck: the Calculator and this table have always
     // had to agree about which character they are scoring (Shizu, 2026-08-11).
-    var res = rank(grade, P.scoringProfile());
+    var res = rank(grade, P.profile());
     last = res;
     REG = {}; SEQ = 0;
 
     $("bctl-controls").innerHTML = controlsHTML();
-    P.mountModeControl($("bctl-hdrctl"), $("bctl-pmodenote"));
+    P.mountCharControls($("bctl-hdrctl"));
     $("bctl-strip").innerHTML = stripSVG(res, grade);
     $("bctl-bands").innerHTML = headHTML() + bandsHTML(res, grade);
     $("bctl-foot").innerHTML = footHTML(res, grade);
@@ -860,7 +852,7 @@
       "#tab-tierlist .tl-ctl .mbtn[disabled]{opacity:.45;cursor:default}" +
       // The shared cluster and its note each take the whole width under the
       // view and preset buttons, rather than competing with them for a line.
-      "#tab-tierlist .tl-ctl>.bc-hdrctl,#tab-tierlist .tl-ctl>#bctl-pmodenote{flex:1 0 100%}" +
+      "#tab-tierlist .tl-ctl>.bc-hdrctl{flex:1 0 100%}" +
       // the spread strip
       "#tab-tierlist .tl-strip{margin:16px 0 4px;padding-bottom:8px;border-bottom:1px solid var(--border)}" +
       "#tab-tierlist .tl-strip svg{width:100%;height:auto;display:block}" +
@@ -1001,10 +993,10 @@
   // bracelet and gear into the shared deck and Profile notifies, so the table
   // re-ranks through the same onChange the sliders use.
   //
-  // It leaves the SCORING MODE alone on purpose (Shizu, 2026-08-11): the table
-  // stays on the canonical default profile until the user asks for the
-  // character's own settings, exactly as the Calculator behaves. Seeing that
-  // choice is the only thing the note below has to do, and it does it in a line.
+  // It leaves the DECK alone on purpose: the table stays on the calculator's
+  // defaults until the user presses Import Character Stats, exactly as the
+  // Calculator behaves. Pointing at that button is the only thing the note below
+  // has to do, and it does it in a line.
 
   var whoCtl = null;
 
@@ -1020,19 +1012,17 @@
     whoCtl = window.CharPicker.mount(host, {
       layout: "row",
       title: "Character",
-      emptyText: "None loaded — ranked on the default profile.",
+      emptyText: "None loaded — ranked on the deck's settings.",
       note: whoNote
     });
   }
 
-  /** One line: which profile the table is ranked on, and where the switch is. */
+  /** One line: what the table is ranked on, and where the two buttons are. */
   function whoNote() {
     var c = P.get().char;
     if (!c || !c.name) return "";
-    return P.onDefaults()
-      ? "Ranked on the <b>default profile</b> — " + esc(c.name) +
-        "&rsquo;s own stats are one click away on the <b>Scoring on</b> toggle below."
-      : "Ranked on <b>" + esc(c.name) + "&rsquo;s stats</b> — the <b>Scoring on</b> toggle below goes back to the defaults.";
+    return "Ranked on the settings in the deck — <b>Import Character Stats</b> below fills it with " +
+      esc(c.name) + "&rsquo;s own gear, <b>Reset to Default</b> puts ours back.";
   }
 
   /**
