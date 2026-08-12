@@ -421,7 +421,12 @@
     var rar = r.tier
       ? '<span class="tl-rar" style="background:' + RARITY[r.tier].hue + '" title="' + RARITY[r.tier].name + '"></span>'
       : "";
-    return '<div class="tl-row" data-tip="' + id + '" data-key="' + esc(r.key) + '" tabindex="0" role="button" ' +
+    // A plain row. It used to be a button that dropped its effect into a
+    // Calculator slot; Shizu cut that (2026-08-11), and with it the role, the
+    // tab stop and the pointer cursor that promised it. The hover card is the
+    // row's whole interaction now — tabindex stays so the card is still
+    // reachable from the keyboard, but the row no longer claims to be a control.
+    return '<div class="tl-row" data-tip="' + id + '" data-key="' + esc(r.key) + '" tabindex="0" ' +
       'aria-label="' + esc(r.name + (r.tier ? " " + r.tier : "") + ", " + fx(r.dmg, 2) + " percent damage, band " + r.band.key) + '">' +
       '<span class="tl-rank">' + pad2(r.rank) + "</span>" +
       // S+ is a GRADIENT, so it paints the chip background with the .rank-rainbow
@@ -450,6 +455,10 @@
    */
   function bandsHTML(res, grade) {
     var dr = defaultRank(grade);
+    // The tick means "where this line sits for the DEFAULT character". Scoring on
+    // the default settings, that IS the row — so the tick would land at the end
+    // of every bar and say nothing. Hide it rather than draw ninety-nine of them.
+    var showGhost = !P.onDefaults();
     var out = "", i, j;
     for (i = 0; i < BANDS.length; i++) {
       var b = BANDS[i];
@@ -462,7 +471,7 @@
         // The tick has to be on the BAR's scale (share of the #1 line), not the
         // score's (best Epic = 100). Reading dref.pct put every tick in the wrong
         // place and pinned anything over 100 to the far right.
-        var gp = (dref && dr.best > 0) ? dref.barPct : null;
+        var gp = (showGhost && dref && dr.best > 0) ? dref.barPct : null;
         body += rowHTML(mine[j], grade, gp);
       }
       out += '<section class="tl-band">' +
@@ -564,8 +573,9 @@
           r.band.min + "%</span>") + "</span>";
     h += '<div class="tp-sec"><div class="tp-sec-h">Worth to your character</div><div class="tp-grid">' + kv + "</div></div>";
 
-    // how your build differs from the canonical default
-    if (dref) {
+    // How your build differs from the canonical default — dropped when the table
+    // IS the default, where both columns would carry the same three numbers.
+    if (dref && !P.onDefaults()) {
       var dd = r.pct - dref.pct;
       var word = Math.abs(dd) < 0.05 ? "the same place" : (dd > 0 ? "higher" : "lower");
       h += '<div class="tp-sec"><div class="tp-sec-h">Compared to the default character</div><div class="tp-grid">' +
@@ -588,7 +598,6 @@
         : fam.granted[r.tier] + "% for " + RARITY[r.tier].name) +
       '<span class="tp-dim"> &#183; &#215; 30 &#247; ' + fx(SPEC_SUM, 5) + "</span></span></div></div>";
 
-    h += '<div class="tp-foot">Click the row to drop this effect into a Calculator slot.</div>';
     return h;
   }
 
@@ -686,24 +695,39 @@
       "bracelet against a perfect one, this ranks a single line against the best single line. " +
       "The faint tick on each bar is where the line sits for the " +
       '<span data-gloss="The canonical default character the leaderboard scores on — Bracelet.normalizeProfile({}), every setting untouched.">default character</span>' +
-      ": bar past the tick means the line is worth more to you than to the average build.</p>" +
+      ": bar past the tick means the line is worth more to you than to the average build. " +
+      "Scoring on the default settings there is nothing to compare, so the tick is not drawn.</p>" +
       "</details>";
   }
 
   function controlsHTML() {
     var S = P.get();
-    var fight = S.fight;
+    var fight = S.fight, def = P.onDefaults();
+    // On the defaults side the presets write to a deck nothing is reading, so
+    // they would look broken. They stay live but say why they do nothing.
+    var off = def ? ' disabled title="Scoring on the default settings — switch to Character settings to use the presets"' : "";
     return '<div class="tl-ctl">' +
       '<div class="tl-seg" role="group" aria-label="View">' +
       '<button type="button" class="mbtn' + (view === "family" ? " active" : "") + '" data-view="family">By family <span class="tl-n">33</span></button>' +
       '<button type="button" class="mbtn' + (view === "roll" ? " active" : "") + '" data-view="roll">By roll <span class="tl-n">99</span></button>' +
       "</div>" +
+      // Grade came out of the control deck when it moved to the Bracelet panel
+      // (profile.js), and this table is ranked per grade — so it needs its own.
+      '<div class="tl-seg" role="group" aria-label="Bracelet grade">' +
+      '<button type="button" class="mbtn' + (S.grade === "ancient" ? " active" : "") + '" data-grade="ancient">Ancient</button>' +
+      '<button type="button" class="mbtn' + (S.grade === "relic" ? " active" : "") + '" data-grade="relic">Relic</button>' +
+      "</div>" +
       '<div class="tl-presets"><span class="tl-plabel">Presets</span>' +
-      '<button type="button" class="mbtn' + (fight.supportEffects ? " active" : "") + '" data-preset="support"' +
-      ' data-gloss="On: your support already applies the party debuffs, so the four party lines are worth nothing on your bracelet — they apply once per party. Off: you bring them, and they score in full.">' +
-      "Support brings shreds " + (fight.supportEffects ? "on" : "off") + "</button>" +
-      '<button type="button" class="mbtn' + (fight.demon ? " active" : "") + '" data-preset="demon">Demon boss ' + (fight.demon ? "on" : "off") + "</button>" +
-      "</div></div>";
+      '<button type="button" class="mbtn' + (fight.supportEffects ? " active" : "") + '" data-preset="support"' + off +
+      ' data-gloss="On: you are the one bringing the party debuffs, so the four party lines score in full. Off: your support already applies them — they apply once per party, so a copy on your bracelet is worth nothing.">' +
+      "Support effects · " + (fight.supportEffects ? "on" : "off") + "</button>" +
+      '<button type="button" class="mbtn' + (fight.demon ? " active" : "") + '" data-preset="demon"' + off +
+      ">Demon boss · " + (fight.demon ? "on" : "off") + "</button>" +
+      "</div>" +
+      // ROW 3 of the character header, the same element app.js's banner shows:
+      // one toggle, two resets and the left-column disclaimer, from profile.js.
+      '<div class="tl-pmodehost" id="bctl-pmodehost"></div>' +
+      "</div>";
   }
 
   function headHTML() {
@@ -712,7 +736,7 @@
       '<span class="tl-gl" data-gloss="The subrank this row sits in, for your current character: its damage as a percentage of the best line in this view, on the shared S+ to F- ladder.">rank</span>' +
       '<span class="tl-nm">Effect</span>' +
       '<span class="tl-vals">' + (view === "family" ? "Roll (mid)" : "Roll") + "</span>" +
-      '<span class="tl-bar" data-gloss="The bar is this line as a share of the #1 line. The vertical tick is where the SAME line sits for the default character — bar past the tick means the line is worth more to you than to an average build. Until you change something in Character, your profile IS the default, so the tick sits at the end of the bar.">% of the best line</span>' +
+      '<span class="tl-bar" data-gloss="The bar is this line as a share of the #1 line. The vertical tick is where the SAME line sits for the default character — bar past the tick means the line is worth more to you than to an average build. Scoring on the default settings the two are the same line, so no tick is drawn.">% of the best line</span>' +
       '<span class="tl-score" data-gloss="Score for this line, with the best EPIC roll set to 100. A Legendary scores above 100 — beating a good Epic is exactly what that should look like.">Score</span>' +
       '<span class="tl-pct">Damage</span>' +
       "</div>";
@@ -736,11 +760,14 @@
     var pane = $(PANE_ID);
     if (!pane) return;
     var S = P.get(), grade = S.grade;
-    var res = rank(grade, P.profile());
+    // The SHARED toggle, not the deck: the Calculator and this table have always
+    // had to agree about which character they are scoring (Shizu, 2026-08-11).
+    var res = rank(grade, P.scoringProfile());
     last = res;
     REG = {}; SEQ = 0;
 
     $("bctl-controls").innerHTML = controlsHTML();
+    P.mountModeControl($("bctl-pmodehost"));
     $("bctl-strip").innerHTML = stripSVG(res, grade);
     $("bctl-bands").innerHTML = headHTML() + bandsHTML(res, grade);
     $("bctl-foot").innerHTML = footHTML(res, grade);
@@ -775,30 +802,20 @@
     nonpos: { back: 0, front: 0, nonDir: 100 }
   };
 
-  /** Drop an effect into the first empty granted slot, then show the Calculator. */
-  function tryInCalculator(key) {
-    var m = /^[fr](\d+)(?::(low|mid|high))?$/.exec(key);
-    if (!m) return;
-    var id = Number(m[1]), tier = m[2] || "mid";
-    var S = P.get(), rows = [], i, target = -1;
-    for (i = 0; i < S.rows.length; i++) {
-      rows.push({ fam: S.rows[i].fam, tier: S.rows[i].tier, value: S.rows[i].value });
-      if (target === -1 && (!S.rows[i].fam || S.rows[i].fam === "none")) target = i;
-    }
-    if (!rows.length) return;
-    if (target === -1) target = rows.length - 1;      // every slot full: replace the last
-    rows[target] = { fam: "sp:" + id, tier: tier, value: null };
-    // A granted row changing voids any cut in progress, exactly as the picker does.
-    P.set({ rows: rows, locks: null, rolled: null });
-    if (typeof window.selectTab === "function") window.selectTab("calculator");
-  }
+  // Clicking a row used to drop its effect into the first empty granted slot and
+  // jump to the Calculator. Shizu cut it (2026-08-11): the table is for reading,
+  // and a whole-row click target under a hover card was one interaction too many.
+  // The buttons in the control row are the only things here that still act.
 
   function bind(pane) {
     pane.addEventListener("click", function (e) {
       var t = e.target;
-      var vb = t.closest ? t.closest("[data-view]") : null;
+      if (!t.closest) return;
+      var vb = t.closest("[data-view]");
       if (vb) { view = vb.getAttribute("data-view"); hidePop(); render(); return; }
-      var pb = t.closest ? t.closest("[data-preset]") : null;
+      var gb = t.closest("[data-grade]");
+      if (gb) { hidePop(); P.set({ grade: gb.getAttribute("data-grade") }); return; }
+      var pb = t.closest("[data-preset]");
       if (pb) {
         var k = pb.getAttribute("data-preset");
         if (k === "demon") P.set({ fight: { demon: !P.get().fight.demon } });
@@ -806,15 +823,6 @@
         else P.set({ fight: PRESETS[k] });
         return;                                       // P.set notifies; the table redraws itself
       }
-      var row = t.closest ? t.closest(".tl-row[data-key]") : null;
-      if (row) tryInCalculator(row.getAttribute("data-key"));
-    });
-    pane.addEventListener("keydown", function (e) {
-      if (e.key !== "Enter" && e.key !== " ") return;
-      var row = e.target.closest ? e.target.closest(".tl-row[data-key]") : null;
-      if (!row) return;
-      e.preventDefault();
-      tryInCalculator(row.getAttribute("data-key"));
     });
   }
 
@@ -836,6 +844,11 @@
       "#tab-tierlist .tl-seg,#tab-tierlist .tl-presets{display:flex;gap:6px;align-items:center;flex-wrap:wrap}" +
       "#tab-tierlist .tl-plabel{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-right:2px}" +
       "#tab-tierlist .tl-n{opacity:.6;font-weight:400;font-size:11px;margin-left:3px}" +
+      "#tab-tierlist .tl-ctl .mbtn[disabled]{opacity:.45;cursor:default}" +
+      // The shared control row takes the whole width under the buttons, so its
+      // note and disclaimer can never share a line with them.
+      "#tab-tierlist .tl-pmodehost{flex:1 0 100%}" +
+      "#tab-tierlist .tl-pmodehost .bc-pmode{margin-top:4px}" +
       // the spread strip
       "#tab-tierlist .tl-strip{margin:16px 0 4px;padding-bottom:8px;border-bottom:1px solid var(--border)}" +
       "#tab-tierlist .tl-strip svg{width:100%;height:auto;display:block}" +
@@ -860,7 +873,9 @@
       // top BAND wore it, it would stop meaning the ceiling.
       "#tab-tierlist .tl-chip-z span{box-shadow:0 0 26px rgba(230,213,166,.38)}" +
       "#tab-tierlist .tl-rows{min-width:0}" +
-      "#tab-tierlist .tl-row{padding:5px 8px;border-radius:6px;cursor:pointer;font-size:12.5px}" +
+      // Not a control: no pointer cursor. The row highlights on hover and on
+      // focus because that is when its card is showing, not to invite a click.
+      "#tab-tierlist .tl-row{padding:5px 8px;border-radius:6px;font-size:12.5px}" +
       "#tab-tierlist .tl-row:nth-child(even){background:rgba(255,255,255,.022)}" +
       "#tab-tierlist .tl-row:hover{background:var(--panel2);outline:1px solid var(--border)}" +
       "#tab-tierlist .tl-row:focus-visible{outline:2px solid var(--accent);outline-offset:1px}" +

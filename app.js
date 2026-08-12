@@ -84,41 +84,16 @@
 
   // ---- character settings vs default settings ----
   //
-  // Two ways to score the same bracelet, and the tool has always had both without
-  // a way to switch: the deck (this character, as imported and then edited) and
-  // the CANONICAL DEFAULT profile, Bracelet.normalizeProfile({}) — the one the
-  // leaderboard ranks everyone on. The banner's one button flips between them and
-  // every number below re-solves. The choice is persisted; it is a way of reading
-  // the tool, not a per-visit accident.
+  // Two ways to score the same bracelet: the deck (this character, as imported
+  // and then edited) and the CANONICAL DEFAULT profile, the one the leaderboard
+  // ranks everyone on. The choice, the persistence and the control all live in
+  // profile.js now — the Tier List scores on the same toggle, and a mode that
+  // moved only this tab was a setting that lied about its own reach.
   //
-  // Defaults mode only applies while a character is loaded, because that is when
-  // the toggle is on screen: a mode nobody can see must not silently change scores.
-  var DEFAULT_PROFILE = B.normalizeProfile({});
-  var PMODE_KEY = "bc_profile_mode";
-  // Default settings, not the imported character's (Shizu, 2026-08-11): the board
-  // ranks everyone on defaults, so a freshly-loaded character should show the same
-  // number the board shows it. Switching to "character" is one click, and the
-  // choice sticks once made.
-  var profileMode = "default";
-  try {
-    var pm = localStorage.getItem(PMODE_KEY);
-    if (pm === "default" || pm === "character") profileMode = pm;
-  } catch (e) { /* private mode */ }
-
+  // Everything here reads P.scoringProfile(), which honours it.
   function hasCharacter() { return !!(S.char && S.char.name); }
-  function onDefaults() { return profileMode === "default" && hasCharacter(); }
-  function buildProfile() { return onDefaults() ? DEFAULT_PROFILE : P.profile(); }
-
-  function setProfileMode(mode) {
-    mode = mode === "default" ? "default" : "character";
-    if (mode === profileMode) return;
-    profileMode = mode;
-    try { localStorage.setItem(PMODE_KEY, mode); } catch (e) { /* private mode */ }
-    renderCharHeader();
-    updateBasicsNote();
-    redrawSlots();          // the pickers are priced on the active profile
-    solveNow();
-  }
+  function onDefaults() { return P.onDefaults(); }
+  function buildProfile() { return P.scoringProfile(); }
   function famGrades(grade) { return P.famGrades(grade); }
   function letterOf(val, grade) { return P.letterOf(val, grade); }
   var TRAIT_KEYS = P.TRAIT_KEYS, TRAIT_LABELS = P.TRAIT_LABELS;
@@ -762,18 +737,9 @@
       "#tab-calculator .bc-rankbadge{display:inline-block;padding:2px 10px;border-radius:99px;font-weight:800;" +
         "font-size:18px;line-height:1.4;color:#fff}" +
       "#tab-calculator .bc-fieldrank{margin-top:6px;font-size:12px;opacity:.75;min-height:15px}" +
-      // ---- the character / default settings toggle ----
-      "#tab-calculator .bc-pmode{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px}" +
-      "#tab-calculator .bc-pmode .lab{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--dim);font-weight:700}" +
-      "#tab-calculator .bc-pmode .bc-pmodebtn{background:var(--panel2);border:1px solid var(--border);border-radius:99px;" +
-        "padding:6px 16px;font-size:12.5px;font-weight:700;font-family:inherit;cursor:pointer;color:var(--text);" +
-        "transition:border-color .12s,color .12s,background .12s}" +
-      "#tab-calculator .bc-pmode .bc-pmodebtn:hover{border-color:var(--accent);color:var(--accent)}" +
-      "#tab-calculator .bc-pmode .bc-pmodebtn.def{background:var(--accent);color:#06121f;border-color:var(--accent)}" +
-      "#tab-calculator .bc-pmode .bc-pmodenote{font-size:11px;color:var(--dim);line-height:1.5;max-width:56ch}" +
-      // Scoring on the defaults means the deck is not being read. Say so by dimming
-      // it, rather than leaving a live-looking panel that changes nothing.
-      "#tab-calculator #bc-deckhost.bc-deck-muted{opacity:.5}" +
+      // The character / default settings toggle is styled by profile.js, with the
+      // rest of the control row it sits in: the Tier List draws the same row, and
+      // a "#tab-calculator …" prefix here would have left that copy unstyled.
       // ---- the bracelet panel ----
       "#tab-calculator .bc-hdrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}" +
       // An illegal-but-scored state (three combat traits, or fewer than two):
@@ -892,7 +858,8 @@
     // on, so printing them here would be a lie of arrangement.
     if (onDefaults()) {
       note.textContent = "Scoring on the canonical default profile — the same one the leaderboard ranks everyone on. " +
-        "The control deck is dimmed because nothing below is reading it. Leave every granted slot empty for an unrolled bracelet.";
+        "The Character deck stays editable; nothing below reads it until you switch back. " +
+        "Leave every granted slot empty for an unrolled bracelet.";
       return;
     }
     var msg = S.useOverride
@@ -1395,6 +1362,9 @@
       // Two deck fields also sit in the character header's chips.
       if (d.path === "rollsLeft" || d.path === "grade") renderCharHeader();
     }
+    // The scoring toggle moved: every number on screen is on a different profile
+    // now, so the banner's figures and the priced pickers both have to follow.
+    if (d.mode) { renderCharHeader(); redrawLive(); }
     if (d.immediate) solveNow(); else schedule();
   }
 
@@ -1658,9 +1628,8 @@
     var box = $("bc-charhdr");
     if (!box) return;
     var c = S.char;
-    if (!c || !c.name) { box.innerHTML = ""; box.style.display = "none"; setDeckMuted(false); return; }
+    if (!c || !c.name) { box.innerHTML = ""; box.style.display = "none"; return; }
     box.style.display = "";
-    setDeckMuted(onDefaults());
 
     var chips = "";
     if (c.region) chips += '<span class="bc-chip">' + esc(c.region) + "</span>";
@@ -1694,7 +1663,7 @@
       '<div class="stat"><span class="k">Worth</span><span class="v gold" id="bc-sum-worth">' + worthTxt + "</span></div>" +
       "</div>" +
       '<div class="bc-fieldrank" id="bc-fieldrank"></div>' +
-      profileModeHtml(c) +
+      '<div id="bc-pmodehost"></div>' +
       "</div>";
 
     var star = $("bc-fav-star");
@@ -1722,36 +1691,12 @@
       };
     }
 
-    var pbtn = $("bc-pmode-btn");
-    if (pbtn) {
-      pbtn.onclick = function (e) {
-        if (e && e.stopPropagation) e.stopPropagation();
-        setProfileMode(onDefaults() ? "character" : "default");
-      };
-    }
+    // ROW 3: the scoring toggle, the two resets and the left-column disclaimer.
+    // profile.js builds and repaints it — the Tier List shows the same row from
+    // the same source, so the wording cannot drift apart.
+    P.mountModeControl($("bc-pmodehost"));
 
     fillFieldRank(c);
-  }
-
-  /** The one two-state button, and the sentence that says which side is live. */
-  function profileModeHtml(c) {
-    var def = onDefaults();
-    var who = esc(c.name);
-    return '<div class="bc-pmode"><span class="lab">Scoring on</span>' +
-      '<button type="button" class="bc-pmodebtn' + (def ? " def" : "") + '" id="bc-pmode-btn">' +
-      (def ? "Default settings" : "Character settings") + "</button>" +
-      '<span class="bc-pmodenote">' +
-      (def
-        ? "Every number below is on the canonical default profile — the one the leaderboard ranks everyone on. " +
-          "The control deck is ignored until you switch back."
-        : "Every number below is on the settings in the deck, which " + who + "'s character page filled in and you can edit. " +
-          "Switch to the defaults to see the figure the leaderboard ranks.") +
-      "</span></div>";
-  }
-
-  function setDeckMuted(on) {
-    var host = $("bc-deckhost");
-    if (host) host.className = on ? "bc-deck-muted" : "";
   }
 
   /**
@@ -1844,7 +1789,44 @@
       return true;
     },
     /** Show a character's header without touching the bracelet. */
-    setCharacter: function (c) { P.setCharacter(c); renderCharHeader(); }
+    setCharacter: function (c) { P.setCharacter(c); renderCharHeader(); },
+
+    /**
+     * The two economy defaults, once the whole import has landed.
+     *
+     * Called LAST by bible-import.js, after applyCharacterProfile has filled the
+     * left column, because both numbers depend on what the deck ended up holding:
+     *
+     *   gold per 1%   from the character's combat power, on the astrogem
+     *                 calculator's own ladder — the same rate a gem is priced at
+     *   baseline %    the score of the bracelet this character is ALREADY
+     *                 wearing, under the profile the numbers are on
+     *
+     * With that baseline, "worth" stops meaning "against no bracelet at all" and
+     * starts meaning "what upgrading from what they wear would be worth" — for an
+     * unrolled bracelet, the option value of rolling into something better.
+     *
+     * Both are one-shot per character and both stay editable: profile.js keeps
+     * the character key each was seeded for and never seeds twice.
+     */
+    seedEcon: function (c) {
+      if (!c) return false;
+      var cur = null;
+      try {
+        // The bracelet as imported, under the profile it is being scored on.
+        // The two FIXED COMBAT TRAITS are part of the bracelet and score with it
+        // — the solver takes them as their own argument, so they have to be added
+        // by hand here or the baseline comes out several points light.
+        var prof = buildProfile();
+        var lines = fixedLines().concat(grantedLines());
+        cur = pct(B.setDamage(lines, S.grade, prof) + B.traitDamage(traitValues(), prof));
+      } catch (e) { cur = null; }
+      return P.seedEcon({
+        key: P.charKey(c),
+        combatPower: (c.profile && c.profile.combatPower != null) ? c.profile.combatPower : null,
+        currentPct: (cur != null && isFinite(cur)) ? cur : null
+      });
+    }
   };
 
   /**

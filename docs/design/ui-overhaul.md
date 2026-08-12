@@ -246,3 +246,29 @@ character profile stop being hand-entered.
 - Value chips are text, not inputs — except crit damage and baseline where a click on
   the chip turns it into a tiny number input (escape hatch for precise values).
 - Bump ?v= on every touched file.
+
+## Queued after the current pass (Shizu, 2026-08-11)
+
+### Advisor tab
+The roll advice — best lock mask and the per-mask table, P(improve), the quantile
+strip, and the cut flow (enter what you rolled, keep-or-replace verdict, apply,
+undo, session history) — moves OUT of the Calculator's results into its own
+**Advisor** tab, the way astrogem separates Grader from Advisor. The Calculator
+keeps the bracelet itself: the lines, the score, the worth, the breakdown.
+Both tabs mount the same shared deck.
+
+### Pricing an unrolled bracelet by its combat traits
+An unrolled bracelet's value depends almost entirely on the two combat traits it
+came with, because those never reroll: 120/120 is worth far more than 80/80 and
+today the tool prices them the same.
+
+Add a **combat-trait total** slider to the unrolled-value card: range **80–240**
+(the two traits summed — 120+120 = 240 is the cap, 40+40 = 80 the floor), and
+show what an unrolled bracelet with that total is worth. Split the total evenly
+across the two active traits unless the user has set them individually, in which
+case keep their ratio. It must recompute live and read off the same worth formula
+as everything else, `E[max(0, final% − baseline%)] × gpd`, so the number is
+comparable to every other price the tool quotes.
+
+This is the feature that answers "what should I pay for this bracelet", which is
+the whole reason the tool exists — the trait pair is the part you cannot change.

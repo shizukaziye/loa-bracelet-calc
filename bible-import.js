@@ -1330,6 +1330,12 @@
       } catch (e) { filled = 0; }     // a shape change upstream must not cost the bracelet
     }
 
+    // LAST, because both of its numbers depend on the finished deck: the gold
+    // rate off the character's combat power, and the baseline off the bracelet
+    // they are already wearing. Each is seeded once per character record and
+    // stays editable afterwards.
+    try { if (app.seedEcon) app.seedEcon(built.patch.character); } catch (e) { /* economy is optional */ }
+
     state.picked = rec.name;
     state.error = null;
     renderLoadoutPills();

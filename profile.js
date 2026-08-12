@@ -122,7 +122,12 @@
         allyCount: 2, atkSpeedPer10: 1
       },
       skills: [{ name: "", share: 100, cr: 90, cd: 280 }],
-      econ: { gpd: 1500000, baseline: 0 },
+      // gpd and baseline both get SEEDED from an imported character (see seedEcon):
+      // the gold rate off combat power, the baseline off the bracelet they wear.
+      // The two *AutoKey fields hold the character key each was seeded for, so a
+      // seed happens once per character and never lands on top of a hand-picked
+      // number.
+      econ: { gpd: 1500000, baseline: 0, gpdAutoKey: null, baseAutoKey: null },
       rows: [blankRow(), blankRow(), blankRow()],
       fixedRows: [],
       advOpen: false,
@@ -361,7 +366,11 @@
       nonDirectionalShare: S.fight.nonDir / 100,
       staggeredShare: a.staggerShare / 100,
       demonShare: S.fight.demon ? 1 : 0,
-      supportHasEffects: !!S.fight.supportEffects,
+      // The deck's switch and the model's flag are OPPOSITES, and saying so here
+      // is cheaper than a bug: `fight.supportEffects` means "count the four party
+      // lines", while the model's `supportHasEffects` means "the party's support
+      // already brings them, so a copy on your bracelet is worth nothing".
+      supportHasEffects: !S.fight.supportEffects,
       demonBase: a.demonBase / 100,
       shieldUptime: a.shieldUptime / 100,
       allyDpsCount: a.allyCount,
@@ -379,6 +388,132 @@
       atkMoveSpeedDamagePerPct: (a.atkSpeedPer10 == null ? 1 : a.atkSpeedPer10) / 10
     });
   }
+
+  // ------------------------------------------------------------------
+  // character settings vs default settings
+  //
+  // Two ways to score the same thing: the deck (this character, as imported and
+  // then edited) and the CANONICAL DEFAULT profile, Bracelet.normalizeProfile({}),
+  // the one the leaderboard ranks everyone on. It lived in app.js and moved the
+  // Calculator alone, which meant the Tier List quietly ignored a choice the user
+  // had made — so it lives here now, with the rest of the shared state, and every
+  // tab reads scoringProfile().
+  //
+  // The choice is persisted under its old key: it is a way of reading the tool,
+  // not a per-visit accident.
+  //
+  // Defaults mode only bites while a character is loaded, because that is when
+  // the control is on screen. A mode nobody can see must not change scores, and
+  // with no character the deck IS the user's own settings.
+  // ------------------------------------------------------------------
+
+  var DEFAULT_PROFILE = B.normalizeProfile({});
+  var PMODE_KEY = "bc_profile_mode";
+  // Default settings, not the imported character's (Shizu, 2026-08-11): the board
+  // ranks everyone on defaults, so a freshly-loaded character should show the same
+  // number the board shows it. Switching is one click, and the choice sticks.
+  var scoringMode = "default";
+  try {
+    var pm0 = localStorage.getItem(PMODE_KEY);
+    if (pm0 === "default" || pm0 === "character") scoringMode = pm0;
+  } catch (e) { /* private mode */ }
+
+  function hasCharacter() { return !!(S.char && S.char.name); }
+  function onDefaults() { return scoringMode === "default" && hasCharacter(); }
+  /** The profile every tab scores on. The one call that honours the toggle. */
+  function scoringProfile() { return onDefaults() ? DEFAULT_PROFILE : buildProfile(); }
+
+  function setScoringMode(mode) {
+    mode = mode === "default" ? "default" : "character";
+    if (mode === scoringMode) return;
+    scoringMode = mode;
+    try { localStorage.setItem(PMODE_KEY, mode); } catch (e) { /* private mode */ }
+    modeRepaint();                             // every copy of the control row says which side is live
+    renderAll();
+    notify({ mode: true, immediate: true });
+  }
+
+  // The deck is NOT dimmed or disabled on the defaults side (Shizu, 2026-08-11:
+  // "the character board should still work even if we're working with default
+  // settings — those should be editable"). Setting a character up and then
+  // flipping to Character settings is the normal way round, and a dead panel
+  // blocks it. The mode decides which profile the SCORING reads, nothing else;
+  // the note beside the toggle is what says so.
+
+  // The one line the whole deck turns on: an import fills the LEFT column and
+  // nothing else. Everything in the right column is judgement the user supplies.
+  var DISCLAIMER_HTML = '<span class="bc-pmodedisc">Character settings only fill the ' +
+    '<b>left column</b> — honing, accessories, gems, the stone and Master. The ' +
+    '<b>right column</b> — fight shares, trait weights, skills and economy — is ' +
+    'yours to set, and no import ever touches it.</span>';
+
+  /**
+   * ROW 3 of the character header: which settings the numbers are on, the two
+   * resets, and the one line about what an import actually fills.
+   *
+   * Rendered by BOTH tabs from here so the wording cannot drift apart, and the
+   * clicks are caught by one delegated listener on the document, so there are no
+   * ids to collide when two panes each hold a copy.
+   *
+   * The resets used to sit in the provenance strip INSIDE the deck, which starts
+   * collapsed — so the pair a user reaches for most were behind a click. They
+   * live here now, on the same line as the toggle.
+   *
+   * Returns "" with no character loaded: the banner is hidden then, and the
+   * deck's own "Reset character" button covers that state.
+   */
+  function modeControlHtml() {
+    if (!hasCharacter()) return "";
+    var def = onDefaults(), who = esc(S.char.name);
+    var h = '<div class="bc-pmode">' +
+      '<span class="lab">Scoring on</span>' +
+      '<button type="button" class="bc-pmodebtn' + (def ? " def" : "") + '" data-pmode="' +
+      (def ? "character" : "default") + '">' +
+      (def ? "Default settings" : "Character settings") + "</button>" +
+      '<span class="bc-pmodegap"></span>';
+    if (provWasCount()) {
+      h += '<button type="button" class="mbtn" data-bcreset="imported"' +
+        ' data-gloss="Put every value ' + who + "'s character page suggested back, marks and all." +
+        ' Only the left column ever came from the page.">Reset to imported</button>';
+    }
+    h += '<button type="button" class="mbtn" data-bcreset="defaults"' +
+      ' data-gloss="Clears BOTH columns back to the calculator\'s defaults — the imported gear on the left and' +
+      ' the fight, trait, skill and economy settings you chose on the right. The bracelet itself is left alone.">' +
+      "Reset to defaults</button>";
+    h += '<span class="bc-pmodenote">' +
+      (def
+        ? "Every number is on the canonical default profile — the one the leaderboard ranks everyone on. " +
+          "The control deck is ignored until you switch back."
+        : "Every number is on the settings in the deck, which " + who + "'s character page filled in and you can edit. " +
+          "Switch to the defaults to see the figure the leaderboard ranks.") +
+      "</span>" + DISCLAIMER_HTML + "</div>";
+    return h;
+  }
+
+  /** How many values a character page ever suggested — "Reset to imported" needs one. */
+  function provWasCount() {
+    var n = 0, k;
+    for (k in S.provWas) if (Object.prototype.hasOwnProperty.call(S.provWas, k)) n++;
+    return n;
+  }
+
+  // One listener for every copy of the control, on the document, because the
+  // Calculator's banner and the Tier List's control row are two different panes
+  // and either may be rebuilt at any moment.
+  document.addEventListener("click", function (e) {
+    var t = e.target, btn;
+    if (!t || !t.closest) return;
+    if ((btn = t.closest("[data-pmode]"))) {
+      e.stopPropagation();                     // the banner behind it reloads the character on click
+      setScoringMode(btn.getAttribute("data-pmode"));
+      return;
+    }
+    if ((btn = t.closest("[data-bcreset]"))) {
+      e.stopPropagation();
+      if (btn.getAttribute("data-bcreset") === "imported") resetToImported();
+      else resetCharacter();
+    }
+  });
 
   // ---- skill shares: always exactly 100 ----
 
@@ -616,8 +751,10 @@
     for (k in seen) if (Object.prototype.hasOwnProperty.call(seen, k)) {
       // Sliders and typed fields carry the path as an id; segmented controls and
       // toggles are buttons that carry it as data-seg / data-tgl instead.
+      var sel = '[data-seg="' + k + '"],[data-tgl="' + k + '"]';
       var el = $(fldId(k)) ||
-        (deckEl && deckEl.querySelector('[data-seg="' + k + '"],[data-tgl="' + k + '"]'));
+        (deckEl && deckEl.querySelector(sel)) ||
+        (topEl && topEl.querySelector(sel));
       if (!el) continue;
       // A TOGGLE has no row and no label: the button is the whole control, and
       // it carries the gloss itself. The 9/7 stone and Master are both toggles,
@@ -651,18 +788,16 @@
   function renderProvStrip() {
     var box = $("bc-prov");
     if (!box) return;
-    var was = 0, k;
-    for (k in S.provWas) if (Object.prototype.hasOwnProperty.call(S.provWas, k)) was++;
-    if (!S.char || !was) { box.innerHTML = ""; box.style.display = "none"; return; }
+    if (!S.char || !provWasCount()) { box.innerHTML = ""; box.style.display = "none"; return; }
     box.style.display = "";
     var n = provCount(), who = esc(provWho() || "the character page");
     var txt = n
       ? "Loaded from <b>" + who + "</b> — " + n + " value" + (n === 1 ? "" : "s") + " came from the character page."
       : "Loaded from <b>" + who + "</b> — every imported value has been edited since.";
+    // The two resets are NOT here any more: they moved up to the character
+    // header's control row, which is on screen whether or not the deck is open.
     box.innerHTML = '<span class="bc-provtxt" data-gloss="Marked fields hold a number read off the character page rather than one you chose. Editing a field drops its mark for good; the label then says what the page had, as a suggestion.">' +
-      txt + "</span>" +
-      '<button type="button" class="mbtn" id="bc-prov-reimport">Reset to imported</button>' +
-      '<button type="button" class="mbtn" id="bc-prov-defaults">Reset to defaults</button>';
+      txt + " Only the left column ever comes from a character page.</span>";
   }
 
   // ------------------------------------------------------------------
@@ -792,13 +927,22 @@
       ".bc-sl.wep input[type=range]::-moz-range-track{background:rgba(102,199,255,.30);border-color:var(--accent)}" +
       // ---- segmented controls and toggles -----------------------------
       ".bc-segrow{display:grid;grid-template-columns:96px minmax(0,1fr);gap:10px;align-items:center;margin-bottom:6px}" +
-      // Grade, slots and rolls on ONE row (Shizu). Each keeps its label above its
-      // control rather than beside it, so three controls fit where one used to.
-      + '.bc-toprow{display:grid;grid-template-columns:auto auto minmax(120px,1fr);gap:8px 16px;align-items:end;margin-bottom:8px}'
-      + '.bc-toprow .bc-segrow,.bc-toprow .bc-sl{display:block;margin:0}'
-      + '.bc-toprow .lb{display:block;margin-bottom:3px}'
-      + '.bc-toprow .bc-sl .tk{display:inline-block;width:calc(100% - 56px);vertical-align:middle}'
-      + '.bc-toprow .bc-sl .chip{display:inline-block;width:52px;text-align:right;vertical-align:middle}' +
+      // ---- the bracelet's own header: grade, slots and rolls on ONE row ----
+      //
+      // These five rules used to start with a stray unary `+` on the first of
+      // them ("…6px}" + + '.bc-toprow{…'), which coerced the string to NaN. The
+      // grid rule vanished and the next selector became "NaN.bc-toprow …", which
+      // the parser threw away too — so the rolls slider, still sized for a grid
+      // cell it no longer had, sat on top of its neighbours. That is the overlap
+      // Shizu photographed (2026-08-11).
+      ".bc-brachdr{margin:0 0 12px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--panel2)}" +
+      ".bc-toprow{display:grid;grid-template-columns:auto auto minmax(140px,1fr);gap:8px 18px;align-items:end}" +
+      ".bc-toprow .bc-segrow,.bc-toprow .bc-sl{display:block;margin:0;min-width:0}" +
+      ".bc-toprow .lb{display:block;margin-bottom:4px}" +
+      ".bc-toprow .bc-sl .tk{display:inline-block;width:calc(100% - 56px);vertical-align:middle}" +
+      ".bc-toprow .bc-sl .chip{display:inline-block;width:52px;text-align:right;vertical-align:middle}" +
+      // Phones: three controls will not share 375px. Stack them.
+      "@media(max-width:560px){.bc-toprow{grid-template-columns:minmax(0,1fr);gap:10px}}" +
       ".bc-seg{display:flex;gap:4px}" +
       ".bc-seg button{flex:1 1 0;min-width:0;background:var(--panel2);border:1px solid var(--border);color:var(--dim);" +
         "border-radius:6px;padding:5px 2px;font-size:11.5px;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap}" +
@@ -828,6 +972,22 @@
       // went too far — Shizu, 2026-08-11).
       ".bc-slot{display:grid;grid-template-columns:44px 168px minmax(0,430px) 120px;gap:8px;align-items:end;margin-bottom:8px;justify-content:start}" +
       ".bc-slot .sn{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;padding-bottom:7px}" +
+      // ---- the character header's control row (ROW 3), on every tab ----
+      // Scoring toggle on the left, the two resets pushed to the right by a
+      // flexible gap, then the note and the disclaimer each on their own full
+      // line beneath. The two spans take the whole row so nothing can ever share
+      // a line with the buttons and overlap them.
+      ".bc-pmode{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;padding-top:11px;border-top:1px solid var(--border)}" +
+      ".bc-pmode .lab{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--dim);font-weight:700}" +
+      ".bc-pmode .bc-pmodegap{flex:1 1 24px;min-width:0}" +
+      ".bc-pmode .bc-pmodebtn{background:var(--panel2);border:1px solid var(--border);border-radius:99px;" +
+        "padding:5px 14px;font-size:12px;font-weight:700;font-family:inherit;color:var(--text);cursor:pointer;white-space:nowrap}" +
+      ".bc-pmode .bc-pmodebtn:hover{border-color:var(--accent);color:var(--accent)}" +
+      ".bc-pmode .bc-pmodebtn.def{background:var(--accent);color:#06121f;border-color:var(--accent)}" +
+      ".bc-pmode .bc-pmodenote,.bc-pmode .bc-pmodedisc{flex:1 0 100%;font-size:11px;color:var(--dim);line-height:1.5;max-width:78ch}" +
+      ".bc-pmode .bc-pmodedisc{margin-top:-4px}" +
+      ".bc-pmode .bc-pmodedisc b{color:var(--text);font-weight:700}" +
+      "@media(max-width:560px){.bc-pmode .bc-pmodegap{flex-basis:100%}}" +
       "@media(max-width:640px){.bc-slot{grid-template-columns:1fr;gap:5px}.bc-slot .sn{padding-bottom:0}}" +
       "@media(max-width:900px) and (min-width:641px){.bc-slot{grid-template-columns:44px 150px minmax(0,1fr) 110px}}";
   }
@@ -946,7 +1106,11 @@
       '    <span class="tgl" id="bc-toggle"><span id="bc-caret">&#9656;</span></span></div>' +
       '  <div id="bc-inputs-body" style="display:none">' +
       '    <div class="bc-prov" id="bc-prov" style="display:none"></div>' +
-      '    <div id="bc-top"></div>' +
+      // #bc-top (grade / granted slots / rolls left) is NOT here any more: those
+      // three describe the BRACELET, not the character, so they are adopted into
+      // the Bracelet panel's header (see buildTop / adoptBraceletPanel). Sitting
+      // in the deck they collided with the provenance strip above them and said
+      // the same thing as the banner's chips.
       '    <div class="bc-deck">' +
       '      <div class="bc-col">' +
       '        <div class="bc-gearhdr"><div class="subh">Gear</div>' +
@@ -956,7 +1120,7 @@
       '        <div id="bc-kit"></div>' +
       '        <div class="barrow">' +
       '          <button class="mbtn" id="bc-advtoggle" type="button">Advanced ▾</button>' +
-      '          <button class="mbtn" id="bc-reset" type="button">Reset character</button>' +
+      '          <button class="mbtn" id="bc-reset" type="button" data-gloss="Puts BOTH columns back to the calculator\'s defaults — gear, accessories, gems and the two nodes on the left, and the fight, trait, skill and economy settings on the right. The bracelet itself is left alone.">Reset to defaults</button>' +
       '        </div>' +
       '      </div>' +
       '      <div class="bc-col">' +
@@ -980,12 +1144,21 @@
   // input rendering
   // ------------------------------------------------------------------
 
+  /**
+   * Grade, granted slots and rolls left — the BRACELET's own three settings.
+   *
+   * They render into #bc-top, which is not in the deck any more: it is one
+   * element this file builds and re-parents into the Bracelet panel's header,
+   * beside the rows they describe (see buildTop / adoptBraceletPanel). In the
+   * deck they sat under the provenance strip, overlapped it, and repeated what
+   * the banner's chips already said.
+   *
+   * Grade and slot count are two-option choices, so they read as left/right
+   * pills like the loadout switch. Rolls left keeps a tight track because it
+   * genuinely has eight positions, and all three sit on one line.
+   */
   function renderTop() {
-    var ch = slotChoices(), j;
-    // Grade and slot count are two-option choices, so they read as left/right
-    // pills like the loadout switch — not as sliders or selects (Shizu). Rolls
-    // left keeps a tight track because it genuinely has eight positions, and all
-    // three sit on one row.
+    var ch = slotChoices();
     var h = '<div class="bc-toprow">';
     h += segmented("grade", "Grade", ["ancient", "relic"],
       function (v) { return v === "ancient" ? "Ancient" : "Relic"; },
@@ -996,9 +1169,7 @@
       { cls: "bc-sl-tight",
         gloss: "A fresh bracelet has 4 rolls plus up to 3 reconversion-ticket rolls = 7. The chip splits the two while the ticket rolls are still there. The cut flow counts this down." });
     h += "</div>";
-    h += fldChk("useOverride", "Enter WP / main stat directly",
-      "Skip the honing sliders and type the two raw numbers straight off your character sheet (before the % buckets).");
-    $("bc-top").innerHTML = h;
+    buildTop().innerHTML = h;
   }
 
 
@@ -1006,6 +1177,10 @@
 
   function renderGear() {
     var h = "", i, k;
+    // The raw-override switch describes the CHARACTER, so it stays with the gear
+    // it replaces rather than travelling with the bracelet's three settings.
+    h += fldChk("useOverride", "Enter WP / main stat directly",
+      "Skip the honing sliders and type the two raw numbers straight off your character sheet (before the % buckets).");
     if (S.useOverride) {
       h += '<div class="ig">';
       h += fldNum("ov.mainStatRaw", "Main stat (raw)", "1", "Before the main-stat % bucket: the five armour pieces + accessories + base + roster.");
@@ -1084,8 +1259,8 @@
     h += slider("fight.cdWeight", "CD penalty wt", 0, 100, 1, "pct",
       { gloss: "Family 15 buys damage with +2% cooldown. At 100% you are judged on burst, where the extra cooldown never bites; at 0% on sustained, where the damage is divided by 1.02. 70% is the shipped assumption." });
     h += '<div class="barrow">' +
-      toggle("fight.supportEffects", "Support brings shreds",
-        "On: your support already applies the party debuffs, so the four party lines (defense shred, crit-resist shred, crit-damage-resist shred, shielded-target damage) are worth NOTHING on your bracelet — they apply once per party. Off: you are the one bringing them, and they score in full.") +
+      toggle("fight.supportEffects", "Support effects",
+        "On: you are the one bringing the party debuffs, so the four party lines (defense shred, crit-resist shred, crit-damage-resist shred, shielded-target damage) score in full. Off: your support already applies them — they apply once per party, so a copy on your bracelet is worth nothing.") +
       toggle("fight.demon", "Demon boss",
         "On: the fight is a Demon or Archdemon boss, so demon-damage lines score in full — still diluted by the demon damage you already carry from cards and pets. Off: they score nothing.") +
       "</div>";
@@ -1144,15 +1319,118 @@
     return sig3(Math.pow(10, 5 + (clamp(pos, 0, GPD_STEPS) / GPD_STEPS) * 2));
   }
 
+  // ---- the two economy defaults, seeded from the character ----
+  //
+  // Ported from the astrogem calculator (loadout-econ.js cpToGpd, grader.js
+  // gpdNoteHtml) so a bracelet and a gem are priced off the same ladder. 7.5M and
+  // 10M are deliberately manual-only: nothing in a character page justifies them.
+  function cpToGpd(cp) {
+    if (cp == null || !isFinite(cp) || cp <= 0) return null;
+    if (cp < 3500) return 500000;
+    if (cp < 4500) return 1000000;
+    if (cp < 5500) return 1500000;
+    if (cp < 6500) return 2500000;
+    if (cp < 7500) return 3500000;
+    return 5000000;
+  }
+  /** astrogem's own short form: 2.5M, 500k. */
+  function gpdLabel(g) {
+    if (g >= 1000000) return (g / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
+    return (g / 1000).toFixed(0) + "k";
+  }
+  /** One character record, one key. A re-pull is a new key and re-seeds. */
+  function charKey(c) {
+    c = c || S.char;
+    if (!c || !c.name) return null;
+    return (c.region || "") + ":" + c.name + ":" + (c.pulledAt || 0);
+  }
+  function charCombatPower() {
+    var c = S.char, cp = c && c.profile ? c.profile.combatPower : null;
+    return (cp != null && isFinite(cp) && cp > 0) ? Number(cp) : null;
+  }
+
+  /**
+   * The honesty pattern astrogem uses, word for word: while the live rate IS the
+   * one combat power picked, the note says it was auto-set; the moment the user
+   * drags the slider anywhere else it downgrades to a suggestion. Nothing is ever
+   * claimed that the number on screen does not back up.
+   */
+  function gpdNoteHtml() {
+    if (!hasCharacter()) return "";
+    var cp = charCombatPower(), g = cpToGpd(cp);
+    if (!g) {
+      return '<div class="note bc-gpdnote">no combat power in this record — the gold rate is left where you had it</div>';
+    }
+    var n = cp.toLocaleString("en-US");
+    return '<div class="note bc-gpdnote">' +
+      (num(S.econ.gpd, 0) === g
+        ? "auto-set " + gpdLabel(g) + " from combat power " + n
+        : "combat power " + n + " suggests " + gpdLabel(g)) +
+      "</div>";
+  }
+
+  function baselineNoteHtml() {
+    if (!hasCharacter() || !S.econ.baseAutoKey) return "";
+    var same = S.econ.baseAutoKey === charKey();
+    return '<div class="note bc-basenote">' +
+      (same
+        ? "the bracelet " + esc(S.char.name) + " is wearing scores " + fx(num(S.econ.baseline, 0), 2) +
+          "% — worth is what an upgrade over it would be worth"
+        : "carried over from an earlier character; edit it to price against this one") +
+      "</div>";
+  }
+
+  /**
+   * Seed the two economy numbers from a freshly imported character. Each is
+   * seeded ONCE per character key: a hand-picked rate or baseline is never
+   * overwritten, and a re-render can never re-seed.
+   *
+   *   key         region:name:pulledAt
+   *   combatPower drives the gold rate, through the ladder above
+   *   currentPct  the character's CURRENT bracelet, in % damage, under the
+   *               profile the numbers are being scored on
+   */
+  function seedEcon(o) {
+    o = o || {};
+    var key = o.key || charKey(), moved = false;
+    if (!key) return false;
+    if (S.econ.gpdAutoKey !== key) {
+      var g = cpToGpd(o.combatPower);
+      if (g) S.econ.gpd = g;                 // no combat power: leave the rate alone, and say so
+      S.econ.gpdAutoKey = key;
+      moved = true;
+    }
+    if (S.econ.baseAutoKey !== key && o.currentPct != null && isFinite(o.currentPct)) {
+      // The bracelet they already wear IS the thing a new one has to beat, so it
+      // is the honest baseline: worth then answers "what is upgrading worth",
+      // not "what is this worth against no bracelet at all".
+      //
+      // Rounded DOWN to two decimals, never up. Rounding up puts the baseline a
+      // hair above the score it was taken from, and a bracelet with no rolls left
+      // then reports a small NEGATIVE worth — an arithmetic artefact reading as a
+      // verdict.
+      S.econ.baseline = Math.max(0, Math.floor(num(o.currentPct, 0) * 100) / 100);
+      S.econ.baseAutoKey = key;
+      moved = true;
+    }
+    if (!moved) return false;
+    save();
+    if (deckEl) { renderEcon(); markProvenance(); }
+    notify({ path: "econ", immediate: false, seeded: true });
+    return true;
+  }
+
   function renderEcon() {
     var h = '<div class="bc-sl">' +
       '<label class="lb" for="bc-gpd" data-gloss="What one percent of damage is worth to you in gold. It is a rate you choose, not a market read — the same convention the accessory and astrogem tools use, so a bracelet, an accessory and a gem can be priced against each other. Higher for a whale roster, lower for a fresh one. The track is logarithmic: 100k at the left, 10M at the right.">Gold per 1%</label>' +
       '<div class="tk"><input id="bc-gpd" type="range" data-gpd="1" min="0" max="' + GPD_STEPS + '" step="1" value="' + gpdPos(S.econ.gpd) + '"></div>' +
       '<span class="chip" id="bc-gpd-chip">' + esc(gold(num(S.econ.gpd, 0))) + "</span></div>";
+    h += gpdNoteHtml();
     h += slider("econ.baseline", "Baseline %", 0, 25, 0.5, "pct1", {
       edit: true,
-      gloss: "The bracelet you would wear instead. Worth is (expected final − baseline) × gold per 1%, so leaving it at 0 prices this bracelet against no bracelet at all. Click the number to type an exact one."
+      gloss: "The bracelet you would wear instead. Worth is (expected final − baseline) × gold per 1%, so leaving it at 0 prices this bracelet against no bracelet at all. Importing a character sets it to the bracelet that character is already wearing, which is the comparison that answers \"is upgrading worth it\". Click the number to type an exact one."
     });
+    h += baselineNoteHtml();
     $("bc-econ").innerHTML = h;
   }
 
@@ -1227,6 +1505,29 @@
     renderSkills(); renderEcon(); renderAdvanced();
     markProvenance();
     applyFold();
+    // With a character loaded the header's control row carries this pair, so the
+    // deck's own copy would be the third button doing the same thing.
+    var rb = $("bc-reset");
+    if (rb) rb.style.display = hasCharacter() ? "none" : "";
+    modeRepaint();
+  }
+
+  // Every host that has drawn a copy of the control row, so a mode flip or a
+  // reset repaints all of them without each tab wiring its own subscription.
+  var modeHosts = [];
+  function modeRepaint() {
+    for (var i = modeHosts.length - 1; i >= 0; i--) {
+      var el = modeHosts[i];
+      if (!el || !el.parentNode) { modeHosts.splice(i, 1); continue; }
+      el.innerHTML = modeControlHtml();
+    }
+  }
+  /** A tab hands over the element its control row lives in; we keep it painted. */
+  function mountModeControl(hostEl) {
+    if (!hostEl) return null;
+    if (modeHosts.indexOf(hostEl) === -1) modeHosts.push(hostEl);
+    hostEl.innerHTML = modeControlHtml();
+    return hostEl;
   }
 
   // ------------------------------------------------------------------
@@ -1248,6 +1549,37 @@
    * every step of a drag tears the slider out from under the cursor, so the
    * rebuild waits for the change event the browser fires on release.
    */
+  /**
+   * The tail EVERY control shares once its state path has moved.
+   *
+   * It was extracted because the segmented pills had grown their own shorter
+   * copy of it, and that copy quietly dropped everything a SHAPE change needs:
+   * pick Relic and the slot pills went on offering 3, the row count never
+   * followed, and a cut in progress survived a bracelet it no longer described
+   * (Shizu, 2026-08-11 — "i dont think the grade and granted slot buttons really
+   * work at all"). One tail, so a control cannot half-apply a change again.
+   *
+   *   o.immediate  a press, not a drag — the subscriber should solve now
+   *   o.rebuild    false while a range is still under the mouse
+   *   o.also       extra renderers, run only when the path is NOT a shape field
+   *                (a shape field rebuilds every control anyway)
+   */
+  function afterPathChange(path, o) {
+    o = o || {};
+    if (path === "grade" || path === "slots") { S.locks = null; S.rolled = null; }
+    var unmarked = clearProv(path);
+    save();
+    if (SHAPE_FIELDS[path]) {
+      if (path === "grade") fitTraits();
+      fitRows();
+      if (o.rebuild !== false) keepFocus(renderAll);
+    } else if (o.also) {
+      keepFocus(o.also);
+    }
+    if (unmarked) { renderProvStrip(); markProvenance(); }
+    notify({ path: path, shape: !!SHAPE_FIELDS[path], immediate: !!o.immediate });
+  }
+
   function onFieldChange(el, settled) {
     var path = el.getAttribute && el.getAttribute("data-k"), t = el.getAttribute("data-t");
     if (!path) return false;
@@ -1256,9 +1588,6 @@
     else if (t === "num") setPath(S, path, num(el.value, getPath(S, path)));
     else setPath(S, path, isNaN(Number(el.value)) ? el.value : Number(el.value));
     if (path === "rollsLeft") S.rollsTotal = Math.max(S.rollsTotal, num(el.value, 7));
-    if (path === "grade" || path === "slots") { S.locks = null; S.rolled = null; }
-    var unmarked = clearProv(path);
-    save();
     if (t === "rng") {
       // Mid-drag: repaint the chip and the derived read-outs only. Rebuilding
       // the control would tear the slider out from under the mouse.
@@ -1267,19 +1596,15 @@
       if (path.indexOf("gear.") === 0) updateIlvl();
       if (path === "kit.gems") updateKitNote();
     }
-    if (SHAPE_FIELDS[path]) {
-      if (path === "grade") fitTraits();
-      fitRows();
-      if (t !== "rng" || settled !== false) keepFocus(renderAll);
-    } else if (path === "adv.baseApOverride") {
-      keepFocus(function () { renderKit(); renderAdvanced(); markProvenance(); });
+    var also = null;
+    if (path === "adv.baseApOverride") {
+      also = function () { renderKit(); renderAdvanced(); markProvenance(); };
     } else if (path.indexOf("adv.") === 0) {
       // Karma and the attack-power override feed the two derived buckets the
       // Gear column prints; refresh that line without rebuilding the field.
       updateKitNote();
     }
-    if (unmarked) { renderProvStrip(); markProvenance(); }
-    notify({ path: path, shape: !!SHAPE_FIELDS[path], immediate: false });
+    afterPathChange(path, { rebuild: (t !== "rng" || settled !== false), also: also });
     return true;
   }
 
@@ -1409,7 +1734,7 @@
       else if (t.id === "bc-addfixed") {
         if (S.fixedRows.length < 2) { S.fixedRows.push(blankRow()); save(); renderAdvanced(); notify({ path: "fixedRows", immediate: false }); }
       } else if (t.id === "bc-prov-reimport") { resetToImported(); }
-      else if (t.id === "bc-prov-defaults" || t.id === "bc-reset") { resetCharacter(); }
+      else if (t.id === "bc-reset") { resetCharacter(); }
     });
 
     // The whole header row collapses the panel, not just the little arrow.
@@ -1451,6 +1776,14 @@
     if (!hdr) return;
     var h2 = hdr.getElementsByTagName("h2")[0];
     if (h2 && h2.firstChild && h2.textContent === "Bracelet") h2.textContent = "Grader — score a bracelet";
+
+    // Grade / granted slots / rolls left belong to the bracelet, so they ride
+    // directly under its header. appendChild on a node already in the document
+    // re-parents it, listeners and all — the same trick the deck itself uses, so
+    // there is still only ONE of each control and #bc-top never goes missing.
+    var top = buildTop();
+    if (top.parentNode !== panel) panel.insertBefore(top, hdr.nextSibling);
+
     if (document.getElementById("bc-resetbracelet")) return;
     var b = document.createElement("button");
     b.type = "button";
@@ -1465,6 +1798,26 @@
   // ------------------------------------------------------------------
   // the one deck element
   // ------------------------------------------------------------------
+
+  /**
+   * The bracelet's three settings, as one element that lives outside the deck.
+   *
+   * It is built detached and adopted into the Bracelet panel on the first mount,
+   * so renderTop() always has something to write into — even on the Tier List,
+   * which has no Bracelet panel and simply leaves the element where it is.
+   */
+  var topEl = null;
+  function buildTop() {
+    if (topEl) return topEl;
+    injectStyle();
+    topEl = document.createElement("div");
+    topEl.id = "bc-top";
+    topEl.className = "bc-brachdr";
+    // The pills and the slider are bound by the deck's own delegated listeners,
+    // which are on the deck element — this one needs its own copy.
+    bindDeck(topEl);
+    return topEl;
+  }
 
   var deckEl = null;
   function buildDeck() {
@@ -1488,6 +1841,17 @@
   var Profile = {
     get: function () { return S; },
     profile: function () { return buildProfile(); },
+
+    // ---- character settings vs default settings, shared by every tab ----
+    /** The profile to SCORE on. Honours the toggle; use this, not profile(). */
+    scoringProfile: scoringProfile,
+    /** "default" | "character" — the raw choice, whether or not it bites. */
+    scoringMode: function () { return scoringMode; },
+    setScoringMode: setScoringMode,
+    /** True when the numbers are on the canonical default profile right now. */
+    onDefaults: onDefaults,
+    /** Put the header's control row (toggle + resets + disclaimer) in hostEl. */
+    mountModeControl: mountModeControl,
 
     /** Merge a patch (one level deep for the nested blocks), persist, notify. */
     set: function (patch) {
@@ -1572,6 +1936,14 @@
     applyImported: applyImported,
     /** The Worker's §1.1 `profile` block -> every control in the left column. */
     applyCharacterProfile: applyCharacterProfile,
+
+    // ---- the two economy defaults ----
+    /** Seed gold-per-1% and the baseline from a character. Once per character. */
+    seedEcon: seedEcon,
+    /** The astrogem calculator's combat-power ladder, for anyone else who needs it. */
+    cpToGpd: cpToGpd,
+    /** region:name:pulledAt — the key a seed is remembered against. */
+    charKey: charKey,
     provCount: provCount,
     character: function () { return S.char; },
     setCharacter: function (c) { S.char = c || null; save(); renderProvStrip(); },
