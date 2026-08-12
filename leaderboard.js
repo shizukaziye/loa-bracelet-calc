@@ -410,8 +410,22 @@
   /**
    * The Worker's snapshot. Two shapes are accepted so a snapshot format still being
    * written cannot break this tab: the seed's own {entries:[…]} envelope, or the
-   * packed {classes:[…], characters:[[region,name,itemLevel,classIdx,pulledAt,
-   * grade,statsPacked]]} of ARCHITECTURE §1.2. Anything else reads as empty.
+   * packed {classes:[…], labels:[…], characters:[[region,name,itemLevel,classIdx,
+   * pulledAt,grade,statsPacked, loadouts?, chosen?]]} of ARCHITECTURE §1.2.
+   * Anything else reads as empty.
+   *
+   * THE PACKED ROW GREW, IT DID NOT MOVE. Indices 0–6 mean in v2 exactly what they
+   * meant in v1, and index 6 is still the bracelet the board ranks. v2 appends:
+   *
+   *   index 7  every loadout, [labelIdx, itemLevel, statsPacked] each, in the
+   *            character's own tab order — present only when the character wears
+   *            more than one DISTINCT bracelet, which is the only case the marker
+   *            and its tooltip have anything to say about.
+   *   index 8  which of them index 6 is.
+   *
+   * So a v1 payload (and a row that ends at 6) still decodes here: no loadouts,
+   * one bracelet, exactly the old behaviour. The v gate is belt to that braces —
+   * it keeps a FUTURE format from being read as if index 7 still meant this.
    */
   function fromWorker(data) {
     if (!data) return [];
@@ -438,19 +452,43 @@
         };
       });
     }
-    var classes = data.classes || [];
-    return chars.map(function (a) {
-      var packed = a[6] || [], stats = [], i;
+    var classes = data.classes || [], labels = data.labels || [];
+    var v = typeof data.v === "number" ? data.v : 1;
+    function unpack(packed) {
+      var stats = [], i;
+      packed = packed || [];
       for (i = 0; i + 3 < packed.length; i += 4) {
         stats.push({ type: packed[i], index: packed[i + 1], value: packed[i + 2], fixed: !!packed[i + 3] });
       }
+      return stats;
+    }
+    return chars.map(function (a) {
+      var stats = unpack(a[6]);
+      var ilvl = a[2] != null ? Math.round(a[2]) : null;
+      var los = null, chosen = 0;
+      if (v >= 2 && Array.isArray(a[7]) && a[7].length > 1) {
+        los = a[7].map(function (l, i) {
+          return {
+            label: (l && l[0] != null && l[0] >= 0 && labels[l[0]]) || ("Loadout " + (i + 1)),
+            rawStats: unpack(l && l[2]),
+            // The snapshot carries no roll counts, in v1 or v2 — the record's own
+            // numbers are rolls USED and this panel wants rolls LEFT, and there is
+            // no honest way to turn one into the other here.
+            rollsRemaining: null,
+            itemLevel: (l && l[1] != null) ? Math.round(l[1]) : ilvl,
+            storedPct: null
+          };
+        });
+        if (typeof a[8] === "number" && a[8] >= 0 && a[8] < los.length) chosen = a[8];
+      }
+      if (!los) los = [{ label: "Bracelet", rawStats: stats, rollsRemaining: null, itemLevel: a[2], storedPct: null }];
       return {
         name: a[1], region: normRegion(a[0]),
-        itemLevel: a[2] != null ? Math.round(a[2]) : null,
+        itemLevel: ilvl,
         "class": (a[3] != null && a[3] >= 0) ? (classes[a[3]] || null) : null,
         pulledAt: toTime(a[4]),
-        loadouts: [{ label: "Bracelet", rawStats: stats, rollsRemaining: null, itemLevel: a[2], storedPct: null }],
-        chosenLoadout: 0, storedPct: null, biblePct: null
+        loadouts: los,
+        chosenLoadout: chosen, storedPct: null, biblePct: null
       };
     });
   }

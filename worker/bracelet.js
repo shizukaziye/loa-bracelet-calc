@@ -84,6 +84,8 @@
  *   POST /admin/seed                            X-Admin-Token. Body = data/leaderboard-seed.json
  *   POST /admin/delete   {region, name}         X-Admin-Token. Takedown.
  *   POST /admin/drain · POST /admin/snapshot    X-Admin-Token. Run one now.
+ *                                               /admin/snapshot {full:true} rebuilds
+ *                                               every row instead of the dirty ones.
  *   GET  /admin/page?name=&region=              X-Admin-Token. Raw parse probe: what the
  *                                               character page actually yielded. This is how
  *                                               the profile auto-fill map gets filled in
@@ -238,6 +240,13 @@ const SNAPSHOT_SRC_KEY = "lb:chars:gz";     // the MUTATION source: the same cha
                                             // gzipped. The served form is index-packed against string
                                             // tables, so upserting one row into it means rebuilding the
                                             // tables; keeping the objects is cheaper than unpacking.
+const SNAPSHOT_V = 2;                       // the WIRE format (payload.v). 2 added the per-row loadouts.
+const SNAPSHOT_FMT = 2;                     // the ENTRY shape stored in SNAPSHOT_SRC_KEY. Bump it whenever
+                                            // snapshotEntry() starts carrying a new field: the incremental
+                                            // rebuild only rewrites the rows a dirty marker points at, so a
+                                            // widened row would otherwise reach the board one takedown at a
+                                            // time. A mismatch forces ONE from-scratch build and clears.
+const SNAPSHOT_FMT_KEY = "lb:snapshot:fmt"; // the SNAPSHOT_FMT the stored source was built with
 const SNAPSHOT_MIN_INTERVAL_MS = 10 * 60 * 1000;  // Shizu's number: rebuild at most every 10 minutes
 const REBUILD_CURSOR_KEY = "lb:rebuild:cursor";   // { c } — present while a from-scratch build is in flight
 const REBUILD_ACC_KEY = "lb:rebuild:acc:gz";      // the rows accumulated so far, gzipped
@@ -337,11 +346,16 @@ function unplaced(dec) {
 /**
  * score(stats) — a raw lostark.bible `stats` array to the number the board ranks on.
  *
- * The split matters: a FIXED combat-trait line (Crit / Spec / Swiftness) is one
- * of the two trait lines the bracelet came with and scores through
- * traitDamage(); everything else — granted lines AND fixed effect lines — scores
- * through setDamage(). A trait rolled into a GRANTED slot scores zero, which is
- * the model's rule, not this file's.
+ * The split matters, and it is on `cat`, never on `fixed`: EVERY combat-trait
+ * line (Crit / Spec / Swiftness) scores through traitDamage(), and every effect
+ * line — granted and fixed alike — through setDamage(). See the rule in
+ * model/bracelet.js's traitDamage() header.
+ *
+ * This used to read `l.fixed && l.cat === "trait"`, which sent a trait that had
+ * rolled into a granted slot to setDamage(), where a trait line scores zero. Four
+ * of the fifty-nine seeded characters carry one, and they scored 2.2-3.2pp low.
+ * `fixed` is bible's LOCK icon, not the drop's fixed/granted split — players lock
+ * granted lines — so it never meant "one of the two the bracelet came with".
  *
  * `pct` is the whole bracelet. `linesPct` is the effect lines alone, which is
  * the figure comparable to lostark.bible's own "Bracelet Effects +X%" and to the
@@ -465,6 +479,38 @@ function markDirty(env, ck) {
   return env.CHARS.put(DIRTY_PREFIX + ck, "1", { expirationTtl: DIRTY_TTL_S }).catch(function () {});
 }
 function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+/**
+ * The parse generation, for stamping onto a record we have just parsed or scored.
+ *
+ * POST /admin/rescore bumps the counter in KV and writes it onto every record it
+ * touches. It used to be the ONLY writer, which left a hole: a character pulled
+ * after a rescore carried no `parseVersion` at all, so nothing could later tell a
+ * record parsed by today's code from one parsed a year ago. Every path that
+ * builds or re-scores stats now stamps this, beside `modelSig`.
+ *
+ * The two answer different questions and both are kept:
+ *   modelSig      which SCORING model produced `score` (Bracelet.MODEL_SIG@VERSION)
+ *   parseVersion  which PARSE generation produced `stats` — the rescore counter
+ *
+ * Memoised per isolate for PARSEVERSION_TTL_MS: the counter only moves on an
+ * admin click, and a fresh pull is not worth a KV read to learn a number that
+ * changes a few times a year. Reading it a few seconds stale is harmless — the
+ * record is stamped one generation low and the next rescore simply rescores it,
+ * which is the safe direction to be wrong in.
+ */
+const PARSEVERSION_TTL_MS = 30 * 1000;
+let _pvCache = { v: 0, at: 0 };
+async function currentParseVersion(env) {
+  const now = Date.now();
+  if (_pvCache.at && (now - _pvCache.at) < PARSEVERSION_TTL_MS) return _pvCache.v;
+  if (!env || !env.CHARS) return _pvCache.v;
+  try {
+    const v = parseInt(await env.CHARS.get(PARSEVERSION_KEY), 10) || 0;
+    _pvCache = { v: v, at: now };
+    return v;
+  } catch (e) { return _pvCache.v; }
+}
 
 // ---------------------------------------------------------------------------
 // Admin auth — fail closed, constant time, header only
@@ -1438,6 +1484,7 @@ async function loadCharacter(env, region, name, opts) {
           for (const l of rec.loadouts) if (Array.isArray(l.stats)) l.score = briefScore(score(l.stats));
         }
         rec.modelSig = MODEL_SIG;
+        rec.parseVersion = await currentParseVersion(env);
         rec.scoredAt = Date.now();
         try { await env.CHARS.put(key, JSON.stringify(rec)); await markDirty(env, key); } catch (e) {}
       }
@@ -1480,6 +1527,9 @@ async function loadCharacter(env, region, name, opts) {
     itemLevel: res.data.itemLevel != null ? res.data.itemLevel : (opts.fallbackItemLevel != null ? opts.fallbackItemLevel : null),
     score: score(res.data.stats),
     modelSig: MODEL_SIG,
+    // Stamped on the INLINE fetch, which is also the drain's and the import
+    // queue's only way in: all three land here, so all three are stamped.
+    parseVersion: await currentParseVersion(env),
     scoredAt: now,
     pulledAt: now,
     published: opts.publish !== false,
@@ -2025,11 +2075,35 @@ function isCharKey(n) {
   return n.indexOf(CHAR_PREFIX) === 0;
 }
 
-/** The board row we keep per character, before it is packed for the wire. */
+/** One bracelet's packed stat tuples: (type, index, value, fixed) × N. */
+function packStats(stats) {
+  const packed = [];
+  for (const s of (stats || [])) {
+    packed.push(s.type == null ? 0 : s.type, s.index == null ? 0 : s.index,
+      s.value == null ? 0 : s.value, s.fixed ? 1 : 0);
+  }
+  return packed;
+}
+
+/**
+ * The board row we keep per character, before it is packed for the wire.
+ *
+ * `stats` is the CHOSEN loadout — the bracelet the board RANKS on, and the only
+ * one the row used to carry. `loadouts` carries every loadout the character has,
+ * chosen one included, in the character's own tab order; `chosen` says which of
+ * them `stats` is.
+ *
+ * IT IS OMITTED WHEN THE LOADOUTS ALL WEAR THE SAME BRACELET. Most characters
+ * have three tabs and one bracelet, and shipping that bracelet three times says
+ * nothing: the marker only draws on ≥2 DISTINCT brackets, and the client counts
+ * distinctness off exactly these packed tuples, so a list it would collapse to
+ * one is a list nobody would ever see. 9 of the 60 stored characters genuinely
+ * differ, and those 9 are the ones that pay for the field.
+ */
 function snapshotEntry(rec) {
   if (!rec || !Array.isArray(rec.stats) || !rec.stats.length) return null;
   if (rec.published === false) return null;             // reading your own bracelet ≠ joining a public board
-  return {
+  const e = {
     region: rec.region, name: rec.name,
     itemLevel: rec.itemLevel == null ? null : rec.itemLevel,
     "class": rec["class"] || null,
@@ -2037,21 +2111,62 @@ function snapshotEntry(rec) {
     grade: (rec.score && rec.score.grade) || null,
     stats: rec.stats
   };
+
+  const los = Array.isArray(rec.loadouts) ? rec.loadouts.filter(function (l) {
+    return l && Array.isArray(l.stats) && l.stats.length;
+  }) : [];
+  if (los.length < 2) return e;
+
+  const sigs = los.map(function (l) { return JSON.stringify(packStats(l.stats)); });
+  const distinct = {};
+  for (const s of sigs) distinct[s] = 1;
+  if (Object.keys(distinct).length < 2) return e;
+
+  // Which loadout IS the ranked bracelet? Matched on the stats rather than
+  // trusted from `chosenLoadout`, so index 6 and the "(ranked)" pill can never
+  // disagree — a record written before the two were kept in step would.
+  const chosenSig = JSON.stringify(packStats(rec.stats));
+  let chosen = sigs.indexOf(chosenSig);
+  if (chosen < 0) chosen = (typeof rec.chosenLoadout === "number" && rec.chosenLoadout >= 0 && rec.chosenLoadout < los.length) ? rec.chosenLoadout : 0;
+
+  e.loadouts = los.map(function (l, i) {
+    return {
+      label: l.label || loadoutLabel(l.classification) || ("Loadout " + (i + 1)),
+      itemLevel: l.itemLevel == null ? null : l.itemLevel,
+      stats: l.stats
+    };
+  });
+  e.chosen = chosen;
+  return e;
 }
 function entryId(e) { return (e.region + ":" + e.name).toLowerCase(); }
 
 /**
  * ARCHITECTURE §1.2, on the wire:
  *
- *   { v:1, builtAt, classes:[…],
- *     characters:[ [region, name, itemLevel, classIdx, pulledAt, grade, statsPacked] ] }
+ *   { v:2, builtAt, classes:[…], labels:[…],
+ *     characters:[ [region, name, itemLevel, classIdx, pulledAt, grade, statsPacked,
+ *                   loadouts?, chosen?] ] }
  *
  * `statsPacked` is the raw stat tuples flattened to numbers (type, index, value,
- * fixed) × N — a bracelet is at most five lines, so a row is ~25 numbers.
+ * fixed) × N — a bracelet is at most five lines, so a row is ~25 numbers. It is
+ * the CHOSEN loadout's bracelet, and it is what the board ranks on.
  *
- * The class table rides INSIDE the payload. A table shipped separately is a table
- * that drifts: the client would decode last week's indices against this week's
- * list and mislabel every row, silently.
+ * INDICES 0–6 NEVER MOVE. v2 only APPENDS, and a row that has nothing to append
+ * simply ends at 6, because a JSON array does not have to be a fixed width. So a
+ * client built against v1 reads a v2 payload correctly and ignores the rest, and
+ * this v2 encoder's rows still decode in that older client — which is the whole
+ * reason the loadouts went on the end instead of into a reshaped row.
+ *
+ *   index 7  loadouts  [ [labelIdx, itemLevel, statsPacked], … ] — every loadout
+ *                      the character has, chosen one included, in tab order.
+ *                      Present only when they are not all the same bracelet
+ *                      (see snapshotEntry).
+ *   index 8  chosen    which of index 7 is the ranked bracelet at index 6.
+ *
+ * The class table rides INSIDE the payload, and so does the new label table. A
+ * table shipped separately is a table that drifts: the client would decode last
+ * week's indices against this week's list and mislabel every row, silently.
  */
 function encodeSnapshot(builtAt, entries) {
   const classes = [], classIdx = {};
@@ -2060,24 +2175,41 @@ function encodeSnapshot(builtAt, entries) {
     if (classIdx[n] == null) { classIdx[n] = classes.length; classes.push(n); }
     return classIdx[n];
   }
+  const labels = [], labelIdx = {};
+  function li(n) {
+    const s = String(n || "");
+    if (!s) return -1;
+    if (labelIdx[s] == null) { labelIdx[s] = labels.length; labels.push(s); }
+    return labelIdx[s];
+  }
   const characters = entries.map(function (e) {
-    const packed = [];
-    for (const s of (e.stats || [])) {
-      packed.push(s.type == null ? 0 : s.type, s.index == null ? 0 : s.index,
-        s.value == null ? 0 : s.value, s.fixed ? 1 : 0);
+    const row = [e.region, e.name, e.itemLevel, ci(e["class"]), e.pulledAt || 0,
+      e.grade || null, packStats(e.stats)];
+    if (Array.isArray(e.loadouts) && e.loadouts.length > 1) {
+      row.push(e.loadouts.map(function (l) {
+        return [li(l.label), l.itemLevel == null ? null : l.itemLevel, packStats(l.stats)];
+      }));
+      row.push(e.chosen || 0);
     }
-    return [e.region, e.name, e.itemLevel, ci(e["class"]), e.pulledAt || 0, e.grade || null, packed];
+    return row;
   });
-  return { v: 1, builtAt: builtAt, classes: classes, characters: characters };
+  return { v: SNAPSHOT_V, builtAt: builtAt, classes: classes, labels: labels, characters: characters };
 }
 
-/** The mutation source (plain entries, gzipped). The served payload is packed. */
+/**
+ * The mutation source (plain entries, gzipped). The served payload is packed.
+ *
+ * A bare array is the pre-SNAPSHOT_FMT shape and is REFUSED, which sends the
+ * rebuild down the from-scratch path once. The stored value carries its own
+ * shape number now, so the same one-off migration costs a `SNAPSHOT_FMT` bump
+ * next time rather than a hand-run admin call.
+ */
 async function readSnapshotSource(env) {
   try {
     const gz = await env.CHARS.get(SNAPSHOT_SRC_KEY, "arrayBuffer");
     if (gz && gz.byteLength) {
       const v = await gunzipToJson(gz);
-      if (Array.isArray(v)) return v;
+      if (v && v.fmt === SNAPSHOT_FMT && Array.isArray(v.entries)) return v.entries;
     }
   } catch (e) {}
   return null;
@@ -2135,18 +2267,30 @@ async function buildEntriesChunk(env) {
  * clock buys nothing and costs a list() every single minute — about 43,000 a
  * month to learn something one cheap get() already knew.
  */
-async function rebuildSnapshotIfChanged(env, minIntervalMs) {
+async function rebuildSnapshotIfChanged(env, minIntervalMs, opts) {
   if (!env || !env.CHARS) return { skipped: "no_kv" };
   const interval = (typeof minIntervalMs === "number") ? minIntervalMs : SNAPSHOT_MIN_INTERVAL_MS;
+  const forceFull = !!(opts && opts.full);   // POST /admin/snapshot {full:true} — ignore the stored source
   const builtAt = parseInt((await env.CHARS.get(BUILTAT_KEY)) || "0", 10);
   if (builtAt > 0 && (Date.now() - builtAt) < interval) return { skipped: "throttled" };
 
+  // Has the ROW SHAPE changed under the stored source? A widened row reaches the
+  // board only through the record it belongs to, and the incremental rebuild
+  // rewrites only the rows a dirty marker points at — so without this, a format
+  // change would trickle out one edited character at a time and the rest would
+  // keep serving yesterday's shape forever. One cheap get, and only on a tick
+  // that is already past the throttle. It is a HINT, not the guard:
+  // readSnapshotSource re-checks the shape inside the blob and refuses a stale
+  // one whatever this key says.
+  const fmt = parseInt((await env.CHARS.get(SNAPSHOT_FMT_KEY)) || "1", 10) || 1;
+  const shapeChanged = forceFull || fmt !== SNAPSHOT_FMT;
+
   let dirty;
   try { dirty = await env.CHARS.list({ prefix: DIRTY_PREFIX, limit: 1000 }); } catch (e) { return { skipped: "list_failed" }; }
-  if (builtAt > 0 && !dirty.keys.length) return { skipped: "clean" };
+  if (builtAt > 0 && !dirty.keys.length && !shapeChanged) return { skipped: "clean" };
 
   const startedAt = Date.now();
-  let entries = await readSnapshotSource(env);
+  let entries = shapeChanged ? null : await readSnapshotSource(env);
   let fromScratch = false;
 
   if (entries && entries.length) {
@@ -2184,7 +2328,8 @@ async function rebuildSnapshotIfChanged(env, minIntervalMs) {
   const payload = encodeSnapshot(startedAt, entries);
   const gz = await gzipString(JSON.stringify(payload));
   await env.CHARS.put(SNAPSHOT_GZ_KEY, gz);
-  await env.CHARS.put(SNAPSHOT_SRC_KEY, await gzipString(JSON.stringify(entries)));
+  await env.CHARS.put(SNAPSHOT_SRC_KEY, await gzipString(JSON.stringify({ fmt: SNAPSHOT_FMT, entries: entries })));
+  await env.CHARS.put(SNAPSHOT_FMT_KEY, String(SNAPSHOT_FMT));
   await env.CHARS.put(BUILTAT_KEY, String(startedAt));
 
   // Clear ONLY the markers we listed. Anything written mid-build keeps its marker
@@ -2194,7 +2339,11 @@ async function rebuildSnapshotIfChanged(env, minIntervalMs) {
   if (!fromScratch) {
     await Promise.all(dirty.keys.map(function (k) { return env.CHARS.delete(k.name).catch(function () {}); }));
   }
-  return { built: entries.length, bytes: gz.byteLength, builtAt: startedAt, fromScratch: fromScratch };
+  return { built: entries.length, bytes: gz.byteLength, builtAt: startedAt, fromScratch: fromScratch,
+    v: SNAPSHOT_V, fmt: SNAPSHOT_FMT,
+    // How many rows carry more than one distinct bracelet — the number that says
+    // whether the widened row is actually doing anything.
+    withLoadouts: entries.filter(function (e) { return e && e.loadouts && e.loadouts.length > 1; }).length };
 }
 
 /**
@@ -2210,7 +2359,7 @@ async function rebuildSnapshotIfChanged(env, minIntervalMs) {
  * decompressed here, because the edge does not do that for us.
  */
 async function handleList(env, acceptEncoding) {
-  if (!env || !env.CHARS) return json({ v: 1, builtAt: 0, classes: [], characters: [] }, 200);
+  if (!env || !env.CHARS) return json({ v: SNAPSHOT_V, builtAt: 0, classes: [], labels: [], characters: [] }, 200);
   try {
     const gz = await env.CHARS.get(SNAPSHOT_GZ_KEY, "arrayBuffer");
     if (gz && gz.byteLength) {
@@ -2228,7 +2377,7 @@ async function handleList(env, acceptEncoding) {
   } catch (e) {}
   // No snapshot yet. An empty list, not an error: the client reads "no rows" as
   // "the board is not built" and falls back to its baked copy, which is true.
-  return json({ v: 1, builtAt: 0, classes: [], characters: [],
+  return json({ v: SNAPSHOT_V, builtAt: 0, classes: [], labels: [], characters: [],
     note: "No snapshot has been built yet. The cron rebuilds every 10 minutes when a record has changed." }, 200);
 }
 
@@ -2624,6 +2773,10 @@ async function handleImport(env, request, ip, ctx) {
     if (existing && (Date.now() - (existing.pulledAt || 0)) < CHAR_TTL_MS) {
       if (publish && !existing.published) {
         existing.published = true;
+        // No `parseVersion` stamp here on purpose: flipping a consent flag parses
+        // nothing and scores nothing, so claiming today's generation for stats
+        // some earlier build produced would be the lie the stamp exists to catch.
+        // The import's REAL store is the queue -> drain -> loadCharacter path.
         try { await env.CHARS.put(ck, JSON.stringify(existing)); await markDirty(env, ck); } catch (e) {}
       }
       results.push({ name: existing.name, region: region, status: "cached", pct: existing.score && existing.score.pct });
@@ -2695,6 +2848,7 @@ async function handleAdminSeed(env, request) {
 
   const out = [];
   const now = Date.now();
+  const pv = await currentParseVersion(env);      // read once: the seed writes many records
   for (const e of entries) {
     if (!e || !e.name || !Array.isArray(e.rawStats)) { out.push({ name: (e && e.name) || "?", status: "no_rawStats" }); continue; }
     const region = normRegion(e.region || "NA") || "NA";
@@ -2726,7 +2880,7 @@ async function handleAdminSeed(env, request) {
       chosenLoadout: typeof e.chosenLoadout === "number" ? e.chosenLoadout : null,
       numRerolls: (e.rerollsLeft && e.rerollsLeft.base) != null ? e.rerollsLeft.base : null,
       numTicketRerolls: (e.rerollsLeft && e.rerollsLeft.ticket) != null ? e.rerollsLeft.ticket : null,
-      score: sc, modelSig: MODEL_SIG, scoredAt: now,
+      score: sc, modelSig: MODEL_SIG, parseVersion: pv, scoredAt: now,
       // The seed was read on 2026-08-11; keep that as the pull time so the board
       // ages it honestly rather than claiming it is fresh.
       pulledAt: Date.parse(e.scoredAt || body._scoredAt || "") || now,
@@ -2919,6 +3073,9 @@ async function handleAdminRescore(env, request) {
   try { body = await request.json(); } catch (e) {}
   const version = (parseInt(await env.CHARS.get(PARSEVERSION_KEY), 10) || 0) + (body && body.cursor ? 0 : 1);
   if (!(body && body.cursor)) { try { await env.CHARS.put(PARSEVERSION_KEY, String(version)); } catch (e) {} }
+  // Keep this isolate's memo honest: the very next fresh pull should stamp the
+  // number we just wrote, not the one it read half a minute ago.
+  _pvCache = { v: version, at: Date.now() };
 
   const res = await env.CHARS.list({ prefix: CHAR_PREFIX, cursor: (body && body.cursor) || undefined, limit: RESCORE_PER_CALL });
   const names = res.keys.map(function (k) { return k.name; });
@@ -3084,7 +3241,15 @@ async function handleFetch(request, env, ctx) {
     if (p === "/admin/dequeue")  return post ? handleAdminDequeue(env, request) : postOnly;
     if (p === "/admin/rescore")  return post ? handleAdminRescore(env, request) : postOnly;
     if (p === "/admin/drain")    return post ? json(Object.assign({ ok: true }, await drainQueue(env)), 200) : postOnly;
-    if (p === "/admin/snapshot") return post ? json(Object.assign({ ok: true }, await rebuildSnapshotIfChanged(env, 0)), 200) : postOnly;
+    if (p === "/admin/snapshot") {
+      if (!post) return postOnly;
+      // {full:true} discards the stored source and rebuilds every row from the
+      // records — the lever for a row-shape change that the fmt gate somehow
+      // missed. A body is optional; without one this is the plain "run it now".
+      let sb = {};
+      try { sb = (await request.json()) || {}; } catch (e) {}
+      return json(Object.assign({ ok: true }, await rebuildSnapshotIfChanged(env, 0, { full: !!sb.full })), 200);
+    }
     if (p === "/admin/feedback") return post ? handleAdminFeedbackMutate(env, request, u) : handleAdminFeedback(env);
     if (p === "/admin/metrics")  return handleAdminMetrics(env);
     if (p === "/admin/page")     return handleAdminPage(env, request, u);
