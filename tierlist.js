@@ -699,6 +699,9 @@
       '<button type="button" class="mbtn' + (view === "roll" ? " active" : "") + '" data-view="roll">By roll <span class="tl-n">99</span></button>' +
       "</div>" +
       '<div class="tl-presets"><span class="tl-plabel">Presets</span>' +
+      '<button type="button" class="mbtn' + (fight.supportEffects ? " active" : "") + '" data-preset="support"' +
+      ' data-gloss="On: your support already applies the party debuffs, so the four party lines are worth nothing on your bracelet — they apply once per party. Off: you bring them, and they score in full.">' +
+      "Support brings shreds " + (fight.supportEffects ? "on" : "off") + "</button>" +
       '<button type="button" class="mbtn' + (fight.demon ? " active" : "") + '" data-preset="demon">Demon boss ' + (fight.demon ? "on" : "off") + "</button>" +
       "</div></div>";
   }
@@ -799,6 +802,7 @@
       if (pb) {
         var k = pb.getAttribute("data-preset");
         if (k === "demon") P.set({ fight: { demon: !P.get().fight.demon } });
+        else if (k === "support") P.set({ fight: { supportEffects: !P.get().fight.supportEffects } });
         else P.set({ fight: PRESETS[k] });
         return;                                       // P.set notifies; the table redraws itself
       }

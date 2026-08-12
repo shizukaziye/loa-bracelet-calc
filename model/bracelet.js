@@ -179,6 +179,10 @@
 
     // Party model for the shred lines (16/17/19) and family 18.
     allyDpsCount: 2,
+    // Does the party's support already bring these debuffs? Default false — score
+    // the lines — with a toggle, because a support who runs them makes every one
+    // of these four lines worthless (they apply once per party).
+    supportHasEffects: false,
     allyCritRate: 0.90,
     allyCritDamage: 2.8,
     enemyBaseDR: 0.50,              // enemy damage reduction before any shred
@@ -340,6 +344,11 @@
   // A party line's multiplier on YOUR damage: your own gain plus each ally's
   // gain, counted in units of your baseline damage.
   function partyMult(profile, selfGain, allyGain) {
+    // "This effect can only be applied once per party." If the party's SUPPORT
+    // already carries the same debuff, a second copy on your bracelet does
+    // nothing at all — not a smaller effect, nothing. supportHasEffects=true
+    // says the support already brings them, so the line is worth zero.
+    if (profile.supportHasEffects) return 1;
     var n = profile.allyDpsCount;
     if (profile.role === "support") return 1 + n * allyGain;   // a support's own damage is ignored
     return 1 + selfGain + n * allyGain;

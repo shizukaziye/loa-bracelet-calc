@@ -583,7 +583,7 @@
   function ensureWorker() {
     if (worker) return worker;
     try {
-      worker = new Worker("solver-worker.js?v=4");
+      worker = new Worker("solver-worker.js?v=5");
     } catch (e) {
       worker = null;
       return null;

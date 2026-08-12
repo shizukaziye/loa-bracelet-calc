@@ -108,7 +108,7 @@
       kit: { neck: 2.6, ear1: 3, ear2: 3, gems: 9, stone: true, master: false },
       // Where the damage lands, how the cooldown line is judged, and what the
       // class pays for a Spec / Swiftness trait line (points per 100 points).
-      fight: { back: 100, front: 100, nonDir: 100, cdWeight: 70, demon: false, wSpec: 2.5, wSwift: 2.5 },
+      fight: { back: 100, front: 100, nonDir: 100, cdWeight: 70, demon: false, supportEffects: true, wSpec: 2.5, wSwift: 2.5 },
       // The bracelet's two FIXED combat traits. A real bracelet carries exactly
       // two, but the panel no longer polices it: a third can be switched on and
       // the score keeps counting it, with a warning that the state is illegal
@@ -361,6 +361,7 @@
       nonDirectionalShare: S.fight.nonDir / 100,
       staggeredShare: a.staggerShare / 100,
       demonShare: S.fight.demon ? 1 : 0,
+      supportHasEffects: !!S.fight.supportEffects,
       demonBase: a.demonBase / 100,
       shieldUptime: a.shieldUptime / 100,
       allyDpsCount: a.allyCount,
@@ -791,6 +792,13 @@
       ".bc-sl.wep input[type=range]::-moz-range-track{background:rgba(102,199,255,.30);border-color:var(--accent)}" +
       // ---- segmented controls and toggles -----------------------------
       ".bc-segrow{display:grid;grid-template-columns:96px minmax(0,1fr);gap:10px;align-items:center;margin-bottom:6px}" +
+      // Grade, slots and rolls on ONE row (Shizu). Each keeps its label above its
+      // control rather than beside it, so three controls fit where one used to.
+      + '.bc-toprow{display:grid;grid-template-columns:auto auto minmax(120px,1fr);gap:8px 16px;align-items:end;margin-bottom:8px}'
+      + '.bc-toprow .bc-segrow,.bc-toprow .bc-sl{display:block;margin:0}'
+      + '.bc-toprow .lb{display:block;margin-bottom:3px}'
+      + '.bc-toprow .bc-sl .tk{display:inline-block;width:calc(100% - 56px);vertical-align:middle}'
+      + '.bc-toprow .bc-sl .chip{display:inline-block;width:52px;text-align:right;vertical-align:middle}' +
       ".bc-seg{display:flex;gap:4px}" +
       ".bc-seg button{flex:1 1 0;min-width:0;background:var(--panel2);border:1px solid var(--border);color:var(--dim);" +
         "border-radius:6px;padding:5px 2px;font-size:11.5px;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap}" +
@@ -911,7 +919,7 @@
   }
 
   function segmented(path, label, options, fmt, gloss) {
-    var cur = String(getPath(S, path)), h = "", i, v;
+    var cur = String(getPath(S, path)), h = "", i, v;   // String(): slot counts arrive as numbers
     for (i = 0; i < options.length; i++) {
       v = options[i];
       h += '<button type="button" data-seg="' + path + '" data-v="' + esc(v) + '" aria-pressed="' +
@@ -973,25 +981,26 @@
   // ------------------------------------------------------------------
 
   function renderTop() {
-    var ch = slotChoices(), ticks = [], j;
-    var h = '<div class="ig">';
-    h += fldSel("grade", "Grade", [{ v: "ancient", t: "Ancient" }, { v: "relic", t: "Relic" }],
+    var ch = slotChoices(), j;
+    // Grade and slot count are two-option choices, so they read as left/right
+    // pills like the loadout switch — not as sliders or selects (Shizu). Rolls
+    // left keeps a tight track because it genuinely has eight positions, and all
+    // three sit on one row.
+    var h = '<div class="bc-toprow">';
+    h += segmented("grade", "Grade", ["ancient", "relic"],
+      function (v) { return v === "ancient" ? "Ancient" : "Relic"; },
       "Ancient bracelets roll 2 or 3 granted slots and higher line values; Relic rolls 1 or 2.");
-    h += "</div>";
-    // Sliders, not boxes: both are short integer ranges, and the grade already
-    // decides which slot counts are legal, so a track that cannot leave the band
-    // says more than a select that lists two options.
-    for (j = 0; j < ch.length; j++) ticks.push(String(ch[j]));
-    h += slider("slots", "Granted slots", ch[0], ch[ch.length - 1], 1, "slots",
-      { ticks: ticks,
-        gloss: "The rerollable lines. Ancient: 3 slots on 25% of drops, 2 on 75%. Slot count moves the value of an unrolled bracelet a lot." });
+    h += segmented("slots", "Granted slots", ch, function (v) { return String(v); },
+      "The rerollable lines. Ancient: 3 slots on 25% of drops, 2 on 75%. Slot count moves the value of an unrolled bracelet a lot.");
     h += slider("rollsLeft", "Rolls left", 0, 7, 1, "rolls",
-      { ticks: ["0", "1", "2", "3", "4", "5", "6", "7"],
+      { cls: "bc-sl-tight",
         gloss: "A fresh bracelet has 4 rolls plus up to 3 reconversion-ticket rolls = 7. The chip splits the two while the ticket rolls are still there. The cut flow counts this down." });
+    h += "</div>";
     h += fldChk("useOverride", "Enter WP / main stat directly",
       "Skip the honing sliders and type the two raw numbers straight off your character sheet (before the % buckets).");
     $("bc-top").innerHTML = h;
   }
+
 
   // ---- left column: GEAR ----
 
@@ -1075,6 +1084,8 @@
     h += slider("fight.cdWeight", "CD penalty wt", 0, 100, 1, "pct",
       { gloss: "Family 15 buys damage with +2% cooldown. At 100% you are judged on burst, where the extra cooldown never bites; at 0% on sustained, where the damage is divided by 1.02. 70% is the shipped assumption." });
     h += '<div class="barrow">' +
+      toggle("fight.supportEffects", "Support brings shreds",
+        "On: your support already applies the party debuffs, so the four party lines (defense shred, crit-resist shred, crit-damage-resist shred, shielded-target damage) are worth NOTHING on your bracelet — they apply once per party. Off: you are the one bringing them, and they score in full.") +
       toggle("fight.demon", "Demon boss",
         "On: the fight is a Demon or Archdemon boss, so demon-damage lines score in full — still diluted by the demon damage you already carry from cards and pets. Off: they score nothing.") +
       "</div>";

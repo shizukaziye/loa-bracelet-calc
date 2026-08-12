@@ -68,6 +68,7 @@ DEFAULT_PROFILE = {
     "shieldUptime": 0.60,
 
     "allyDpsCount": 2,
+    "supportHasEffects": False,
     "allyCritRate": 0.90,
     "allyCritDamage": 2.8,
     "enemyBaseDR": 0.50,
@@ -212,6 +213,10 @@ def def_shred_gain(profile, a_pct):
 
 
 def party_mult(profile, self_gain, ally_gain):
+    # See bracelet.js: these four lines apply once per party, so if the support
+    # already brings them a second copy is worth exactly nothing.
+    if profile.get("supportHasEffects"):
+        return 1
     n = profile["allyDpsCount"]
     if profile["role"] == "support":
         return 1 + n * ally_gain
