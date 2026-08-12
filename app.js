@@ -2147,6 +2147,16 @@
      * is currently holding, so a second worker would not merely double a
      * three-second solve — it would judge the cut against a different bracelet.
      */
+    /**
+     * The worth arithmetic, so the Advisor cannot quote a different number for
+     * the same bracelet. It is NOT res.valueGold: solveState sends
+     * goldPer1Pct: 0 to keep gold out of the solve cache key (that is what lets
+     * the gold slider drag without a three-second re-solve), so the worker's
+     * own figure is identically zero. This applies the model's definition —
+     * E[max(0, final% - baseline%)] x gpd — to the returned distribution.
+     */
+    worth: { of: worthOf, odds: oddsTxt, note: worthNote, gloss: worthGloss },
+
     solver: {
       solveState: solveState,                        // (profile, granted, rolls, opts) -> Promise
       send: send,                                    // (cmd, payload) -> Promise; "advise" rides this
