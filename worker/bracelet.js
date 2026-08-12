@@ -951,6 +951,16 @@ function braceletInLoadout(loadoutSrc) {
  *               (unanimous, 15 of 59 characters have it; its tier-4 neighbours
  *               are 1032100 Critical and 1032300 Pulverize).
  *
+ *   COMBAT      the page header's estimatedMaxCombatPower.score — NOT the
+ *   POWER       `combatPower` on the loadout, which is only what that tab was
+ *               wearing when bible last synced it. On 36 of the 59 corpus pages
+ *               the ranked loadout's figure is lower, by as much as 5,617, and
+ *               on 18 of them the difference moves the gold-per-damage rung the
+ *               calculator picks. Noa's chaos tab reads 4,420 against a
+ *               character estimate of 6,693 — 1M gold per 1% instead of 3.5M.
+ *               The loadout's own figure is kept in raw.loadoutCombatPower, and
+ *               raw.combatPowerSource names which of the two was taken.
+ *
  * NOT ON THE PAGE, and therefore never emitted:
  *
  *   mainStat / weaponPower as the deck means them — its two override fields are
@@ -980,6 +990,12 @@ const EAR_OPTIONS = [0, 0.8, 1.8, 3];
 const GEM_AP_LEVEL = { 45: 6, 60: 7, 80: 8, 100: 9, 120: 10 };
 
 const MASTER_NODE_ID = 1032200;   // Ark Passive · Evolution · T4 · "Master"
+
+/** The `score` inside a `{id,score}` combat-power object, or null. */
+function cpScore(src) {
+  if (!src || src[0] !== "{") return null;
+  return numOrNull(field(src, "score"));
+}
 
 /** The nearest legal option, for a value the page could in principle drift off. */
 function snapTo(options, v) {
@@ -1068,11 +1084,19 @@ function parseCharacterProfile(html, loadoutSrc) {
   if (ilvl != null) out.itemLevel = ilvl;
   const classId = unquote(field(src, "classId"));
   if (classId) out.classId = classId;
-  const cp = field(src, "combatPower");
-  if (cp && cp[0] === "{") {
-    const sc = numOrNull(field(cp, "score"));
-    if (sc != null) out.combatPower = sc;
-  }
+  // COMBAT POWER is the CHARACTER's estimated maximum, not the loadout's own
+  // reading. A loadout's `combatPower` is what it was wearing the moment bible
+  // last synced that tab, so a chaos tab reads hundreds of points low — Noa's
+  // chaos loadout says 4,420 where the character is 6,693, and the difference is
+  // two whole rungs of the gold-per-damage ladder. `estimatedMaxCombatPower` in
+  // the page header is the number bible itself prints on the profile, it is on
+  // all 59 corpus pages, and it is the one the ladder was calibrated against.
+  // The loadout's own reading rides in `raw` so a reader can see both.
+  const loCp = cpScore(field(src, "combatPower"));
+  const estCp = cpScore(field(html || "", "estimatedMaxCombatPower"));
+  if (loCp != null) out.raw.loadoutCombatPower = loCp;
+  if (estCp != null) { out.combatPower = estCp; out.raw.combatPowerSource = "estimatedMaxCombatPower"; }
+  else if (loCp != null) { out.combatPower = loCp; out.raw.combatPowerSource = "loadout"; }
   const ap = field(src, "apPoints");
   if (ap && ap[0] === "{") {
     out.apPoints = {
@@ -2872,7 +2896,12 @@ async function handleAdminSeed(env, request) {
           stats: l.rawStats,
           numRerolls: (l.rerollsUsed && l.rerollsUsed.base) != null ? l.rerollsUsed.base : null,
           numTicketRerolls: (l.rerollsUsed && l.rerollsUsed.ticket) != null ? l.rerollsUsed.ticket : null,
-          score: briefScore(score(l.rawStats))
+          score: briefScore(score(l.rawStats)),
+          // ARCHITECTURE §1.1 — the same grader auto-fill block a live pull
+          // carries, read off the same page by the same parser and baked into
+          // the seed file. Without it a seeded character loads with an empty
+          // left column and the deck falls back to a uniform honing guess.
+          profile: l.profile || null
         };
       });
     } catch (err) { seedLoadouts = []; }   // a loadout that will not score costs the pills, not the entry
@@ -2881,6 +2910,11 @@ async function handleAdminSeed(env, request) {
       stats: e.rawStats,
       loadouts: seedLoadouts,
       chosenLoadout: typeof e.chosenLoadout === "number" ? e.chosenLoadout : null,
+      // The chosen loadout's block, mirroring the per-loadout one exactly as the
+      // live path does. Falls back to the chosen loadout's own copy so a seed
+      // written before the top-level field existed still fills the deck.
+      profile: e.profile ||
+        (seedLoadouts[typeof e.chosenLoadout === "number" ? e.chosenLoadout : 0] || {}).profile || null,
       numRerolls: (e.rerollsLeft && e.rerollsLeft.base) != null ? e.rerollsLeft.base : null,
       numTicketRerolls: (e.rerollsLeft && e.rerollsLeft.ticket) != null ? e.rerollsLeft.ticket : null,
       score: sc, modelSig: MODEL_SIG, parseVersion: pv, scoredAt: now,

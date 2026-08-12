@@ -612,7 +612,12 @@
         numTicketRerolls: rolls.ticket || 0,
         pct: s ? s.pct : null,
         grade: s ? s.grade : (l.grade || e.grade || null),
-        unmapped: s ? s.unmapped : 0
+        unmapped: s ? s.unmapped : 0,
+        // ARCHITECTURE §1.1, exactly as fromWorkerRecord passes it: the left
+        // column belongs to the LOADOUT, so a pill click refills the deck. The
+        // seed now bakes the same block a live pull carries, read off the same
+        // page by the same parser.
+        profile: l.profile || e.profile || null
       };
     });
     var best = bestOf(los, e.chosenLoadout || 0);
@@ -627,7 +632,10 @@
       loadouts: los,
       best: best,
       pct: los[best] ? los[best].pct : null,
-      profile: null
+      // The chosen loadout's block, mirroring the record shape a live pull has.
+      // An older seed file carries none and this stays null, which is what the
+      // auto-re-pull below reads.
+      profile: e.profile || (los[best] && los[best].profile) || null
     };
   }
 
@@ -1528,7 +1536,7 @@
   function maybeAutoRepullForProfile(rec) {
     if (!WORKER_URL) return false;
     if (!rec || rec.cached !== true || rec.profile) return false;
-    if (rec.source !== "bible") return false;                   // the seed never carries one
+    if (rec.source !== "bible") return false;                   // the seed carries its own, baked from the same pages
     // No sign-in check: a re-pull works signed out now, and skipping it would
     // leave a signed-out visitor with an empty deck for no reason.
     var k = charKey(rec.region, rec.name);
