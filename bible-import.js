@@ -1375,11 +1375,12 @@
     // calculator's defaults, which is what the board ranks them on.
     var canImport = !!(root.Profile && root.Profile.canImportStats && root.Profile.canImportStats());
 
-    // LAST, because both of its numbers depend on the finished deck: the gold
-    // rate off the character's combat power, and the baseline off the bracelet
-    // they are already wearing. Each is seeded once per character record and
-    // stays editable afterwards.
-    try { if (app.seedEcon) app.seedEcon(built.patch.character); } catch (e) { /* economy is optional */ }
+    // The economy is NOT seeded here any more. Gold-per-1% comes off the
+    // character's combat power and the baseline off the bracelet they already
+    // wear — both are that character's numbers, so they belong to "Import
+    // Character Stats" with the rest of the left column, not to merely opening
+    // someone (Shizu, 2026-08-12). Loading a character leaves our defaults in
+    // place; the button fills them in.
 
     state.picked = rec.name;
     state.error = null;

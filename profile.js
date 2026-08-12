@@ -758,6 +758,16 @@
     for (k in vals) if (Object.prototype.hasOwnProperty.call(vals, k)) n++;
     if (!n) return 0;
     applyImported(vals, c);
+    // The economy is this character's too: the gold rate follows their combat
+    // power and the baseline is the bracelet they already wear. Both used to be
+    // seeded the moment someone loaded, which contradicted "defaults until you
+    // ask" — so they ride this button with the rest of the left column
+    // (Shizu, 2026-08-12). seedEcon is keyed per character and only fills a
+    // value it has not already set, so pressing twice cannot stomp an edit.
+    var app = window.BraceletApp;
+    if (app && typeof app.seedEcon === "function") {
+      try { app.seedEcon(c); } catch (e) { /* economy is optional; the gear still landed */ }
+    }
     return n;
   }
 
