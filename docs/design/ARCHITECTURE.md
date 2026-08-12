@@ -24,12 +24,29 @@ Companion docs — read before changing anything here:
 3. **Every request to lostark.bible carries the authorization token. No exceptions.**
    That is the standing condition of Shizu's access (confirmed with molenzwiebel
    2026-08-11). An unauthenticated request is the violation — and is what earns a 429.
-   Arbitrary/bulk character fetching is permitted **today** at Shizu's discretion.
    Raid statistics remain banned outright.
-   The consent-gated path (fetch only what a signed-in user owns) is built and stays the
-   DEFAULT for public users, because molenzwiebel intends to make it the only path later
-   — but it is not a present restriction on Shizu's own pulls. Keep both paths, keep the
-   token mandatory on both.
+
+   **Anyone may look up anyone, by name — decided 2026-08-11.** Character-page
+   scraping is permitted at Shizu's discretion, and that permission is not limited to
+   the caller's own characters. The Worker fetches with the CALLER's own token when
+   they are signed in (better attribution, and the load spreads over many sign-ins)
+   and with the `BIBLE_TOKEN` secret when they are not.
+
+   The roster-ownership gate we shipped first — fetch only what a signed-in user owns
+   — was **stricter than the permission we actually hold**. It was a default, picked
+   because molenzwiebel means to make roster-only the only path *later*. It is off
+   until he changes the API. The code that implements it is still there, wired to
+   `POST /forget` only, because deleting somebody's row is not reading a public page.
+
+   **This is a policy, not a bug.** A later session that finds `/character` open must
+   not "restore" the gate as a fix. It reverts when molenzwiebel changes the API, and
+   that call is Shizu's. Sign-in stays optional and must never become a wall on a
+   lookup.
+
+   With the gate off, the abuse controls are the only protection left, so they are
+   load-bearing: per-IP lookup throttle, site-wide enqueue gate, hard cap, global
+   gate, the ≥3s spacing floor, the monthly budget, the fail-streak breaker, the
+   `nf:` markers and the 7-day cache.
 4. **Favorites is the spine.** One sign-in → roster fetch → `Favorites.add` per
    character → every tab populates through `onChange`. No tab knows about OAuth.
 5. **Politeness is a hard constraint, not a setting.** ≥3s between character-page
@@ -108,7 +125,7 @@ set and a dashboard-only namespace vanishes silently (astrogem lost one this way
 |---|---|
 | `CHARS` (KV) | character records, queue, snapshot, markers |
 | `OAUTH` (KV) | anything token-bearing — kept separate so a prefix-less `list()` over CHARS can never read a session key into the public snapshot |
-| rate limits | `HARD_CAP` 60/60s per IP · `LOOKUP` 2/10s per IP · `LB` 3/60s per IP · `GLOBAL_GATE` 1000/60s fixed key · `ENQUEUE` 10/60s fixed key |
+| rate limits | `HARD_CAP` 60/60s per IP · `LOOKUP_THROTTLE` 3/60s per IP · `LB` 3/60s per IP · `GLOBAL_GATE` 1000/60s fixed key · `IMPORT_GATE` (enqueue) 10/60s fixed key |
 | cron | `* * * * *` — drain + snapshot rebuild |
 
 Secrets (never in source): `BIBLE_TOKEN`, `ADMIN_TOKEN`.
@@ -123,10 +140,11 @@ factory).
 |---|---|---|---|
 | OPTIONS | any | — | 204, before the hard cap so preflights are never throttled |
 | GET | `/` | — | health |
-| GET | `/character?region=&name=` | Bearer + ownership | cached record, or enqueue |
-| POST | `/import` | Bearer | verify ownership via rosters, enqueue each character |
+| GET | `/character?region=&name=` | none (Bearer used if sent) | cached record, or enqueue. **Any name** — see §0.3 |
+| POST | `/import` | none (Bearer used if sent) | enqueue each character; a signed-out batch is capped at 8 instead of 24 |
+| POST | `/forget` | Bearer **+ ownership** | the one route that still proves the roster holds the name — it deletes |
 | GET | `/list?fmt=1` | — | gzip snapshot bytes as-is |
-| GET | `/wait?region=&name=&since=` | Bearer | long-poll ≤25s; **pre-check before holding** (astrogem's version was an unauthenticated read amplifier: ~34 KV reads for any name) |
+| GET | `/wait?region=&name=&since=` | none | long-poll ≤25s; **pre-check before holding** — with the ownership check gone this pre-check is the whole defence (astrogem's version was a read amplifier: ~34 KV reads for any name) |
 | POST | `/admin/seed` | `X-Admin-Token` | load `data/leaderboard-seed.json` |
 | GET | `/admin/metrics` | `X-Admin-Token` | queue, drain log, budget, mode |
 | POST | `/admin/control` | `X-Admin-Token` | drain mode/rate |
@@ -147,13 +165,16 @@ wrapper into a 500 with no CORS headers.
 - URL `https://lostark.bible/character/{CE|NA}/{name}`, `encodeURIComponent` the name
   (our corpus has Astó, Phoënix, Lúo, Tîeria).
 - `Authorization: Bearer` — the requester's own token, else `BIBLE_TOKEN`. **Never** to
-  any other host.
+  any other host, and **never absent**: with neither token the Worker makes no request
+  at all rather than a naked one.
 - Browser UA, `redirect: "follow"`.
 - **`AbortSignal.timeout(10000)`.** Astrogem has no timeout anywhere; one hung
   connection eats the whole 50s drain budget.
 - Classification: `404`/parse-failure → drop + `nf:` marker (1h) so a dead name can't
-  re-enqueue forever. `401/403` → drop this item only, do **not** trip the breaker (it's
-  a dead user token, not a site block). Other upstream 4xx → trip breaker to `probe`.
+  re-enqueue forever. `401/403` → the fetch already retried a stale caller token on
+  `BIBLE_TOKEN`, so this means BOTH were refused: drop the item (one bad sign-in must
+  not freeze the queue) but count it toward the fail streak, so a dead secret trips the
+  breaker in five instead of eating the queue silently. Other upstream 4xx → breaker.
   5xx/network → retry, max 5 attempts, preserving the stored token on requeue.
 
 ### 2.3 Cache policy
@@ -223,7 +244,7 @@ fields, `list()` returns a copy, subscribers wrapped in try/catch, CE→EU heale
 ### 3.2 Calculator tab — the grader profile
 
 Modes, mirroring the grader: **Manual** (what exists today) · **Pull** (region + name,
-consent-gated) · saved-character chips.
+no sign-in needed) · saved-character chips.
 
 Pull flow: `Econ.fetchCharacter` → cached hit renders instantly · `queued` shows position
 and ETA → three concurrent mechanisms as astrogem does: a 1s local countdown (free), a
@@ -472,7 +493,7 @@ not be one button press away — that is a conversation with lostark.bible, not 
 
 | Trigger | Behaviour |
 |---|---|
-| User clicks Re-pull | `refresh=1`, bypasses cache, requires sign-in + ownership |
+| User clicks Re-pull | `refresh=1`, bypasses cache, no sign-in needed (§0.3); pays the per-IP throttle like any fresh lookup |
 | Record older than 7d | labelled `stale`, **not** auto-refetched |
 | Decoder version bump | `parseVersion` mismatch → client rescoring is enough; refetch only if raw stats are insufficient |
 | Bulk backfill | **not built.** 17.8k characters is a conversation, not a feature |
@@ -484,8 +505,8 @@ must either honour it or say "already queued, position N".
 
 ## 5. Build order
 
-1. Worker skeleton + `/character` + `/import` + consent gate + KV cache. *(prototype
-   exists — fold it in)*
+1. Worker skeleton + `/character` + `/import` + KV cache. *(built; the consent gate it
+   originally carried came off 2026-08-11 — §0.3)*
 2. `favorites.js` + sign-in → roster → star → saved-character chips.
 3. Grader pull flow with queue/wait UI.
 4. Snapshot + `/list` + Leaderboard tab (seed the 58 entries via `/admin/seed`).

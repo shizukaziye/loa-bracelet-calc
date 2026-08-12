@@ -16,9 +16,11 @@
  *      to come out lower; the test asserts they are the only ones that differ.
  *   2. THE PAGE PARSER — extractBracelets() against a hand-built fragment in the
  *      exact hydration-blob style, including the raid-then-chaos repeat.
- *   3. THE CONSENT GATE — collectRosterChars() and ownsCharacter() against four
- *      plausible roster shapes (the real one is still unknown), plus the cases
- *      that must be REFUSED.
+ *   3. THE ROSTER PROOF — collectRosterChars() and ownsCharacter() against the
+ *      real roster payload and four older speculative shapes, plus the cases that
+ *      must be REFUSED. Since 2026-08-11 this proof guards POST /forget alone; a
+ *      LOOKUP needs no sign-in and no ownership (ARCHITECTURE.md §0.3). These
+ *      checks stay green either way — they test the walker, not the policy.
  *
  * What it cannot cover, and what a live deploy is for: KV, the rate-limit
  * bindings, CORS stamping, the OAuth round trip, and whether a real character
@@ -291,7 +293,7 @@ if (!corpusFiles.length) {
 }
 
 // ---------------------------------------------------------------------------
-console.log("\n3. the consent gate");
+console.log("\n3. the roster proof (POST /forget only, since 2026-08-11)");
 // ---------------------------------------------------------------------------
 // THE REAL SHAPE, captured from a live signed-in session on 2026-08-11 (two
 // rosters on one account, region on the ROSTER and not on the character, class

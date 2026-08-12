@@ -60,13 +60,44 @@
   // bands and palettes
   // ------------------------------------------------------------------
 
-  // The one ladder, from subrank.js. Eighteen steps on flat 5-point bands of the
-  // best line in the view, wearing the astrogem calculator's own rank colours.
+  // The tier list uses its OWN, more lenient ladder than the Leaderboard's flat
+  // five-point steps (Shizu, 2026-08-11). Two reasons it has to differ:
+  //
+  //   The yardsticks differ. The board scores a whole bracelet against a perfect
+  //   one; this ranks a single line against the best single line. A line at 85%
+  //   of the best line in the game is excellent, not an A.
+  //
+  //   The data clusters. The same five families supply the top fifteen rolls at
+  //   Legendary / Epic / Rare, landing at ~95-100%, ~84-86% and ~74-76%. Flat
+  //   five-point bands cut through the middle cluster, so two rolls of the same
+  //   family one tier apart could read S- and A+. These cuts sit in the gaps
+  //   between clusters instead, so a cluster is never split.
+  //
+  // The top five rolls are S+ and carry the rainbow outright — they are the five
+  // Legendary crit / shred lines and there is no honest way to separate them.
+  var TL_BANDS = [
+    { key: "S",  pct: 80 }, { key: "S-", pct: 70 }, { key: "A+", pct: 62 },
+    { key: "A",  pct: 54 }, { key: "A-", pct: 46 }, { key: "B+", pct: 38 },
+    { key: "B",  pct: 30 }, { key: "B-", pct: 22 }, { key: "C+", pct: 14 },
+    { key: "C",  pct: 0.0001 }, { key: "F", pct: 0 }
+  ];
+  var TOP_RAINBOW = 5;
   var BANDS = SR.BANDS;
-  var BOTTOM = SR.BOTTOM;                       // F- — where a worthless line is pinned
+  var BOTTOM = SR.BOTTOM;
 
-  /** The band for a percentage of the best line; a line worth nothing is F-, full stop. */
-  function bandFor(d, pct) { return d > 0 ? SR.of(pct) : BOTTOM; }
+  function tlBand(key) {
+    var c = SR.colorOf(key, key === "S+");           // S+ takes the rainbow
+    // `bg` and `hue` are the same value under two names: the strip and dots read
+    // `hue`, the chips and pills read `bg`.
+    return { key: key, bg: c.bg, hue: c.bg, fg: c.fg, cls: c.cls, glow: key === "S+" };
+  }
+  /** rank is 1-based within the current view; the first TOP_RAINBOW are S+. */
+  function bandFor(d, pct, rank) {
+    if (d <= 0) return tlBand("F");
+    if (rank && rank <= TOP_RAINBOW) return tlBand("S+");
+    for (var i = 0; i < TL_BANDS.length; i++) if (pct >= TL_BANDS[i].pct) return tlBand(TL_BANDS[i].key);
+    return tlBand("F");
+  }
 
   // The six letter GROUPS, for the strip: eighteen dashed cuts and eighteen
   // letters on one 1000-unit axis is a picket fence. The strip draws one cut per
@@ -155,7 +186,7 @@
   // scoring
   // ------------------------------------------------------------------
 
-  var view = "family";                                // "family" | "roll"
+  var view = "roll";                                // "family" | "roll"
   var defaultCache = {};                              // grade -> the canonical-profile ranking
 
   /** Per-tier log-space damage for one family under one profile. */
@@ -219,7 +250,7 @@
       var r = rows[i];
       r.rank = i + 1;
       r.pct = best > 0 ? r.d / best * 100 : 0;
-      r.band = bandFor(r.d, r.pct);
+      r.band = bandFor(r.d, r.pct, r.rank);
       r.dmg = B.damagePercent(r.d);
     }
     return { rows: rows, best: best, bestRow: rows[0] || null };
@@ -335,8 +366,14 @@
     return '<div class="tl-row" data-tip="' + id + '" data-key="' + esc(r.key) + '" tabindex="0" role="button" ' +
       'aria-label="' + esc(r.name + (r.tier ? " " + r.tier : "") + ", " + fx(r.dmg, 2) + " percent damage, band " + r.band.key) + '">' +
       '<span class="tl-rank">' + pad2(r.rank) + "</span>" +
-      '<span class="tl-gl" style="color:' + r.band.bg +
-      '" title="this row\'s subrank">' + r.band.key + "</span>" +
+      // S+ is a GRADIENT, so it paints the chip background with the .rank-rainbow
+      // tiling class rather than a text colour.
+      (r.band.cls
+        ? '<span class="tl-gl ' + r.band.cls + '" style="background:' + r.band.bg +
+          ";color:" + (r.band.fg || "#2b2440") + '" title="top five — nothing honest separates them">' +
+          r.band.key + "</span>"
+        : '<span class="tl-gl" style="color:' + r.band.bg +
+      '" title="this row\'s subrank">' + r.band.key + "</span>") +
       '<span class="tl-nm">' + rar + esc(r.name) +
       (r.tier ? ' <em style="color:' + RARITY[r.tier].hue + '">' + RARITY[r.tier].name + "</em>" : "") + "</span>" +
       '<span class="tl-vals">' + esc(vals) + "</span>" +
@@ -428,7 +465,14 @@
       var tr = TIERS[t], d = r.tierD[t];
       var dmg = B.damagePercent(d);
       var p = res.best > 0 ? d / res.best * 100 : 0;
-      var bd = bandFor(d, p);
+      // Find this tier's own rank in the current ranking so the card cannot show a
+      // different band than the row it came from (the top five are S+ by rank, not
+      // by percentage, so a rank-blind lookup here would read S).
+      var tRank = null, tKey = "r" + fam.id + ":" + tr;
+      for (var tq = 0; tq < res.rows.length; tq++) {
+        if (res.rows[tq].key === tKey) { tRank = res.rows[tq].rank; break; }
+      }
+      var bd = bandFor(d, p, tRank);
       var isMe = r.tier === tr;                       // the row's own tier, in the by-roll view
       h += '<tr class="' + (isMe ? "tp-best" : "") + '">' +
         '<td><span class="tp-rar" style="background:' + RARITY[tr].hue + '"></span>' +
@@ -569,14 +613,17 @@
    */
   function copyHTML() {
     return '<details class="method tl-method"><summary>How these ranks are worked out</summary>' +
-      "<p><b>Subranks are a percentage of the best line for <i>your</i> character.</b> " +
-      "The ladder runs in flat five-point steps — S+ from 95%, S from 90%, S- from 85%, on down through " +
-      "A, B, C and D to F+ at 20% and F at 10%. Anything under 10%, and anything worth no damage at all, is F-. " +
-      "That best line is whatever the profile below makes best, so <b>every number here moves when you change the profile</b> — " +
-      "drag a slider and the table reorders under your hand, with no wait. " +
-      "Both views band the same way: <i>by family</i> against the best family, <i>by roll</i> against the best single roll.</p>" +
-      "<p>The same eighteen steps grade a whole bracelet on the Leaderboard, so an S- there and an S- here " +
-      "are read off one ladder. The faint tick on each bar is where the line sits for the " +
+            "<p><b>Ranks are a percentage of the best line for <i>your</i> character.</b> " +
+      "The top five rolls all take a rainbow <b>S+</b> — they are the five Legendary crit and shred " +
+      "lines, and nothing honest separates them. Below that: <b>S</b> from 80%, <b>S-</b> from 70%, " +
+      "then A, B and C down to <b>F</b>, which means the line does no damage at all for you. " +
+      "The cuts sit in the gaps between natural clusters, so the same family one tier apart never " +
+      "lands two bands apart. " +
+      "That best line is whatever the profile makes best, so <b>every number here moves when you " +
+      "change the profile</b> — drag a slider and the table reorders under your hand, with no wait.</p>" +
+      "<p>These bands are more lenient than the Leaderboard's, deliberately: that one scores a whole " +
+      "bracelet against a perfect one, this ranks a single line against the best single line. " +
+      "The faint tick on each bar is where the line sits for the " +
       '<span data-gloss="The canonical default character the leaderboard scores on — Bracelet.normalizeProfile({}), every setting untouched.">default character</span>' +
       ": bar past the tick means the line is worth more to you than to the average build.</p>" +
       "</details>";
@@ -754,6 +801,13 @@
       "#tab-tierlist .tl-row:focus-visible{outline:2px solid var(--accent);outline-offset:1px}" +
       "#tab-tierlist .tl-rank{font-family:'SF Mono',Menlo,Consolas,monospace;font-size:11px;color:var(--dim);text-align:right}" +
       "#tab-tierlist .tl-gl{font-weight:900;font-size:12px;text-align:center;letter-spacing:-.03em;white-space:nowrap}" +
+      // The S+ rainbow. 90deg, NOT diagonal: a diagonal gradient's left and right
+      // edges differ, so a repeat-tiled background seams visibly at the wrap.
+      // 400% spans three whole tiles, so the slide loops with no visible reset.
+      "#tab-tierlist .tl-gl.rank-rainbow{background-size:400% 100%;border-radius:4px;padding:1px 5px}" +
+      "@media (prefers-reduced-motion:no-preference){" +
+      "#tab-tierlist .tl-gl.rank-rainbow{animation:tl-rb-slide 8s linear infinite}" +
+      "@keyframes tl-rb-slide{from{background-position:0% 50%}to{background-position:400% 50%}}}" +
       "#tab-tierlist .tl-nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
       "#tab-tierlist .tl-nm em{font-style:normal;font-size:10px;letter-spacing:.04em;text-transform:uppercase;opacity:.85}" +
       "#tab-tierlist .tl-rar{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:6px;vertical-align:1px}" +

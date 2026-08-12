@@ -2,10 +2,10 @@
  * worker/bracelet.js — "bracelet-bible", the Cloudflare Worker behind the
  * bracelet calculator's lostark.bible import.
  *
- * Complete as of 2026-08-11: the import round trip, the consent gate, the KV
- * record store, the canonical-default scorer, the queue and its paced drain with
- * a circuit breaker, the long poll, the gzipped leaderboard snapshot, feedback,
- * and the admin surface.
+ * Complete as of 2026-08-11: the import round trip, the KV record store, the
+ * canonical-default scorer, the queue and its paced drain with a circuit breaker,
+ * the long poll, the gzipped leaderboard snapshot, feedback, and the admin
+ * surface.
  *
  * ============================== WHY IT EXISTS ==============================
  *
@@ -15,25 +15,43 @@
  * So this Worker fetches the page server-side, pulls the bracelet out, scores
  * it, and answers JSON with a CORS allowlist for our own origins.
  *
- * ============================ THE CONSENT GATE =============================
+ * ========================= WHO MAY BE LOOKED UP ============================
  *
- * NON-NEGOTIABLE, and the thing to preserve through any later redesign:
+ * ANYONE, since 2026-08-11. Any visitor, signed in or not, may type any name and
+ * region and get that character's bracelet.
  *
- *   A character is fetched, stored or ranked ONLY IF the caller is signed in to
- *   lostark.bible AND that character appears in THEIR OWN /api/oauth/rosters
- *   response.
+ * THAT IS A DELIBERATE POLICY, NOT A HOLE TO PLUG. Shizu holds the lostark.bible
+ * relationship, and molenzwiebel's terms are: scraping character pages is
+ * permitted at Shizu's discretion, PROVIDED every request carries the
+ * authorization token. An earlier build fetched a character only if it appeared
+ * on the caller's own /api/oauth/rosters roster — stricter than the permission we
+ * actually hold, and chosen only because molenzwiebel means to make roster-only
+ * the ONLY path LATER. It is open until he changes the API. Do NOT restore that
+ * gate as a bug fix; it is a policy change and it needs Shizu, not a patch. The
+ * same decision, dated, is docs/design/ARCHITECTURE.md §0.3.
  *
- * The caller sends their own `uwo_…` bearer token; this Worker calls
- * /api/oauth/rosters ITSELF with that token and checks the name is in it before
- * any page fetch happens. There is no name lookup, no enumeration and no
- * crawler anywhere in this file. Request volume is therefore bounded by real
- * signed-in humans clicking their own characters — the board is opt-in the way
- * lostark.bible's own is.
+ * ========================= WHAT DID NOT CHANGE =============================
  *
- * The caller's token is used for the ownership check and (preferably) for the
- * page fetch, so every upstream request is attributable to a consenting human.
- * It is NEVER logged and NEVER stored: the roster cache is keyed by a SHA-256
- * of the token, and the queue stores no token at all (see enqueue()).
+ * 1. EVERY request to lostark.bible carries an Authorization Bearer. The
+ *    CALLER'S OWN token when they are signed in — better attribution, and the
+ *    load spreads across users instead of landing entirely on one secret — and
+ *    the BIBLE_TOKEN secret otherwise. A tokenless request is the violation, and
+ *    is the thing that earns a 429.
+ * 2. The token goes to lostark.bible and NOWHERE else, and is never logged and
+ *    never stored: the roster cache (which only /forget uses now) is keyed by a
+ *    SHA-256 of the token, and the queue holds it in a VALUE that is deleted the
+ *    moment the fetch lands.
+ * 3. Raid-statistics endpoints are never touched, by any path.
+ * 4. The abuse controls are now the ONLY thing between a stranger and Shizu's
+ *    token, so every one of them is load-bearing: the per-IP lookup throttle, the
+ *    site-wide enqueue gate, the hard cap, the global gate, the ≥3s spacing floor
+ *    between character-page fetches, the monthly budget, the fail-streak breaker,
+ *    the `nf:` markers and the 7-day cache. There is still no crawler and no
+ *    enumeration anywhere in this file: one name, one click, one page.
+ *
+ * OWNERSHIP IS STILL PROVEN FOR ONE THING. POST /forget DELETES records, so it
+ * still checks the caller's own roster holds the character. Reading a public page
+ * and deleting someone's row are not the same act.
  *
  * ================================ ROUTES ===================================
  *
@@ -41,21 +59,22 @@
  *   GET  /                                      health + model signature
  *   GET  /character?name=&region=[&queue=1][&pos=1][&refresh=1][&publish=0]
  *                                               The one route the import UI calls.
- *                                               Cached → answer now. Miss → Bearer +
- *                                               ownership, then ENQUEUE and answer
+ *                                               No sign-in needed. Cached → answer now.
+ *                                               Miss → ENQUEUE and answer
  *                                               {queued, position, total, drainPerMin}.
  *   GET  /bracelet?…                            alias of /character (the name used
  *                                               in docs/design/bible-import-fallback.md)
- *   GET  /wait?region=&name=&since=             Bearer + ownership. Long poll, ≤25s;
- *                                               answers the moment the drain stores a
- *                                               record newer than `since`.
+ *   GET  /wait?region=&name=&since=             Long poll, ≤25s, no sign-in; answers the
+ *                                               moment the drain stores a record newer
+ *                                               than `since`. Holds only for a lookup
+ *                                               that is genuinely pending.
  *   GET  /?list=1   ·   GET /list               the board: the stored gzip bytes, as-is
  *   GET  /status                                is the drain running? (public, cached 30s)
  *   POST /feedback {type,message,contact,hp}    public, honeypotted, throttled, 90-day TTL
- *   POST /import   {characters:[…], publish?}   Bearer required. Same gate, in bulk —
- *                                               every accepted character is queued.
- *   POST /forget   {characters:[…]}|{all:true}  Bearer required. Removes the caller's
- *                                               OWN characters from the board.
+ *   POST /import   {characters:[…], publish?}   Bulk queue. Bearer OPTIONAL; a signed-out
+ *                                               batch is capped harder (IMPORT_MAX_ANON).
+ *   POST /forget   {characters:[…]}|{all:true}  Bearer REQUIRED, roster checked. Removes
+ *                                               the caller's OWN characters from the board.
  *   GET  /admin/metrics                         X-Admin-Token. Queue, drain, log, health.
  *   GET  /admin/feedback                        X-Admin-Token. The newest ≤200 notes.
  *   POST /admin/feedback {read|del}             X-Admin-Token.
@@ -94,8 +113,11 @@
  *   wrangler secret put <NAME> --config worker/wrangler.toml
  *
  *   BIBLE_TOKEN  the Bearer token lostark.bible's owners issued for this Worker.
- *                Used for the CRON DRAIN and as a fallback when a caller's own
- *                token cannot fetch a page. Live lookups prefer the caller's own.
+ *                It carries the CRON DRAIN, every signed-out lookup, and any
+ *                lookup whose caller token turns out to be stale. Live lookups
+ *                still PREFER the caller's own token when they have one. Without
+ *                this secret a signed-out lookup has no Bearer to send, so it must
+ *                not be made at all — fetchCharacterPage refuses.
  *   ADMIN_TOKEN  the admin credential, sent as the `X-Admin-Token` header.
  *                Fail-closed: while unset, nobody is admin.
  */
@@ -162,12 +184,15 @@ const LASTWRITE_KEY = "lb:lastwrite"; // ms of the most recent real lostark.bibl
 const CHAR_TTL_MS   = 7 * 24 * 60 * 60 * 1000;  // §2.3: a record is "fresh" for 7 days. Cached records are served at
                                                 // ANY age and only LABELLED `stale` past this — never auto-refetched.
                                                 // The Re-pull button (refresh=1) is the refresh path, deliberately.
-const ROSTER_TTL_S  = 5 * 60;               // the ownership check costs one extra fetch per 5 min, not one per click
+const ROSTER_TTL_S  = 5 * 60;               // /forget's roster proof costs one extra fetch per 5 min, not one per call
 const NOTFOUND_TTL_S = 60 * 60;             // remember not-found for an hour; self-corrects if it was transient
 const QUEUE_TTL_S   = 3 * 24 * 3600;        // a queued fetch expires after 3 days if never drained
 const DIRTY_TTL_S   = 7 * 24 * 3600;        // safety net; the rebuild normally clears the marker
 
 const IMPORT_MAX      = 24;    // characters accepted in one POST /import (a big roster, no more)
+const IMPORT_MAX_ANON = 8;     // …but 8 from a caller with no token. A signed-in import is a
+                               // roster the user just loaded; a signed-out one is a list a
+                               // stranger typed, and it spends Shizu's own token to fetch.
 
 // ---------------------------------------------------------------------------
 // Queue, drain and the circuit breaker
@@ -377,6 +402,38 @@ function normRegion(r) {
 }
 function charKey(region, name) { return CHAR_PREFIX + region.toUpperCase() + ":" + String(name).toLowerCase(); }
 
+// The region a PLAYER says out loud. Internally EU Central is "CE", because that
+// is what lostark.bible's URLs use; a sentence shown to a human says EU.
+function regionLabel(r) { return normRegion(r) === "CE" ? "EU" : "NA"; }
+function otherRegionLabel(r) { return regionLabel(r) === "NA" ? "EU" : "NA"; }
+
+/**
+ * Why a name came back with nothing — in the visitor's terms, and about the
+ * ACTUAL cause.
+ *
+ * We cannot tell a typo from a character hidden on lostark.bible: both are a 404
+ * on the character page, and the OAuth scope itself only covers non-hidden
+ * characters. So the sentence names both and neither invents a rule of ours nor
+ * hangs one on lostark.bible. Before 2026-08-11 this said the character was "not
+ * on the roster lostark.bible shows for your account", which blamed lostark.bible
+ * for a restriction WE had chosen — and sent people to fix the wrong thing.
+ */
+function noSuchMsg(region, name) {
+  return "No character called " + name + " on " + regionLabel(region) +
+    " — check the spelling, or try " + otherRegionLabel(region) +
+    ". A character hidden on lostark.bible cannot be read either.";
+}
+
+/**
+ * The per-IP key for the fresh-lookup throttle.
+ *
+ * It used to hash the caller's OAuth token, which only worked while a lookup
+ * REQUIRED a sign-in. A signed-out visitor has no token to key on, and keying the
+ * signed-in separately would hand anybody a second bucket for the price of
+ * signing out. The IP is the one handle that covers both, so both use it.
+ */
+function lookupKey(ip) { return "look:" + (ip || "0.0.0.0"); }
+
 // Display name: Roman-script names get Title case; Hangul is left alone. The KV
 // key is lowercased independently, so this only affects what the board shows.
 function normalizeName(name) {
@@ -440,7 +497,13 @@ function adminOk(request, env) {
 }
 
 // ---------------------------------------------------------------------------
-// THE CONSENT GATE: does this token's own roster hold this character?
+// THE ROSTER PROOF: does this token's own roster hold this character?
+//
+// This whole block used to gate every lookup. Since 2026-08-11 it gates exactly
+// one route — POST /forget, which DELETES records — and nothing else calls it.
+// Reading a page that lostark.bible serves to anyone needs no proof of ownership;
+// deleting somebody's row does. Keep it here, keep it wired to /forget, and do
+// not re-point it at /character (see the header: that would be a policy change).
 // ---------------------------------------------------------------------------
 
 /**
@@ -450,9 +513,12 @@ function adminOk(request, env) {
  * roster against data/leaderboard-seed.json, which was read off the pages
  * themselves — see docs/research/oauth-rosters-shape.md.
  *
- * Used only as a FALLBACK: the page badge wins when the page parsed. It exists
- * so a character whose badge markup changed still shows a class on the board
- * instead of a blank cell.
+ * DORMANT since 2026-08-11, deliberately kept. It was the class fallback for a
+ * lookup that had already read the caller's roster; a lookup reads no roster any
+ * more, so nothing calls it and the page badge is the only source. It stays
+ * because the table is research, not code — nine codes joined by hand against
+ * real pages — and it is what the roster-only path will need on the day
+ * molenzwiebel makes that the only path. Do not delete it to quiet a linter.
  */
 const ROSTER_CLASS = {
   // verified against real character pages
@@ -548,8 +614,8 @@ function collectRosterChars(payload) {
 }
 
 /**
- * The caller's own roster, cached ~5 minutes so the gate costs one extra fetch
- * per session rather than two fetches per click.
+ * The caller's own roster, cached ~5 minutes so the proof costs one extra fetch
+ * per session rather than two fetches per call.
  *
  * The cache KEY is a SHA-256 of the token, never the token. The cached VALUE is
  * the character list only — names, classes, item levels the user already agreed
@@ -608,11 +674,15 @@ function ownsCharacter(chars, region, name) {
   return { ok: false, sawName: sawName };
 }
 
-/** Bearer + roster in one step. Returns { ok, chars } or a ready-made error Response. */
+/**
+ * Bearer + roster in one step, for POST /forget only — the one route that still
+ * has to prove the caller owns what they are about to delete.
+ * Returns { token, chars } or a ready-made error Response.
+ */
 async function requireOwner(env, request) {
   const token = bearer(request);
   if (!token) {
-    return { resp: json({ error: "not_signed_in", message: "Sign in with lostark.bible first — this endpoint only reads characters on your own roster." }, 401) };
+    return { resp: json({ error: "not_signed_in", message: "Sign in with lostark.bible first — taking a character off the board has to prove it is yours." }, 401) };
   }
   const roster = await callerRoster(env, token);
   if (!roster.ok) {
@@ -1199,12 +1269,29 @@ function parseMeta(html) {
  * Fetch one character page and parse it. Returns { ok:true, data } or
  * { ok:false, status, error, message }.
  *
- * `userToken` is the caller's own OAuth token when a human is driving; the cron
- * drain has no human, so it falls back to the BIBLE_TOKEN secret. Either way the
- * page request carries a Bearer token, which is the condition lostark.bible's
- * owners set (2026-07-22) — a tokenless request 401s.
+ * `userToken` is the caller's own OAuth token when a signed-in human is driving.
+ * A signed-out visitor and the cron drain have none, so both fall back to the
+ * BIBLE_TOKEN secret.
+ *
+ * EVERY REQUEST CARRIES A BEARER. That is the standing condition of Shizu's
+ * access (molenzwiebel, 2026-07-22, re-confirmed 2026-08-11) and the one rule
+ * that did not loosen when the ownership gate came off. With no token of either
+ * kind this function makes NO REQUEST AT ALL — sending a naked one is the actual
+ * violation, and it is what earns a 429.
+ *
+ * A caller token that turns out to be stale falls back to BIBLE_TOKEN and retries
+ * ONCE, spaced like any other page fetch. Now that signing in is optional, a
+ * months-old token in someone's localStorage must not be the reason a lookup
+ * fails.
  */
 async function fetchCharacterPage(env, region, name, userToken) {
+  const secret = (env && env.BIBLE_TOKEN) || "";
+  const first = userToken || secret;
+  if (!first) {
+    return { ok: false, status: 503, error: "no_token",
+      message: "Character lookups are not configured right now — nothing was requested from lostark.bible.",
+      upstreamStatus: 0 };
+  }
   const url = BIBLE + "/character/" + encodeURIComponent(region) + "/" + encodeURIComponent(name);
   const headers = {
     "User-Agent": BROWSER_UA,
@@ -1217,8 +1304,7 @@ async function fetchCharacterPage(env, region, name, userToken) {
     "Sec-Fetch-Site": "none",
     "Sec-Fetch-User": "?1"
   };
-  const tok = userToken || (env && env.BIBLE_TOKEN) || "";
-  if (tok) headers["Authorization"] = "Bearer " + tok;
+  headers["Authorization"] = "Bearer " + first;
 
   let resp;
   try {
@@ -1229,8 +1315,18 @@ async function fetchCharacterPage(env, region, name, userToken) {
   }
   catch (e) { return { ok: false, status: 502, error: "upstream_unreachable", message: "lostark.bible did not answer.", upstreamStatus: 0 }; }
 
+  // The caller's sign-in is dead but ours is not: space the retry like any other
+  // page fetch (the 3s floor counts both) and go again on the secret, once.
+  if ((resp.status === 401 || resp.status === 403) && first !== secret && secret) {
+    try { await spaceUpstream(env); } catch (e) {}
+    headers["Authorization"] = "Bearer " + secret;
+    try {
+      resp = await fetch(url, { headers: headers, redirect: "follow", signal: AbortSignal.timeout(10000) });
+    } catch (e) { return { ok: false, status: 502, error: "upstream_unreachable", message: "lostark.bible did not answer.", upstreamStatus: 0 }; }
+  }
+
   if (resp.status === 404) {
-    return { ok: false, status: 404, error: "no_such_character", message: "lostark.bible has no page for that character.", upstreamStatus: 404 };
+    return { ok: false, status: 404, error: "no_such_character", message: noSuchMsg(region, name), upstreamStatus: 404 };
   }
   if (!resp.ok) {
     const authIssue = resp.status === 401 || resp.status === 403;
@@ -1238,8 +1334,10 @@ async function fetchCharacterPage(env, region, name, userToken) {
     // classifies on it: 401/403 is one dead token (drop the item), any other 4xx is a
     // site-wide block (trip the breaker). Collapsing both to "502" loses that distinction.
     return { ok: false, status: 502, error: "upstream_" + resp.status,
-      message: "lostark.bible returned HTTP " + resp.status + "." +
-        (authIssue ? " That usually means the BIBLE_TOKEN secret is missing or stale." : ""),
+      message: resp.status === 429
+        ? "lostark.bible is rate-limiting us at the moment — this is temporary, try again shortly."
+        : ("lostark.bible returned HTTP " + resp.status + "." +
+           (authIssue ? " Both our sign-in and the BIBLE_TOKEN secret were refused, so the secret is missing or stale." : "")),
       authIssue: authIssue || undefined, upstreamStatus: resp.status };
   }
 
@@ -1322,7 +1420,7 @@ async function loadCharacter(env, region, name, opts) {
 
   if (env && env.CHARS && !opts.refresh) {
     const nf = await env.CHARS.get(NOTFOUND_PREFIX + key);
-    if (nf) return { ok: false, status: 404, body: { error: "no_such_character", message: "lostark.bible has no page for that character." } };
+    if (nf) return { ok: false, status: 404, body: { error: "no_such_character", message: noSuchMsg(region, name) } };
   }
 
   let stale = null;
@@ -1789,14 +1887,23 @@ async function drainQueue(env) {
       } catch (e) {}
       run.dropped.push({ region: it.r, name: it.n, status: ourStatus, msg: (r && r.body && r.body.error) || "dropped" });
     } else if (upstream === 401 || upstream === 403) {
-      // This requester's token expired or was revoked. Their problem, not the
-      // site's — drop the item and carry on. Tripping the breaker here would let
-      // one stale sign-in freeze the queue for everybody.
-      consecFail = 0;
+      // Both Bearers were refused — fetchCharacterPage already retried a stale
+      // requester token on BIBLE_TOKEN before it got here. So this is either one
+      // dead sign-in on a Worker with no secret set, or the secret itself is dead.
+      //
+      // Drop the item either way (one bad token must not freeze the queue for
+      // everybody) but COUNT IT toward the fail streak, so a dead secret trips the
+      // breaker in five instead of quietly eating the whole queue one item at a
+      // time. That silent-drain-to-nothing is exactly what this branch used to do.
       try { await env.CHARS.delete(it.k); } catch (e) {}
       removed[it.k] = 1;
       run.dropped.push({ region: it.r, name: it.n, status: ourStatus, upstream: upstream,
-        msg: "auth — the requester's sign-in token expired or was revoked" });
+        msg: "auth — both the requester's token and BIBLE_TOKEN were refused" });
+      if (++consecFail >= PAUSE_FAIL_LIMIT) {
+        await setDrainConfig(env, { mode: "probe", drainPerMin: cfg.drainPerMin, lastProbe: Date.now(), interval: PAUSE_PROBE_FIRST_MS });
+        run.stop = "auth";
+        break;
+      }
     } else if (upstream >= 400 && upstream < 500) {
       // A site-wide refusal (429 rate limit, 418/451 anti-bot). Stop now.
       run.failed.push({ region: it.r, name: it.n, status: ourStatus, upstream: upstream, msg: "blocked", att: 1 });
@@ -2145,7 +2252,7 @@ async function handleFeedback(env, request, ip) {
   // own key in the shared per-IP namespace fixes that without touching lookups.
   if (env.LOOKUP_THROTTLE) {
     const t = await env.LOOKUP_THROTTLE.limit({ key: "fb:" + ip });
-    if (!t.success) return json({ error: "slow_down", message: "One note every few seconds — please wait a moment.", rateLimited: true, retryAfterMs: 5000 }, 429);
+    if (!t.success) return json({ error: "slow_down", message: "A few notes a minute is the limit — please wait a moment and send it again.", rateLimited: true, retryAfterMs: 20000 }, 429);
   }
   let body;
   try { body = await request.json(); } catch (e) { return json({ error: "bad_request", message: "Body must be JSON." }, 400); }
@@ -2247,9 +2354,16 @@ function validateNameRegion(rawRegion, rawName) {
  *                   on the first lookup and its 30s re-syncs, not on every tick)
  *   ?refresh=1      the Re-pull button: bypass the cache
  *
+ * NO SIGN-IN, AND NO OWNERSHIP CHECK — any name, any region, any visitor (see the
+ * header for whose decision that is and what would reverse it). A Bearer is still
+ * read when the caller has one, because a request attributable to the human who
+ * asked for it beats one attributable to Shizu's secret; with none, the secret
+ * carries it. What actually holds the volume down is below, in order: the drain
+ * mode, the `nf:` marker, the global gate, the per-IP throttle, the monthly
+ * budget and the site-wide enqueue gate.
+ *
  * The flags the client branches on, in the order it reads them:
  *   unavailable  the drain is off or probing — no character page will be fetched
- *   needSignIn   a fetch is needed and the caller is not signed in (401)
  *   queued       it is in the queue; position/total/drainPerMin say where
  *   degraded     the global gate tripped; new work is paused for everyone
  */
@@ -2273,15 +2387,11 @@ async function handleCharacter(env, request, u, ip, ctx, degraded) {
     if (cached && !Array.isArray(cached.stats)) cached = null;
   }
   if (cached && !refresh && typeof cached.pulledAt === "number") {
-    // A record the owner asked NOT to publish is not public data, so reading it
-    // costs an ownership check. A published one is already on the board.
-    if (cached.published === false) {
-      const owner = await requireOwner(env, request);
-      if (owner.resp) return owner.resp;
-      if (!ownsCharacter(owner.chars, region, name).ok) {
-        return json({ error: "not_yours", message: "That character is not on your roster." }, 403);
-      }
-    }
+    // `published:false` means "keep me off the public board" — snapshotEntry drops
+    // such a record and always will. It never meant "nobody may look this
+    // character up": the same page is on lostark.bible for anyone to read, and
+    // since 2026-08-11 there is no sign-in here to check it against. So a cached
+    // record answers whoever asks, and the board flag is left exactly as it was.
     const out = characterResponse({ record: cached, cached: true,
       stale: (Date.now() - cached.pulledAt) >= CHAR_TTL_MS });
     if (wantQueue && env.CHARS) {
@@ -2299,72 +2409,65 @@ async function handleCharacter(env, request, u, ip, ctx, degraded) {
   // ---- 2) A page fetch is needed --------------------------------------------
   // Everything from here consumes lostark.bible, so everything from here is gated.
 
-  if (!wantQueue) {
-    // Legacy inline path, kept for curl and the test harness: verify, fetch, answer.
-    // The UI never takes it — it sets queue=1 so a slow upstream cannot hold a
-    // browser request open.
-    const owner = await requireOwner(env, request);
-    if (owner.resp) return owner.resp;
-    const owns = ownsCharacter(owner.chars, region, name);
-    if (!owns.ok) {
-      return json({ error: "not_yours",
-        message: owns.sawName
-          ? "That name is on your roster but under a different region."
-          : "That character is not on the roster lostark.bible shows for your account. Only your own characters can be read here." }, 403);
-    }
-    if (degraded) return json({ error: "busy", message: "The site is very busy right now — please try again shortly.", rateLimited: true, degraded: true }, 429);
-    if (env.LOOKUP_THROTTLE) {
-      const k = (await sha256hex(owner.token)).slice(0, 24);
-      const t = await env.LOOKUP_THROTTLE.limit({ key: "look:" + k });
-      if (!t.success) return json({ error: "slow_down", message: "One character every few seconds, please.", rateLimited: true, retryAfterMs: 5000 }, 429);
-    }
-    await spaceUpstream(env);
-    const r = await loadCharacter(env, region, name, {
-      token: owner.token, refresh: refresh, publish: publish,
-      regionVerified: owns.regionVerified,
-      fallbackClass: owns.meta && classFromRoster(owns.meta.cls),
-      fallbackItemLevel: owns.meta && owns.meta.ilvl
-    });
-    if (!r.ok) return json(r.body, r.status);
-    return json(characterResponse(r), 200);
-  }
-
-  // Drain mode first: if no page is going to be fetched at all, saying so beats
-  // asking someone to sign in for a service that is switched off.
+  // Drain mode first, for BOTH paths. "off" and "probe" mean this Worker is making
+  // no character-page requests at all, and the inline path is a character-page
+  // request like any other — it used to slip past this check because a sign-in
+  // stood in front of it, and nothing stands in front of it now.
   const cfg = await getDrainConfig(env);
   if (cfg.mode !== "run") {
     return json({ unavailable: true, error: "unavailable",
-      message: UNAVAILABLE_MSG + " — nothing is being fetched from lostark.bible right now. Cached characters and the board still work." }, 503);
+      message: UNAVAILABLE_MSG + " — nothing is being fetched from lostark.bible right now, and that is temporary. Cached characters and the board still work." }, 503);
   }
+
+  if (!wantQueue) {
+    // Legacy inline path, kept for curl and the test harness: fetch and answer in
+    // one request. The UI never takes it — it sets queue=1 so a slow upstream
+    // cannot hold a browser request open.
+    //
+    // It reaches lostark.bible exactly as the drain does, so it pays exactly the
+    // same tolls: the busy gate, the per-IP throttle, the monthly budget, the
+    // site-wide enqueue gate and the 3s spacing floor. It used to skip the budget
+    // and the enqueue gate, which was survivable only while a sign-in was needed
+    // to get here at all.
+    if (degraded) return json({ error: "busy", message: "The site is very busy right now — this is temporary, please try again shortly.", rateLimited: true, degraded: true }, 429);
+    if (env.LOOKUP_THROTTLE) {
+      const t = await env.LOOKUP_THROTTLE.limit({ key: lookupKey(ip) });
+      if (!t.success) return json({ error: "slow_down", message: "That is a lot of new characters at once — you have hit the lookup limit, which resets in under a minute.", rateLimited: true, retryAfterMs: 20000 }, 429);
+    }
+    if (await usageCount(env) >= MONTHLY_CHAR_BUDGET) {
+      return json({ error: "monthly_budget", monthlyBudget: true,
+        message: "This month's character-fetch budget is spent — new lookups resume next month. Cached characters and the board still work." }, 503);
+    }
+    if (env.IMPORT_GATE) {
+      const g = await env.IMPORT_GATE.limit({ key: "enqueue" });
+      if (!g.success) return json({ error: "busy", message: "Lookups are backed up right now — this is temporary, try again in a moment.", rateLimited: true, retryAfterMs: 30000 }, 429);
+    }
+    await spaceUpstream(env);
+    const r = await loadCharacter(env, region, name, {
+      token: bearer(request), refresh: refresh, publish: publish
+    });
+    if (!r.ok) return json(r.body, r.status);
+    if (!r.cached) await bumpUsage(env, 1);
+    return json(characterResponse(r), 200);
+  }
+
   // A name we already know has no page. Don't re-queue it, and say why.
   if (!refresh && env.CHARS) {
     const miss = await env.CHARS.get(NOTFOUND_PREFIX + key);
     if (miss) {
       return json({ notFound: true, error: "no_such_character",
-        message: (typeof miss === "string" && miss.length > 3) ? miss : "lostark.bible has no page for that character." }, 404);
+        message: (typeof miss === "string" && miss.length > 3) ? miss : noSuchMsg(region, name) }, 404);
     }
   }
   if (degraded) {
-    return json({ error: "busy", message: "The site is very busy right now — please try again shortly.", rateLimited: true, degraded: true }, 429);
+    return json({ error: "busy", message: "The site is very busy right now — this is temporary, please try again shortly.", rateLimited: true, degraded: true }, 429);
   }
 
-  // THE CONSENT GATE. A character page is fetched only for a signed-in caller who
-  // owns that character. Signed-out visitors read the cache and the board (both
-  // already answered above) and go no further.
+  // No sign-in, no ownership check: any name may be looked up. The caller's own
+  // token rides along when they have one — better attribution, and it spreads the
+  // upstream load over many sign-ins instead of one secret — and is stored with
+  // the queue item so the drain fetches as the person who asked.
   const token = bearer(request);
-  if (!token) {
-    return json({ needSignIn: true, error: "not_signed_in",
-      message: "Sign in with lostark.bible to look up a character — this only reads characters on your own roster." }, 401);
-  }
-  const owner = await requireOwner(env, request);
-  if (owner.resp) return owner.resp;
-  const owns = ownsCharacter(owner.chars, region, name);
-  if (!owns.ok) {
-    return json({ error: "not_yours",
-      message: owns.sawName
-        ? "That name is on your roster but under a different region."
-        : "That character is not on the roster lostark.bible shows for your account. Only your own characters can be read here." }, 403);
-  }
 
   // Already queued — by this caller a moment ago, or by someone else. Report where
   // it is; never add it twice.
@@ -2374,9 +2477,8 @@ async function handleCharacter(env, request, u, ip, ctx, degraded) {
   }
 
   if (env.LOOKUP_THROTTLE) {
-    const k = (await sha256hex(owner.token)).slice(0, 24);
-    const t = await env.LOOKUP_THROTTLE.limit({ key: "look:" + k });
-    if (!t.success) return json({ error: "slow_down", message: "One character every few seconds, please.", rateLimited: true, retryAfterMs: 5000 }, 429);
+    const t = await env.LOOKUP_THROTTLE.limit({ key: lookupKey(ip) });
+    if (!t.success) return json({ error: "slow_down", message: "That is a lot of new characters at once — you have hit the lookup limit, which resets in under a minute. Characters already cached still load instantly.", rateLimited: true, retryAfterMs: 20000 }, 429);
   }
   if (await usageCount(env) >= MONTHLY_CHAR_BUDGET) {
     return json({ error: "monthly_budget", monthlyBudget: true,
@@ -2386,11 +2488,11 @@ async function handleCharacter(env, request, u, ip, ctx, degraded) {
   // it, however many people arrive at once.
   if (env.IMPORT_GATE) {
     const g = await env.IMPORT_GATE.limit({ key: "enqueue" });
-    if (!g.success) return json({ error: "busy", message: "The lookup queue is busy right now — try again in a moment.", rateLimited: true, retryAfterMs: 30000 }, 429);
+    if (!g.success) return json({ error: "busy", message: "The lookup queue is busy right now — this is temporary, try again in a moment.", rateLimited: true, retryAfterMs: 30000 }, 429);
   }
 
-  await enqueue(env, region, name, owner.token);
-  if (ctx && ctx.waitUntil) ctx.waitUntil(kickFetch(env, region, name, owner.token));
+  await enqueue(env, region, name, token);
+  if (ctx && ctx.waitUntil) ctx.waitUntil(kickFetch(env, region, name, token));
   return queuedResponse(env, region, name, { justQueued: true }, wantPos, cached);
 }
 
@@ -2401,15 +2503,20 @@ async function handleCharacter(env, request, u, ip, ctx, degraded) {
  * `since`, so the client's banner clears in seconds instead of on its 30s tick.
  * `{done:false}` on timeout means "reconnect", not "failed".
  *
- * PRE-CHECK BEFORE HOLDING. Astrogem's version held the connection and polled KV
- * for ANY name a stranger typed — about 34 KV reads per request, unauthenticated:
- * a read amplifier anyone could point at the namespace. So: the bearer and the
- * ownership check come first, then one cheap round of "is this lookup actually
- * pending", and only a genuinely pending lookup is worth 25 seconds of polling.
+ * NO SIGN-IN — a signed-out visitor queues lookups now, so a signed-out visitor
+ * must be able to watch them.
+ *
+ * PRE-CHECK BEFORE HOLDING, WHICH IS NOW THE WHOLE DEFENCE. Astrogem's version
+ * held the connection and polled KV for ANY name a stranger typed — about 34 KV
+ * reads per request: a read amplifier anyone could point at the namespace. The
+ * ownership check used to stand in front of that; the cheap pre-check below now
+ * stands there alone, and it is enough, because it costs three reads and holds
+ * the connection ONLY for a lookup that is genuinely pending — and what may be
+ * pending is capped site-wide by the enqueue gate.
  *
  * Every early answer pauses ~2s before returning, because the client reconnects
  * the instant it sees {done:false} — without the pause a not-pending name becomes
- * a tight loop against this Worker.
+ * a tight loop against this Worker. That pause is load-bearing; keep it.
  */
 async function handleWait(env, request, u) {
   const v = validateNameRegion(u.searchParams.get("region"), u.searchParams.get("name"));
@@ -2417,19 +2524,6 @@ async function handleWait(env, request, u) {
   const name = v.name, region = v.region, key = charKey(region, name);
   const since = parseInt(u.searchParams.get("since"), 10) || 0;
   if (!env || !env.CHARS) return json({ done: false }, 200);
-
-  const token = bearer(request);
-  if (!token) {
-    await sleep(2000);
-    return json({ done: false, needSignIn: true, error: "not_signed_in",
-      message: "Sign in with lostark.bible to watch a lookup." }, 401);
-  }
-  const owner = await requireOwner(env, request);
-  if (owner.resp) return owner.resp;
-  if (!ownsCharacter(owner.chars, region, name).ok) {
-    await sleep(2000);
-    return json({ done: false, error: "not_yours", message: "That character is not on your roster." }, 403);
-  }
 
   const isDone = function (rec) {
     return rec && Array.isArray(rec.stats) && rec.stats.length && (rec.pulledAt || 0) > since;
@@ -2439,7 +2533,7 @@ async function handleWait(env, request, u) {
   };
   const missJson = function (miss) {
     return json({ done: false, notFound: true, error: "no_such_character",
-      message: (typeof miss === "string" && miss.length > 3) ? miss : "lostark.bible has no page for that character." }, 200);
+      message: (typeof miss === "string" && miss.length > 3) ? miss : noSuchMsg(region, name) }, 200);
   };
 
   const [rec0, miss0, q0] = await Promise.all([
@@ -2471,7 +2565,16 @@ async function handleWait(env, request, u) {
 }
 
 /**
- * POST /import — the same gate, in bulk.
+ * POST /import — a whole list of characters, queued in one call.
+ *
+ * NO OWNERSHIP CHECK since 2026-08-11, and the Bearer is optional (see the
+ * header). It is still the caller's token that fetches when they have one.
+ *
+ * A SIGNED-OUT BATCH IS CAPPED HARDER: IMPORT_MAX_ANON instead of IMPORT_MAX. A
+ * signed-in import is the roster the user just loaded; a signed-out one is a list
+ * somebody typed, and it spends Shizu's own token to fetch. The per-IP throttle
+ * applies here too — one import costs one lookup, whatever its length — which it
+ * never did while a sign-in was the price of entry.
  *
  * Nothing is fetched inline any more: every accepted character is QUEUED and the
  * drain fetches them one at a time, three seconds apart. Fetching the first few
@@ -2479,25 +2582,33 @@ async function handleWait(env, request, u) {
  * next to the drain's — two lanes cannot honour one spacing floor between them.
  */
 async function handleImport(env, request, ip, ctx) {
-  const owner = await requireOwner(env, request);
-  if (owner.resp) return owner.resp;
+  const token = bearer(request);
 
   let body;
   try { body = await request.json(); } catch (e) { return json({ error: "bad_request", message: "Body must be JSON." }, 400); }
   const wanted = Array.isArray(body && body.characters) ? body.characters : null;
   if (!wanted) return json({ error: "bad_request", message: "Body must be { characters: [ … ] }." }, 400);
-  if (wanted.length > IMPORT_MAX) return json({ error: "too_many", message: "At most " + IMPORT_MAX + " characters per request." }, 400);
+  const cap = token ? IMPORT_MAX : IMPORT_MAX_ANON;
+  if (wanted.length > cap) {
+    return json({ error: "too_many", message: "At most " + cap + " characters per request" +
+      (token ? "." : " when signed out — sign in with lostark.bible to send up to " + IMPORT_MAX + ".") }, 400);
+  }
   const publish = body.publish !== false;
+
+  if (env.LOOKUP_THROTTLE) {
+    const t = await env.LOOKUP_THROTTLE.limit({ key: lookupKey(ip) });
+    if (!t.success) return json({ error: "slow_down", message: "That is a lot of new characters at once — you have hit the lookup limit, which resets in under a minute.", rateLimited: true, retryAfterMs: 20000 }, 429);
+  }
 
   // Site-wide cap on NEW page fetches, so the queue can never grow faster than
   // the drain empties it however many users arrive at once.
   if (env.IMPORT_GATE) {
     const g = await env.IMPORT_GATE.limit({ key: "import" });
-    if (!g.success) return json({ error: "busy", message: "Imports are backed up right now — try again in a minute.", rateLimited: true }, 429);
+    if (!g.success) return json({ error: "busy", message: "Imports are backed up right now — this is temporary, try again in a minute.", rateLimited: true }, 429);
   }
 
   const cfg = await getDrainConfig(env);
-  if (cfg.mode !== "run") return json({ unavailable: true, error: "unavailable", message: UNAVAILABLE_MSG + "." }, 503);
+  if (cfg.mode !== "run") return json({ unavailable: true, error: "unavailable", message: UNAVAILABLE_MSG + " — this is temporary." }, 503);
 
   const results = [];
   let queued = 0;
@@ -2506,8 +2617,6 @@ async function handleImport(env, request, ip, ctx) {
     const region = normRegion((isObj(raw) && raw.region) || body.region || "NA");
     if (!name || name.length > 40) { results.push({ name: String(raw).slice(0, 40), status: "bad_name" }); continue; }
     if (!region) { results.push({ name: name, status: "bad_region" }); continue; }
-    const owns = ownsCharacter(owner.chars, region, name);
-    if (!owns.ok) { results.push({ name: name, region: region, status: "not_yours" }); continue; }
 
     // A record inside the 7-day window needs no fetch at all, whatever the budget.
     const ck = charKey(region, name);
@@ -2520,14 +2629,14 @@ async function handleImport(env, request, ip, ctx) {
       results.push({ name: existing.name, region: region, status: "cached", pct: existing.score && existing.score.pct });
       continue;
     }
-    await enqueue(env, region, name, owner.token);
+    await enqueue(env, region, name, token);
     queued++;
     results.push({ name: name, region: region, status: "queued" });
   }
   // One kick, for the first queued character only — the rest are the drain's, at
   // its pace. Kicking each of them would be twenty fetches with no spacing at all.
   const first = results.find(function (r) { return r.status === "queued"; });
-  if (first && ctx && ctx.waitUntil) ctx.waitUntil(kickFetch(env, first.region, first.name, owner.token));
+  if (first && ctx && ctx.waitUntil) ctx.waitUntil(kickFetch(env, first.region, first.name, token));
   return json({ ok: true, results: results, queued: queued,
     drainPerMin: cfg.drainPerMin, queuedDrainEveryMinutes: 1 }, 200);
 }
@@ -2702,6 +2811,18 @@ async function handleAdminMetrics(env) {
       lastPull: lastWrite, lastSnapshot: builtAt,
       probeArmed: !!(env && env.BIBLE_TOKEN),        // boolean only, forever
       snapshotIntervalMs: SNAPSHOT_MIN_INTERVAL_MS
+    },
+    // IS EACH LIMITER ACTUALLY THERE? Every gate in this file is written
+    // `if (env.X) { … }`, which degrades silently to NO LIMIT when a binding is
+    // missing — and a CLI deploy replaces the whole binding set, so one is one
+    // typo away at any time. That was survivable while a sign-in stood in front of
+    // every lookup. It is not survivable now, so the admin page can see it.
+    rateLimits: {
+      HARD_CAP: !!(env && env.HARD_CAP),
+      LOOKUP_THROTTLE: !!(env && env.LOOKUP_THROTTLE),
+      LB_THROTTLE: !!(env && env.LB_THROTTLE),
+      GLOBAL_GATE: !!(env && env.GLOBAL_GATE),
+      IMPORT_GATE: !!(env && env.IMPORT_GATE)
     },
     // ---- the flat fields the first version answered, kept as fallbacks ----
     characters: chars, queued: items.length, dirty: dirty,

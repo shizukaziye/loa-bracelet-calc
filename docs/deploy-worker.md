@@ -163,12 +163,16 @@ says so.
 npx wrangler tail --config worker/wrangler.toml
 ```
 
-Then sign in on the site and click a character. The Worker will:
+Then type a character name on the site — signed in or not, since 2026-08-11 any
+name works (`ARCHITECTURE.md` §0.3). The Worker will:
 
-1. call `/api/oauth/rosters` itself with your token,
-2. refuse if the name is not on your own roster,
-3. fetch the character page,
-4. parse, score on the canonical default profile, store, and answer.
+1. answer from KV if the character is already cached (nothing upstream at all),
+2. otherwise queue it, and fetch the page with YOUR token if you are signed in and
+   with the `BIBLE_TOKEN` secret if you are not — never with no token,
+3. parse, score on the canonical default profile, store, and answer.
+
+The only route that still checks a roster is `POST /forget`: it deletes rows, so
+it has to know they are yours.
 
 ---
 
@@ -210,7 +214,7 @@ lostark.bible, unless you set `BIBLE_TOKEN` in a local `.dev.vars`.
 Everything that can be checked with no deploy at all is already a test:
 
 ```bash
-node tools/test-worker.mjs     # scoring parity vs the seed, the page parser, the consent gate
+node tools/test-worker.mjs     # scoring parity vs the seed, the page parser, the roster proof
 node verify.js                 # the model's own parity battery
 python verify.py               # the Python mirror
 ```

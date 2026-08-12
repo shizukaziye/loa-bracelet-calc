@@ -1,11 +1,20 @@
 # Fallback: reading a bracelet when `/api/oauth/rosters` has none
 
-**Status: BUILT (first pass, 2026-08-11), not deployed.** `worker/bracelet.js` +
-`worker/wrangler.toml` implement everything below, plus the consent gate and the
-canonical-default scorer. Deploy steps: `docs/deploy-worker.md`. Local checks:
+**Status: BUILT AND DEPLOYED, 2026-08-11.** `worker/bracelet.js` +
+`worker/wrangler.toml` implement everything below, plus the canonical-default
+scorer. Deploy steps: `docs/deploy-worker.md`. Local checks:
 `node tools/test-worker.mjs`.
 
-Three things came out different from the sketch below, all deliberate:
+> **THE OWNERSHIP CHECK BELOW IS NO LONGER IN FORCE — 2026-08-11.** Anyone may
+> look up any character by name, signed in or not. Shizu's permission from
+> molenzwiebel covers arbitrary character-page fetches at his discretion, provided
+> every request carries the token; the roster gate this document argues for was
+> stricter than that permission, and it came off. It survives on `POST /forget`
+> only, which deletes rows. The reasoning, the date and the revert condition are
+> in `ARCHITECTURE.md` §0.3 — read that before "fixing" anything here. The rest of
+> this file is kept as the record of the original design.
+
+Four things came out different from the sketch below, all deliberate:
 
 - The route is `GET /character?name=&region=` (`/bracelet` still works as an
   alias), and it also STORES a scored record, because the leaderboard needs one.
@@ -13,18 +22,24 @@ Three things came out different from the sketch below, all deliberate:
   returns it as `defaultScore`. The calculator scores the same bracelet on the
   user's own settings. Two numbers, both shown, never mixed.
 - `POST /import` (bulk) and `POST /forget` (a user removes their own characters)
-  were added; the leaderboard snapshot (`?list=1`) is stubbed at 501 pending the
-  architecture doc.
+  were added; the leaderboard snapshot (`?list=1`) is live.
+- The ownership check came off `/character` and `/import` (see the note above).
+  What holds the volume down instead: a per-IP lookup throttle, a site-wide
+  enqueue gate, the ≥3s spacing floor, a monthly budget and a 7-day cache.
 
 The rest of this document is the original design and still describes the shape.
 
 ## The rule that shapes everything
 
 The site owner banned scraping the raid statistics endpoints. Nothing here goes
-near them. This fetches ONE character page, on a click the signed-in user made,
-for a character on that user's own roster. No crawling, no sweeps, no queue that
-grows on its own. If it ever needs a rate limit to stay polite, it is already the
-wrong design.
+near them, and nothing ever will. This fetches ONE character page per click a
+human made. No crawling, no sweeps, no enumeration, no queue that grows on its
+own — that much is unchanged and is not negotiable.
+
+What DID change (2026-08-11): the click no longer has to come from the character's
+owner. The rate limits are therefore not a fig leaf over a bad design, they are
+the design — a paced queue, one page every three seconds, a site-wide cap on how
+fast the queue can grow, and a monthly ceiling.
 
 ## Why a Worker at all
 
@@ -47,7 +62,7 @@ GET https://bracelet-bible.<sub>.workers.dev/bracelet
 200 { name, region, grade?, bracelet: { type:"bracelet", stats:[…],
                                         numRerolls, numTicketRerolls } }
 404 { error:"no_bracelet" }            character exists, wears nothing there
-403 { error:"not_yours" }              the token's roster does not list that name
+403 { error:"not_yours" }              POST /forget only — reading needs no ownership
 429 { error:"slow_down" }
 ```
 
@@ -56,21 +71,34 @@ The browser hands the response's `bracelet.stats` straight to
 two steps `bible-import.js` already runs. Only the source of `stats` changes, so
 the client-side change is one function.
 
-### Ownership check, and why it is not optional
+### Ownership check — SUPERSEDED 2026-08-11
 
-The Worker MUST verify the caller owns the character before fetching anything:
-call `GET /api/oauth/rosters` with the caller's own token and check the name is
-in it. Without that check the Worker is a public scraper with a nice URL, which
-is the thing we were asked to stop doing. Cache the roster answer per token for
-a few minutes so the check costs one extra fetch, not two per click.
+The original argument ran: the Worker MUST call `GET /api/oauth/rosters` with the
+caller's token and refuse any name that is not on it, or it is "a public scraper
+with a nice URL".
+
+That over-read the permission. What molenzwiebel actually asked for is the TOKEN
+on every request, not a roster check — arbitrary character fetching is allowed at
+Shizu's discretion, and he has exercised it. The roster check now runs on
+`POST /forget` alone, where the question is "may you delete this row", not "may
+you read this page". Roster answers are still cached per token for five minutes,
+keyed by a SHA-256 of the token.
+
+Rate limits, the paced queue and the cache are what keep this polite now. See
+`ARCHITECTURE.md` §0.3 for the decision, its date, and what reverses it.
 
 ### Credentials
 
-- The caller's OAuth token is used for the ownership check ONLY. It arrives in
-  the Authorization header and is never logged or stored.
-- The page fetch uses `BIBLE_TOKEN`, the sanctioned token, as a Worker secret
-  (`wrangler secret put BIBLE_TOKEN`). It never appears in source — this repo is
-  public. Same arrangement as astrogem.
+- The caller's OAuth token, when they send one, fetches the page — the pull is
+  then attributable to the human who asked, and the load spreads over many
+  sign-ins instead of landing on one secret. It arrives in the Authorization
+  header and is never logged or stored.
+- `BIBLE_TOKEN`, the sanctioned token, is a Worker secret
+  (`wrangler secret put BIBLE_TOKEN`). It carries every signed-out lookup, the
+  cron drain, and one retry when a caller's token turns out to be stale. It never
+  appears in source — this repo is public. Same arrangement as astrogem.
+- **Neither token, no request.** A tokenless fetch is the actual violation, so
+  `fetchCharacterPage` returns 503 rather than send one.
 
 ## Parsing the page
 
@@ -108,10 +136,13 @@ array.
 
 ## Limits
 
-- `[[ratelimits]]` in `wrangler.toml`: one lookup per 10 s per caller, 20 per
-  hour. Generous for a human clicking a character, useless for a crawler.
-- Cache each character's parsed bracelet in KV for an hour. A user who reloads
-  the page or compares two characters must not cause two page fetches.
+- `[[ratelimits]]` in `wrangler.toml`, as built: `HARD_CAP` 60/60s per IP,
+  `LOOKUP_THROTTLE` 3 NEW characters per minute per IP, `IMPORT_GATE` 10 enqueues
+  a minute site-wide, `GLOBAL_GATE` 1000/60s shared. Generous for a human clicking
+  a character, useless for a crawler.
+- Cache each character's parsed bracelet in KV for seven days, and serve a cached
+  record at any age. A cached character costs nothing upstream, so a user who
+  reloads or compares two characters causes no page fetch at all.
 - CORS allowlist, not `*`: the GitHub Pages origin, the loseii origins, and a
   localhost regex — stamped once in `fetch()`, the way astrogem does it.
 - `EU` is `CE` in this API. Reject anything that is not `NA` or `CE` rather than

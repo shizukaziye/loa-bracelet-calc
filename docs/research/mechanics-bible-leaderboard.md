@@ -171,9 +171,14 @@ https://lostark.bible/help/oauth-api. Facts:
   while the grant lives. Scope grants are cumulative.
 - Scopes: `identify`, `rosters` (linked rosters + non-hidden characters), `logs`
   (`GET /api/oauth/logs/{name}?region=NA|CE`, region REQUIRED, `CE` = EU Central).
-- **`/api/oauth/rosters` response shape is undocumented; whether it includes bracelet
-  data is UNKNOWN — probe with a real token before designing around it.** Fallback:
-  rosters → character names → worker fetches character pages (payload above).
+- `/api/oauth/rosters` shape is now KNOWN — `docs/research/oauth-rosters-shape.md`.
+  It is an INDEX and carries no bracelet, so the character-page fetch is the only
+  way to a bracelet.
+- **Character pages may be fetched for ANY name, not just the caller's own** —
+  Shizu's discretion, molenzwiebel confirmed 2026-08-11, provided every request
+  carries the token. `rosters` is now used only to prove ownership before a
+  `POST /forget` deletes a row. See `ARCHITECTURE.md` §0.3 for what would reverse
+  that.
 - **One app per account.** The account's app is "Loseii Astrogem Calculator"
   (prod client `22zuv73nnkcgczoxitokvo2q6u`, dev `onwc5iva725mxhak2dxq3ikjti`).
   The bracelet tool must REUSE this app — add its prod URL to the prod client's

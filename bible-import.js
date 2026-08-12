@@ -12,8 +12,8 @@
  *                                              riding at the END of the mode row
  *   renderFavRow()       -> renderFavRow()     one row per saved character: ★ to
  *                                              unsave, class icon, name, region badge
- *   runPull()            -> runPull()          the five branches: unavailable ·
- *                                              needSignIn · data · queued · error
+ *   runPull()            -> runPull()          the four branches: unavailable ·
+ *                                              data · queued · error
  *   startQueueWatch()    -> startQueueWatch()  the three mechanisms — a 1s local
  *                                              countdown at the drain rate, a 30s
  *                                              server re-sync, and a /wait long poll
@@ -57,6 +57,15 @@
  * NETWORK RULE, ABSOLUTE. The browser NEVER fetches a lostark.bible character page.
  * The only direct calls to that host are BibleOAuth's /oauth/* and /api/oauth/* with
  * the Bearer header. Raid statistics are never touched.
+ *
+ * SIGNING IN IS OPTIONAL, SINCE 2026-08-11. Anyone can type a name and get a
+ * bracelet; the Worker fetches the page with the visitor's own token when there is
+ * one and with its own secret when there is not. Signing in still buys two real
+ * things — "Load my characters" fills the saved grid in one click, and the pull is
+ * attributed to the human who asked for it rather than to Shizu's secret — so the
+ * button stays. It must never be a WALL: no branch here may refuse a lookup for
+ * want of a sign-in. Why that is the policy, and what would reverse it, is in
+ * worker/bracelet.js's header and docs/design/ARCHITECTURE.md §0.3.
  *
  * THE SHAPE PROBLEM (still true for the roster payload). /api/oauth/rosters is an
  * INDEX — name, class, ilvl, lastUpdate, with region on the ROSTER — so nothing here
@@ -762,11 +771,19 @@
     seed: seedIndex
   };
 
-  /** Worker error codes -> the message kinds msgHtml() knows how to word. */
+  /**
+   * Worker error codes -> the message kinds msgHtml() knows how to word.
+   *
+   * `not_yours` no longer comes back from a lookup — nothing is refused for not
+   * being yours any more. It survives here for POST /forget, which still proves
+   * ownership before it deletes a row, and for any cached client talking to a
+   * newer Worker.
+   */
   function workerErrorKind(status, code) {
     if (code === "not_yours") return "notyours";
     if (code === "no_bracelet") return "nobracelet";
     if (code === "no_such_character") return "nopage";
+    if (code === "busy" || code === "unavailable" || code === "monthly_budget") return "busy";
     if (code === "slow_down" || status === 429) return "slowdown";
     if (code === "not_signed_in" || code === "bad_token" || status === 401) return "expired";
     return "worker";
@@ -973,23 +990,30 @@
     if (state.error) {
       var e = state.error, t;
       if (e.kind === "expired") {
-        t = "Your lostark.bible pass ran out. Sending you back to sign in — it should come straight back without asking anything.";
+        t = "Your lostark.bible pass ran out. Sending you back to sign in — it should come straight back without asking anything. " +
+          "Lookups do not need it, so you can also carry on signed out.";
       } else if (e.kind === "reauth-failed") {
-        t = "Signing back in did not take. Use the button above to start the sign-in again.";
+        t = "Signing back in did not take. Use the button above to start the sign-in again — lookups work signed out too.";
       } else if (e.kind === "noworker") {
         t = "Live lookups need our lostark.bible fetch service, which is not deployed for this build yet — " +
           "so " + esc(e.who || "that character") + " cannot be fetched. The characters listed on the right are baked " +
           "into this build and load instantly; pick any of them.";
       } else if (e.kind === "notyours") {
-        t = "lostark.bible would not confirm that " + esc(e.who || e.detail || "that character") +
-          " is on your roster, so nothing was fetched. Only characters your own account shows can be read here — " +
-          "check the character is not hidden on lostark.bible, and that its roster is linked.";
+        // Only POST /forget can still produce this: deleting a row proves the row
+        // is yours. A LOOKUP is never refused for this reason — see the header.
+        t = "Taking " + esc(e.who || e.detail || "that character") + " off the board has to be done by its owner, " +
+          "so it needs a sign-in that shows the character on your roster. Looking the character up needs nothing.";
       } else if (e.kind === "nopage") {
-        t = "lostark.bible has no character page for " + esc(e.who || "that character") + " yet. " +
-          "Visit the character on lostark.bible once so their profile syncs, then try again.";
+        t = "No character called " + esc(e.who || "that one") + " came back on that region. Check the spelling, " +
+          "or try the other region. A character hidden on lostark.bible cannot be read either — and a brand-new " +
+          "one may need visiting on lostark.bible once so their profile syncs.";
       } else if (e.kind === "slowdown") {
-        t = "That is a few characters in quick succession — give it a few seconds and click again. " +
-          "The limit exists so this tool stays a welcome guest on lostark.bible.";
+        t = "That is a lot of new characters at once, and you have hit the lookup limit — it resets in under a minute. " +
+          "Characters already on the board are free and instant meanwhile. The limit is what keeps this tool a welcome " +
+          "guest on lostark.bible.";
+      } else if (e.kind === "busy") {
+        t = (e.detail ? esc(e.detail) : "New lookups are paused for a moment while the queue catches up.") +
+          " This is temporary — cached characters and the board still load.";
       } else if (e.kind === "worker") {
         t = "The import service could not be reached" + (e.detail ? " (" + esc(e.detail) + ")" : "") +
           ". Your bracelet is fine — try again in a minute, or pick a character on the right.";
@@ -1034,7 +1058,8 @@
         "Cached characters still work.</span>";
       return;
     }
-    el.innerHTML = "Cached characters are free &amp; instant · new characters: <b>~1 lookup / 5s</b>" +
+    el.innerHTML = "Any character, no sign-in needed · cached ones are free &amp; instant · " +
+      "new ones: <b>3 a minute</b>" +
       (WORKER_URL ? "" : " · live lookups need the fetch service, which is not deployed yet");
   }
 
@@ -1411,23 +1436,19 @@
         setPullStatus(d.message || d.error || "Lookups are temporarily unavailable.", "err");
         return;
       }
-      // 2) a fresh pull needs the visitor's own lostark.bible token
-      if (d.needSignIn || d.error === "not_signed_in") {
-        renderLookupPanel("back");
-        setPullStatus("Sign in with lostark.bible to look up a character.", "err");
-        state.error = { kind: "expired", who: name };
-        renderMsg();
-        return;
-      }
+      // There is no sign-in branch here any more, on purpose. A signed-out visitor
+      // types a name and gets a bracelet; the Worker carries the pull on its own
+      // token. If a `needSignIn` ever reappears in an answer, that is a Worker
+      // regression to fix there — do NOT re-add a wall here.
 
-      // 3) data present — render it. A cached bracelet stays on screen whatever
+      // 2) data present — render it. A cached bracelet stays on screen whatever
       //    else the answer says; a queue banner layers on top.
       var rec = (d.bracelet && d.bracelet.stats && d.bracelet.stats.length) ? fromWorkerRecord(d) : null;
       var show = rec || (refreshingCached ? cur : null);
       var since = show ? (show.pulledAt || 0) : 0;
       if (show) showRecord(show);
 
-      // 4) queued
+      // 3) queued
       if (d.queued) {
         if (show) {
           setPullStatus((d.stale ? "Cached (stale) — refreshing " : "Cached — refreshing ") + name + "…", "");
@@ -1447,7 +1468,7 @@
         return;
       }
 
-      // 5) anything else is an error, and it gets its own sentence
+      // 4) anything else is an error, and it gets its own sentence
       var msg = d.message || d.error || "The import service returned an error.";
       setPullStatus(msg, "err");
       state.error = { kind: workerErrorKind(r.status, d.error), detail: msg, who: name };
@@ -1488,7 +1509,8 @@
     if (!WORKER_URL) return false;
     if (!rec || rec.cached !== true || rec.profile) return false;
     if (rec.source !== "bible") return false;                   // the seed never carries one
-    if (!(OA.signedIn && OA.signedIn())) return false;          // signed out, a re-pull would just fail
+    // No sign-in check: a re-pull works signed out now, and skipping it would
+    // leave a signed-out visitor with an empty deck for no reason.
     var k = charKey(rec.region, rec.name);
     if (autoRepulled[k]) return false;
     autoRepulled[k] = 1;
@@ -1661,38 +1683,27 @@
   // ------------------------------------------------------------------
 
   /**
-   * Two states, both ported from astrogem:
+   * ONE state now:
    *   "paused" -> amber: the Worker says it cannot read character pages right now.
-   *   "back"   -> blue: lookups work, but they run on a signed-in account's behalf.
-   *   null     -> hidden.
+   *   anything else -> hidden.
+   *
+   * The second state, "back", used to say lookups run on a signed-in account's
+   * behalf and offered a sign-in button. That was true of the old consent-gated
+   * build and is not true now — a signed-out visitor gets a bracelet — so it is
+   * gone rather than reworded, and no branch calls it. The sign-in button lives in
+   * the mode row, where it is an offer and not a gate.
    */
   function renderLookupPanel(stateName) {
     var el = $("bi-unavailable");
     if (!el) return;
-    if (stateName !== "paused" && stateName !== "back") { el.style.display = "none"; return; }
-    if (stateName === "paused") {
-      el.className = "bi-unavail amber";
-      el.innerHTML =
-        '<div class="bi-unavail-hd">&#9888;&#65039; Character lookups are temporarily unavailable</div>' +
-        '<div class="bi-unavail-bd">lostark.bible is not answering our fetch service right now, so looking a ' +
-        'character up by name will not work yet. <b>Characters already on the board still load instantly</b> — ' +
-        'they are on the right — and you can always type a bracelet in by hand.</div>';
-    } else {
-      el.className = "bi-unavail";
-      el.innerHTML =
-        '<div class="bi-unavail-hd">Character lookups run on your own account</div>' +
-        '<div class="bi-unavail-bd">lostark.bible asks that character pages be read on behalf of a signed-in ' +
-        'account. Sign in once and you can look up <b>the characters in your own roster</b> by name.</div>' +
-        '<ol class="bi-unavail-steps">' +
-        '<li>Click <b>Sign in with lostark.bible</b> and approve the access request.</li>' +
-        '<li>You land back here signed in — nothing else to set up.</li>' +
-        '<li>Pick a <b>region</b>, type a <b>character name</b> from your roster, and hit <b>Grade bracelet</b>.</li>' +
-        "</ol>" +
-        '<button type="button" class="bi-unavail-btn" id="bi-unavail-in">Sign in with lostark.bible</button>';
-    }
+    if (stateName !== "paused") { el.style.display = "none"; return; }
+    el.className = "bi-unavail amber";
+    el.innerHTML =
+      '<div class="bi-unavail-hd">&#9888;&#65039; Character lookups are temporarily unavailable</div>' +
+      '<div class="bi-unavail-bd">lostark.bible is not answering our fetch service right now, so looking a ' +
+      'character up by name will not work for the moment. <b>Characters already on the board still load ' +
+      'instantly</b> — they are on the right — and you can always type a bracelet in by hand.</div>';
     el.style.display = "";
-    var b = $("bi-unavail-in");
-    if (b) b.onclick = function () { try { OA.login(); } catch (e) {} };
   }
 
   // ------------------------------------------------------------------

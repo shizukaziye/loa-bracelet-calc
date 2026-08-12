@@ -27,10 +27,12 @@ compatibility_date = "2026-06-01"
 #     wrangler secret put <NAME>
 #
 #   BIBLE_TOKEN   The Bearer token lostark.bible's owners issued for this Worker.
-#                 Character pages 401 without a token. Live lookups prefer the
-#                 CALLER'S OWN OAuth token (so every upstream request is
-#                 attributable to a consenting human); this is the fallback and
-#                 the credential the cron drain uses, since the cron has no human.
+#                 Character pages 401 without a token, and this Worker will not
+#                 send a tokenless one. Live lookups prefer the CALLER'S OWN OAuth
+#                 token when they are signed in (better attribution, and the load
+#                 spreads across users); this secret carries every signed-out
+#                 lookup, the cron drain, and any retry after a caller's token
+#                 turns out to be stale. Without it, signed-out lookups cannot run.
 #   ADMIN_TOKEN   The admin credential for /admin/*, sent as the X-Admin-Token
 #                 request header. Fail-closed: while unset, nobody is admin.
 #                 Header only — never a URL, so it cannot leak via logs or Referer.
@@ -38,7 +40,9 @@ compatibility_date = "2026-06-01"
 # CHARS — one character record per key ("c:<REGION>:<name lowercased>"), holding
 # the raw lostark.bible bracelet payload plus its score at the CANONICAL DEFAULT
 # profile. Also carries the per-user roster cache (rk:<sha256 of the token>, 5
-# min — the token itself is never stored), the fetch queue (q:, whose VALUE holds
+# min — the token itself is never stored; POST /forget is the only route that
+# still reads a roster, to prove a deletion is the caller's own), the fetch queue
+# (q:, whose VALUE holds
 # the requester's token and whose METADATA never does), the not-found markers
 # (nf:), the feedback notes (fb:), the drain's own state (drain:, usage:) and the
 # leaderboard's dirty markers and gzipped snapshot (lb:). The Worker degrades
@@ -81,18 +85,27 @@ namespace_id = "2000"
 limit = 60
 period = 60
 
-# Per-USER character lookup throttle — keyed by a hash of the caller's OAuth
-# token, not the IP, so one person on two networks is still one person. ~1 fresh
-# character per 5s. Cached lookups never reach it.
+# Fresh-character lookup throttle, PER IP: 3 new characters a minute.
 #
-# POST /feedback shares this namespace under its own "fb:<ip>" key: feedback was
-# the one write path with nothing between it and the hard cap.
+# It used to be 2 per 10s keyed by a hash of the caller's OAuth token, which only
+# worked while a lookup required a sign-in. Since 2026-08-11 anyone may look up
+# any character (worker/bracelet.js header, ARCHITECTURE §0.3), so:
+#   - the key is the IP, because a signed-out visitor has no token to key on and
+#     keying the signed-in separately would hand anybody a second bucket for the
+#     price of signing out;
+#   - the rate is TIGHTER, from ~12/min down to 3/min, because a sign-in is no
+#     longer the price of entry and one IP should not be able to take a third of
+#     the drain's 10-a-minute all by itself.
+#
+# Cached characters never reach it — they cost nothing upstream and stay instant.
+# POST /import pays one hit per request whatever its length, and POST /feedback
+# shares the namespace under its own "fb:<ip>" key.
 [[ratelimits]]
 name = "LOOKUP_THROTTLE"
 namespace_id = "2002"
 [ratelimits.simple]
-limit = 2
-period = 10
+limit = 3
+period = 60
 
 # Leaderboard pulls (open to everyone, per IP): 3 a minute, against spam-refresh.
 [[ratelimits]]
