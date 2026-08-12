@@ -357,7 +357,7 @@
       dots += '<circle cx="' + fx(x, 1) + '" cy="' +
         (106 - lane * laneDy) + '" r="4.6" fill="' + fill + '" stroke="#0d1017" stroke-width="1.6">' +
         "<title>" + esc(e.name) + (e.tier ? " (" + e.tier + ")" : "") + " — " + fx(e.dmg, 2) +
-        "% (" + fx(e.pct, 1) + "% of best)</title></circle>";
+        " (score " + fx(e.pct, 1) + ")</title></circle>";
     }
 
     // the GROUP cuts, drawn to scale: this IS the methodology. One per letter
@@ -459,7 +459,10 @@
       var body = "";
       for (j = 0; j < mine.length; j++) {
         var dref = dr.by[mine[j].key];
-        var gp = (dref && dr.best > 0) ? dref.pct : null;
+        // The tick has to be on the BAR's scale (share of the #1 line), not the
+        // score's (best Epic = 100). Reading dref.pct put every tick in the wrong
+        // place and pinned anything over 100 to the far right.
+        var gp = (dref && dr.best > 0) ? dref.barPct : null;
         body += rowHTML(mine[j], grade, gp);
       }
       out += '<section class="tl-band">' +
@@ -567,9 +570,9 @@
       var word = Math.abs(dd) < 0.05 ? "the same place" : (dd > 0 ? "higher" : "lower");
       h += '<div class="tp-sec"><div class="tp-sec-h">Compared to the default character</div><div class="tp-grid">' +
         '<span class="tp-k">default</span><span class="tp-v">#' + pad2(dref.rank) + " &#183; " + fx(dref.dmg, 2) +
-        "% &#183; " + fx(dref.pct, 1) + '% of best <span class="tp-tier" style="background:' + dref.band.bg + ';color:' + dref.band.fg + '">' + dref.band.key + "</span></span>" +
+        "% &#183; score " + fx(dref.pct, 1) + ' <span class="tp-tier" style="background:' + dref.band.bg + ';color:' + dref.band.fg + '">' + dref.band.key + "</span></span>" +
         '<span class="tp-k">yours</span><span class="tp-v">#' + pad2(r.rank) + " &#183; " + fx(r.dmg, 2) +
-        "% &#183; " + fx(r.pct, 1) + "% of best</span>" +
+        "% &#183; score " + fx(r.pct, 1) + "</span>" +
         '<span class="tp-k">shift</span><span class="tp-v">' + (Math.abs(dd) < 0.05 ? "sits in " + word :
           (dd > 0 ? "+" : "") + fx(dd, 1) + "pp " + word + " for you") + "</span>" +
         "</div></div>";
@@ -706,7 +709,7 @@
       '<span class="tl-gl" data-gloss="The subrank this row sits in, for your current character: its damage as a percentage of the best line in this view, on the shared S+ to F- ladder.">rank</span>' +
       '<span class="tl-nm">Effect</span>' +
       '<span class="tl-vals">' + (view === "family" ? "Roll (mid)" : "Roll") + "</span>" +
-      '<span class="tl-bar">% of the best line</span>' +
+      '<span class="tl-bar" data-gloss="The bar is this line as a share of the #1 line. The vertical tick is where the SAME line sits for the default character — bar past the tick means the line is worth more to you than to an average build. Until you change something in Character, your profile IS the default, so the tick sits at the end of the bar.">% of the best line</span>' +
       '<span class="tl-score" data-gloss="Score for this line, with the best EPIC roll set to 100. A Legendary scores above 100 — beating a good Epic is exactly what that should look like.">Score</span>' +
       '<span class="tl-pct">Damage</span>' +
       "</div>";
