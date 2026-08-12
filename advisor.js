@@ -459,7 +459,20 @@
   }
 
   var lastSolve = null, lastKey = null, lastErr = null, solving = false;
-  var lastVerdict = null;
+  var lastVerdict = null, verdictSig = null;
+
+  /** What a verdict was judged against. It is only good for that exact bracelet. */
+  function braceletSig() { return JSON.stringify([S.grade, S.slots, S.rollsLeft, grantedLines(), fixedLines()]); }
+
+  /**
+   * The Calculator edits the granted rows by direct mutation — save(), no notify
+   * — so this tab cannot hear it happen. Anything that came back to this tab
+   * therefore re-checks: a verdict judged against some other bracelet is worse
+   * than no verdict.
+   */
+  function dropStaleVerdict() {
+    if (lastVerdict && verdictSig !== braceletSig()) { lastVerdict = null; verdictSig = null; }
+  }
 
   function solveError(e) {
     if (!e) return "solve failed";
@@ -1005,8 +1018,8 @@
       return api.send("advise", { current: lines, rolled: newSet, rollsLeft: S.rollsLeft - 1, ctxKey: lastKey });
     }).then(function (v) {
       setBusyVerdict(false);
-      if (v.verdict === "unknown") lastVerdict = { error: "The solver does not recognise one of those sets — check for a duplicate effect." };
-      else { v.newSet = newSet; v.locks = locks; lastVerdict = v; }
+      if (v.verdict === "unknown") { lastVerdict = { error: "The solver does not recognise one of those sets — check for a duplicate effect." }; verdictSig = null; }
+      else { v.newSet = newSet; v.locks = locks; lastVerdict = v; verdictSig = braceletSig(); }
       render();
     }, function (e) {
       setBusyVerdict(false);
@@ -1331,8 +1344,13 @@
     if (!e || !e.detail || e.detail.tab !== "advisor") return;
     init();
     claimDeck();
+    dropStaleVerdict();
     render();
-    if (dirty || !lastSolve) schedule(true);
+    // Always re-solve on activation, never only when `dirty`: the Calculator
+    // edits the bracelet's rows without notifying Profile, so this tab cannot
+    // know the bracelet moved. The shared LRU cache makes an unchanged bracelet
+    // a cache hit, so the honest thing is also the cheap one.
+    schedule(true);
   });
 
   init();
