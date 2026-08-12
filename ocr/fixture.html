@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<title>Bracelet reader — fixture bench</title>
+<!--
+  A bench, not a test suite. It draws the synthetic tooltip on a REAL canvas with
+  a REAL font and runs the whole reader over it, Tesseract included — the half
+  `node ocr/self-test.js` cannot reach, because Node has no font rendering and no
+  Tesseract here.
+
+  Open it over http (npm run serve, then /ocr/fixture.html). Tesseract comes from
+  a CDN, so it needs the network; without it the page still runs and every
+  text-derived field comes back flagged, which is the honest degradation.
+
+  It proves the pipeline works on anti-aliased text at a game-like size. It does
+  NOT prove anything about Lost Ark's own tooltip. Only a real screenshot can.
+-->
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body{padding:20px}
+  .bench{max-width:1200px;margin:0 auto}
+  canvas{max-width:100%;border:1px solid var(--border);border-radius:8px;margin:10px 0}
+  table{margin-top:10px}
+  .ok{color:var(--good)}.no{color:var(--bad)}.meh{color:var(--high)}
+  .bar{height:6px;border-radius:3px;background:var(--border);overflow:hidden;width:90px;display:inline-block;vertical-align:middle}
+  .bar>i{display:block;height:100%;background:var(--accent)}
+  pre{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:10px;overflow:auto;font-size:12px}
+  button{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:7px 12px;font:inherit;cursor:pointer}
+</style>
+</head><body>
+<div class="bench">
+  <h1>Bracelet reader — fixture bench</h1>
+  <p class="tag">A synthetic tooltip, drawn with a real font, read by the real pipeline.
+     Nothing here is evidence about the game's own tooltip.</p>
+  <div>
+    <label>seed <input id="seed" type="number" value="7" style="width:70px"></label>
+    <label>grade
+      <select id="grade"><option value="ancient">ancient</option><option value="relic">relic</option></select>
+    </label>
+    <label>brightness <input id="bright" type="number" step="0.05" value="1" style="width:70px"></label>
+    <label>font size <input id="fs" type="number" value="15" style="width:60px"></label>
+    <button id="go">Draw and read</button>
+    <span id="status" class="tag"></span>
+  </div>
+  <canvas id="cv"></canvas>
+  <div id="out"></div>
+  <details><summary>debug</summary><pre id="dbg"></pre></details>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+// Loaded with a fresh stamp every time: this is a bench, and reading yesterday's
+// parser out of the browser cache is the classic way to debug the wrong file.
+(function () {
+  var stamp = Date.now();
+  var files = ["../data/bracelet-data.js", "engine.js", "layout.js", "lexicon.js",
+    "text-reader.js", "tooltip-engine.js", "fixture.js"];
+  files.forEach(function (f) {
+    document.write('<script src="' + f + '?v=' + stamp + '"><\/script>');
+  });
+})();
+</script>
+<script>
+"use strict";
+function $(id) { return document.getElementById(id); }
+function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+
+function confCell(c) {
+  if (c == null) return "<td>-</td>";
+  var cls = c >= 0.8 ? "ok" : (c >= 0.5 ? "meh" : "no");
+  return '<td class="' + cls + '">' + c.toFixed(2) +
+    ' <span class="bar"><i style="width:' + Math.round(c * 100) + '%"></i></span></td>';
+}
+
+function run() {
+  var seed = parseInt($("seed").value, 10) || 1;
+  var b = BraceletFixture.makeBracelet({ seed: seed, grade: $("grade").value });
+  var fx = BraceletFixture.renderToCanvas(b, {
+    brightness: parseFloat($("bright").value) || 1,
+    fontSize: parseInt($("fs").value, 10) || 15
+  });
+  var cv = $("cv");
+  cv.width = fx.canvas.width; cv.height = fx.canvas.height;
+  cv.getContext("2d").drawImage(fx.canvas, 0, 0);
+
+  $("status").textContent = "reading…";
+  var t0 = performance.now();
+  BraceletTooltipEngine.engine.parseScreenshot(cv).then(function (res) {
+    var ms = Math.round(performance.now() - t0);
+    $("status").textContent = "read in " + ms + " ms (" +
+      (BraceletTextReader.getReader().name) + ")";
+    var truthRows = b.lines.map(function (l) {
+      return l.cat === "basic" ? "basic:" + l.family + " " + l.value
+        : "sp:" + l.family + " " + l.tier;
+    });
+    var readRows = res.patch.rows.map(function (r) {
+      return r.fam + (r.fam.indexOf("sp:") === 0 ? " " + r.tier : (r.value != null ? " " + r.value : ""));
+    });
+    var h = "<h2>What it read</h2><table><tr><th>field</th><th>truth</th><th>read</th><th>confidence</th></tr>";
+    function row(label, want, got, key) {
+      var same = String(want) === String(got);
+      h += "<tr><td>" + esc(label) + "</td><td>" + esc(want) + '</td><td class="' +
+        (same ? "ok" : "no") + '">' + esc(got) + "</td>" + confCell(res.confidence[key]) + "</tr>";
+    }
+    row("grade", b.grade, res.patch.grade, "grade");
+    row("granted slots", b.lines.length, res.patch.slots, "slots");
+    row("rolls left", b.rollsLeft, res.patch.rollsLeft, "rollsLeft");
+    b.traits.forEach(function (t) {
+      var k = t.family === "swiftness" ? "swift" : t.family;
+      row("trait " + k, t.value, res.patch.traits[k] ? res.patch.traits[k].v : "-", "traits." + k);
+    });
+    for (var i = 0; i < Math.max(truthRows.length, readRows.length); i++) {
+      row("row " + i, truthRows[i] || "-", readRows[i] || "-", "rows." + i + ".fam");
+    }
+    var lockTruth = b.lines.map(function (l, ix) { return l.locked ? ix : -1; }).filter(function (x) { return x >= 0; });
+    row("locked rows", lockTruth.join(",") || "none", res.patch.lockedIdx.join(",") || "none", "rows.0.locked");
+    h += "</table>";
+    var flagged = Object.keys(res.confidence).filter(function (k) { return res.confidence[k] < 0.8; });
+    h += "<p>" + flagged.length + " field" + (flagged.length === 1 ? "" : "s") +
+      " below the 0.8 threshold: <code>" + esc(flagged.join(", ") || "none") + "</code></p>";
+    if (res.notes.length) h += "<h2>Notes</h2><ul>" + res.notes.map(function (n) { return "<li>" + esc(n) + "</li>"; }).join("") + "</ul>";
+    $("out").innerHTML = h;
+    $("dbg").textContent = JSON.stringify(res.debug, null, 1);
+  }).catch(function (e) {
+    $("status").textContent = "failed: " + (e && e.message || e);
+    console.error(e);
+  });
+}
+$("go").addEventListener("click", run);
+run();
+</script>
+</body></html>
