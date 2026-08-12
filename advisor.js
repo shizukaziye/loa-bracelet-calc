@@ -5,6 +5,10 @@
  * per-line breakdown. This tab says what to do next, the way the astrogem
  * calculator splits Grader from Advisor:
  *
+ *   CHARACTER  name the character to advise on — type-ahead over the board
+ *              snapshot, or one click on a saved ★. The control is
+ *              char-picker.js (the Tier List mounts the same one); this tab
+ *              only gives it a box beside the intake zone.
  *   INTAKE     drop / paste a screenshot, or "Read screen now" — the reader
  *              itself is advisor-capture.js, which plugs in through
  *              window.BraceletAdvisor (see THE CAPTURE SEAM below). Everything
@@ -82,7 +86,11 @@
  * strip with a count and an accent marker, exactly astrogem's pattern, and the
  * mark clears for good when the user confirms or edits that field.
  *
- * NO NETWORK. This tab fetches nothing, from anywhere.
+ * NO NETWORK OF ITS OWN. This file opens no connection to anything. The character
+ * picker's two needs — the board snapshot and a character lookup — both go through
+ * bible-import.js (BraceletImport.seed / .loadCharacter), which already owns the
+ * Worker call, the queue and the one absolute rule: the browser never fetches a
+ * lostark.bible page itself.
  */
 (function () {
   "use strict";
@@ -541,6 +549,16 @@
       "#tab-advisor .av-lead b{color:var(--text);font-weight:600}" +
       // ---- intake ----
       "#tab-advisor .av-intake{margin-bottom:14px}" +
+      // The character picker and the screenshot zone answer the same question —
+      // "which bracelet am I advising on?" — so they share one row, and stack on
+      // a phone rather than squeezing.
+      "#tab-advisor .av-intakegrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:start}" +
+      "@media(max-width:760px){#tab-advisor .av-intakegrid{grid-template-columns:1fr}}" +
+      // The picker itself is char-picker.js's; this is only the frame it sits in.
+      // Styled by id, because CharPicker.mount() owns the host's class list.
+      "#av-who{border:1px solid var(--border);border-radius:10px;background:var(--panel);padding:11px 12px;min-width:0}" +
+      "#tab-advisor .av-nopicker{color:var(--dim);font-size:12.5px;line-height:1.55}" +
+      "#tab-advisor .av-nopicker b{color:var(--text)}" +
       "#tab-advisor .av-drop{border:2px dashed var(--border);border-radius:10px;padding:14px 12px;text-align:center;" +
         "color:var(--dim);cursor:default;transition:border-color .15s,background .15s;background:var(--panel2);font-size:12.5px}" +
       "#tab-advisor .av-drop.drag{border-color:var(--accent);background:rgba(102,199,255,.08);color:var(--text)}" +
@@ -632,6 +650,42 @@
   }
 
   // ------------------------------------------------------------------
+  // the character picker
+  // ------------------------------------------------------------------
+  //
+  // char-picker.js owns it, and the Tier List mounts the same control — one
+  // type-ahead over one board snapshot, so the two cannot drift. This file only
+  // gives it a box beside the screenshot zone: both answer the same question,
+  // "which bracelet am I advising on?", so they belong on one row.
+  //
+  // It loads nothing itself (BraceletImport.loadCharacter is the one load path —
+  // see the module header). A pick lands in the shared state, Profile notifies,
+  // and onProfileChange re-renders and re-solves, so the headline cards, the mask
+  // table and the cut flow all follow.
+  //
+  // It leaves the SCORING MODE alone, deliberately. On this tab that costs
+  // nothing: a new character brings a new bracelet, and the advice is about that
+  // bracelet whichever settings it is scored on. The lead line says which.
+
+  var whoCtl = null;
+
+  function mountWho() {
+    var host = $("av-who");
+    if (!host || whoCtl) return;
+    if (!window.CharPicker || typeof window.CharPicker.mount !== "function") {
+      host.innerHTML = '<div class="av-nopicker"><b>Character lookup did not load.</b> ' +
+        "char-picker.js is not on the page, so this tab cannot name a character. " +
+        "Load one in the Calculator and come back — everything else here works.</div>";
+      return;
+    }
+    whoCtl = window.CharPicker.mount(host, {
+      title: "Character",
+      emptyText: "No character loaded — the advice below is about whatever bracelet the Calculator holds."
+    });
+  }
+
+
+  // ------------------------------------------------------------------
   // the intake zone
   // ------------------------------------------------------------------
 
@@ -642,11 +696,14 @@
   function intakeMarkup() {
     return '' +
       '<div class="av-intake">' +
-      '  <div class="av-drop" id="av-drop">' +
-      '    <span class="hint" id="av-hint"></span>' +
-      '    <img id="av-preview" class="av-preview" alt="screenshot preview">' +
-      '    <span class="cap">drop or paste a new screenshot to replace · click to expand / minimize</span>' +
-      '    <div class="av-readbtns" id="av-readbtns"></div>' +
+      '  <div class="av-intakegrid">' +
+      '    <div id="av-who"></div>' +
+      '    <div class="av-drop" id="av-drop">' +
+      '      <span class="hint" id="av-hint"></span>' +
+      '      <img id="av-preview" class="av-preview" alt="screenshot preview">' +
+      '      <span class="cap">drop or paste a new screenshot to replace · click to expand / minimize</span>' +
+      '      <div class="av-readbtns" id="av-readbtns"></div>' +
+      '    </div>' +
       '  </div>' +
       '  <div class="av-status" id="av-status"></div>' +
       '  <div class="av-bar" id="av-bar"><i></i></div>' +
@@ -1314,6 +1371,7 @@
     bind(pane);
     claimDeck();
     renderIntake();
+    mountWho();
     render();
     P.onChange(onProfileChange);
     schedule(true);
@@ -1344,6 +1402,7 @@
     if (!e || !e.detail || e.detail.tab !== "advisor") return;
     init();
     claimDeck();
+    mountWho();
     dropStaleVerdict();
     render();
     // Always re-solve on activation, never only when `dirty`: the Calculator

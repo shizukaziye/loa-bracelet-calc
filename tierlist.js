@@ -34,7 +34,19 @@
  * it back when the Calculator is selected. Nothing to release — the last
  * mount() wins, and only one tab is ever visible.
  *
- * NO NETWORK. This tab fetches nothing, from anywhere.
+ * THE CHARACTER PICKER. One line above the controls, mounted from char-picker.js
+ * — the same control the Advisor mounts, over the same board snapshot, so the two
+ * cannot drift. Picking someone loads them into the shared state: their bracelet,
+ * their gear, everywhere. It does NOT change what this table is RANKED on. That
+ * stays the user's own choice on the "Scoring on" toggle in the controls below,
+ * and the default is the canonical default profile whether or not anyone is
+ * loaded. The picker's one-line note says which side you are on and where the
+ * switch is.
+ *
+ * NO NETWORK OF ITS OWN. This file opens no connection. The picker's board
+ * snapshot and its character lookups both go through bible-import.js, which owns
+ * the Worker call and the rule that the browser never fetches a lostark.bible
+ * page itself.
  */
 (function () {
   "use strict";
@@ -836,6 +848,11 @@
       "#tab-tierlist .tl-copy{color:var(--dim);font-size:13px;line-height:1.6;max-width:78ch;margin:0 0 14px}" +
       "#tab-tierlist .tl-copy p{margin:0 0 8px}#tab-tierlist .tl-copy b{color:var(--text);font-weight:600}" +
       "#tab-tierlist .tl-copy i{font-style:italic;color:var(--text)}" +
+      // the character picker's one line — its own styles are char-picker.js's, so
+      // this is only the room it takes above the controls
+      "#bctl-who{margin:14px 0 0}" +
+      "#tab-tierlist .tl-nopicker{color:var(--dim);font-size:12.5px;line-height:1.55}" +
+      "#tab-tierlist .tl-nopicker b{color:var(--text)}" +
       "#tab-tierlist .tl-ctl{display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin:14px 0 4px}" +
       "#tab-tierlist .tl-seg,#tab-tierlist .tl-presets{display:flex;gap:6px;align-items:center;flex-wrap:wrap}" +
       "#tab-tierlist .tl-plabel{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-right:2px}" +
@@ -960,6 +977,9 @@
     injectStyle();
     pane.innerHTML =
       '<div id="' + DECK_HOST + '"></div>' +
+      // Its OWN host, outside #bctl-controls: render() rewrites that block on every
+      // input event, which would blow the search box away mid-keystroke.
+      '<div id="bctl-who"></div>' +
       '<div id="bctl-controls"></div>' +
       '<div class="tl-strip" id="bctl-strip"></div>' +
       '<div id="bctl-bands"></div>' +
@@ -968,8 +988,51 @@
     bind(pane);
     wirePop();
     claimDeck();
+    mountWho();
     P.onChange(function () { schedule(); });     // every change, no debounce: scoring is free
     render();
+  }
+
+  // ------------------------------------------------------------------
+  // the character picker
+  // ------------------------------------------------------------------
+  //
+  // char-picker.js's control, mounted in one line. Picking someone loads their
+  // bracelet and gear into the shared deck and Profile notifies, so the table
+  // re-ranks through the same onChange the sliders use.
+  //
+  // It leaves the SCORING MODE alone on purpose (Shizu, 2026-08-11): the table
+  // stays on the canonical default profile until the user asks for the
+  // character's own settings, exactly as the Calculator behaves. Seeing that
+  // choice is the only thing the note below has to do, and it does it in a line.
+
+  var whoCtl = null;
+
+  function mountWho() {
+    var host = $("bctl-who");
+    if (!host || whoCtl) return;
+    if (!window.CharPicker || typeof window.CharPicker.mount !== "function") {
+      host.innerHTML = '<div class="tl-nopicker"><b>Character lookup did not load.</b> ' +
+        "char-picker.js is not on the page. Load a character in the Calculator instead — " +
+        "this table follows whatever the deck holds.</div>";
+      return;
+    }
+    whoCtl = window.CharPicker.mount(host, {
+      layout: "row",
+      title: "Character",
+      emptyText: "None loaded — ranked on the default profile.",
+      note: whoNote
+    });
+  }
+
+  /** One line: which profile the table is ranked on, and where the switch is. */
+  function whoNote() {
+    var c = P.get().char;
+    if (!c || !c.name) return "";
+    return P.onDefaults()
+      ? "Ranked on the <b>default profile</b> — " + esc(c.name) +
+        "&rsquo;s own stats are one click away on the <b>Scoring on</b> toggle below."
+      : "Ranked on <b>" + esc(c.name) + "&rsquo;s stats</b> — the <b>Scoring on</b> toggle below goes back to the defaults.";
   }
 
   /**
@@ -985,6 +1048,7 @@
     if (!e || !e.detail || e.detail.tab !== "tierlist") return;
     init();
     claimDeck();
+    mountWho();          // char-picker.js may have arrived after init ran
     schedule();
   });
 
