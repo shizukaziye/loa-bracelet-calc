@@ -52,6 +52,7 @@
   <!-- Tab bar -->
   <div class="tabbar" id="tabbar">
     <button class="tab active" data-tab="calculator" onclick="selectTab('calculator')">Calculator</button>
+    <button class="tab" data-tab="advisor" onclick="selectTab('advisor')">Advisor</button>
     <button class="tab" data-tab="tierlist" onclick="selectTab('tierlist')">Tier List</button>
     <button class="tab" data-tab="leaderboard" onclick="selectTab('leaderboard')">Leaderboard</button>
     <button class="tab" data-tab="method" onclick="selectTab('method')">Method</button>
@@ -60,6 +61,7 @@
 
   <!-- Tab panes -->
   <section id="tab-calculator" class="tabpane active"></section>
+  <section id="tab-advisor" class="tabpane"></section>
   <section id="tab-tierlist" class="tabpane">
     <div class="placeholder"><b>Tier list</b>Not built yet. It will rank every effect family and every roll by the same % damage figure the Calculator reports, live against your own settings.</div>
   </section>
@@ -80,6 +82,7 @@
 // they exist: a missing file fails its <script> and the loader skips it, so each
 // pane simply keeps the placeholder until the file lands.
 var LAZY_TABS = {
+  advisor: ['advisor.js?v=1'],
   tierlist: ['tierlist.js?v=15'],
   leaderboard: ['leaderboard.js?v=6'],
   method: ['method.js?v=2'],
@@ -130,7 +133,7 @@ function selectTab(name){
 <script src="favorites.js?v=1"></script>
 <script src="profile.js?v=7"></script>
 <script src="subrank.js?v=2"></script>
-<script src="app.js?v=21"></script>
+<script src="app.js?v=22"></script>
 <!-- lostark.bible import. AFTER app.js: bible-import.js mounts into the Bracelet
      panel app.js has just built, and hands what it decodes to
      window.BraceletApp.applyImport. Both degrade to nothing if the site is down. -->

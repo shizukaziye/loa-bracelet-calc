@@ -1469,9 +1469,11 @@
       return;
     }
     var lines = grantedLines();
+    // The roll ADVICE and the cut flow moved to the Advisor tab (advisor.js).
+    // The Calculator keeps what a bracelet IS — its lines, score, worth and
+    // breakdown; the Advisor owns what to DO about it. The advisorHtml/cutHtml
+    // machinery below is now unreachable and can be deleted in a tidy-up pass.
     box.innerHTML = cardsHtml(lastSolve, profile) +
-      advisorHtml(lastSolve, profile, lines) +
-      cutHtml(lastSolve, profile, lines) +
       breakdownHtml(profile, lines, lastSolve);
     paintCharStats();          // the banner's headline stats read the same solve
   }
@@ -2000,6 +2002,19 @@
     },
     /** Show a character's header without touching the bracelet. */
     setCharacter: function (c) { P.setCharacter(c); renderCharHeader(); },
+
+    /**
+     * The shared solver, for advisor.js.
+     *
+     * One worker and ONE DP context. advise() answers off the context the worker
+     * is currently holding, so a second worker would not merely double a
+     * three-second solve — it would judge the cut against a different bracelet.
+     */
+    solver: {
+      solveState: solveState,                        // (profile, granted, rolls, opts) -> Promise
+      send: send,                                    // (cmd, payload) -> Promise; "advise" rides this
+      ctxKey: function () { return workerCtxKey; }   // whose DP the worker holds
+    },
 
     /**
      * The two economy defaults, once the whole import has landed.
