@@ -871,6 +871,8 @@
       "@media(max-width:520px){#bc-import .bi-pullctl .fld-name{flex:1 1 160px;width:auto}}" +
       "#bc-import .bi-pullbtns{display:flex;gap:10px;flex-wrap:wrap;align-items:center}" +
       "#bc-import .bi-freenote{font-size:12px;color:var(--dim);margin-top:6px;line-height:1.5}" +
+      // Empty in the healthy state now — it must not keep its margin.
+      "#bc-import .bi-freenote:empty{display:none}" +
       "#bc-import .bi-freenote b{color:var(--text)}" +
       "#bc-import .bi-freenote .bi-cap{color:#e0683c;font-weight:600}" +
       "#bc-import .bi-msg{color:var(--dim);font-size:11.5px;margin-top:6px;max-width:74ch;line-height:1.55}" +
@@ -951,6 +953,8 @@
       "#bc-loadouts .bi-axispill i{font-style:normal;color:var(--good);margin-left:4px}" +
       "#bc-loadouts .bi-axispill.active i{color:#06121f}" +
       "#bc-loadouts .bi-axisnote{font-size:11px;color:var(--dim)}" +
+      // A flex item, so an empty one still costs the row's gap.
+      "#bc-loadouts .bi-axisnote:empty{display:none}" +
       "</style>";
   }
 
@@ -964,16 +968,14 @@
     return styleBlock() +
       '<div class="bi-unavail" id="bi-unavailable" style="display:none"></div>' +
       '<div class="inputs" id="bi-inputs">' +
-      '  <div class="ihdr"><span>Character — pull a bracelet from lostark.bible</span></div>' +
+      '  <div class="ihdr"><span data-gloss="Any character, no sign-in needed. Ones already on the board are free and instant; a new one is fetched at three a minute.">Character — pull a bracelet from lostark.bible</span></div>' +
       '  <div class="bi-modes">' +
       '    <button class="mbtn active" id="bi-mode-pull" type="button">Pull from lostark.bible</button>' +
       '    <button class="mbtn" id="bi-mode-manual" type="button">Manual entry</button>' +
       '    <span class="bi-authbtns" id="bi-authbtns"></span>' +
       '  </div>' +
       '  <div class="bi-modebody" id="bi-body-manual" style="display:none">' +
-      '    <div class="note" style="margin-top:0">Nothing to pull — type the bracelet into the panel below. ' +
-      'The two combat traits, then one row per granted slot; leave every slot empty for an unrolled bracelet. ' +
-      'Your character settings stay exactly as you left them.</div>' +
+      '    <div class="note" style="margin-top:0"><span data-gloss="The two combat traits first, then one row per granted slot. Leave every slot empty to score it unrolled. Your character settings are not touched.">Nothing to pull — type the bracelet into the panel below.</span></div>' +
       '  </div>' +
       '  <div class="bi-modebody" id="bi-body-pull">' +
       '    <div class="bi-pullgrid">' +
@@ -1109,9 +1111,14 @@
   }
 
   /**
-   * The note under the pull buttons. Cached characters are free and instant; a new
-   * one is paced by the Worker's own throttle. setFreeStatus(true) is the "site
-   * busy" state the Worker reports with `degraded`.
+   * The line under the pull buttons. It now carries the DEGRADED states only —
+   * the site too busy to take new lookups, or no fetch service deployed at all.
+   * Both say something the controls cannot, so both stay on the page
+   * (docs/design/copy-rules.md, rule 4).
+   *
+   * The healthy-state pitch — any character, no sign-in, cached ones free,
+   * new ones three a minute — was ordinary explanation sitting on screen, so it
+   * moved into the panel header's tooltip and this element renders empty.
    */
   function setFreeStatus(degraded) {
     var el = $("bi-free-note");
@@ -1121,9 +1128,9 @@
         "Cached characters still work.</span>";
       return;
     }
-    el.innerHTML = "Any character, no sign-in needed · cached ones are free &amp; instant · " +
-      "new ones: <b>3 a minute</b>" +
-      (WORKER_URL ? "" : " · live lookups need the fetch service, which is not deployed yet");
+    el.innerHTML = WORKER_URL ? "" :
+      '<span class="bi-cap">Live lookups need the fetch service, which is not deployed yet. ' +
+      "The characters on the right load instantly.</span>";
   }
 
   /**
@@ -1257,10 +1264,12 @@
         "</button>";
     }).join("");
     var cur = los[state.loadoutIdx] || los[0];
-    var note = "Scoring the " + (cur.label || cur.classification) + " bracelet" +
-      (state.loadoutIdx === state.bestLoadout
-        ? " — the one the board ranks"
-        : " — the board ranks the highest, not this one");
+    // The pills already say which loadout is active and mark the highest, so
+    // agreeing with the board is not worth a sentence. Disagreeing is: the score
+    // on screen is then not the score the board ranks, and only a line can say
+    // so (docs/design/copy-rules.md, rule 4).
+    var note = state.loadoutIdx === state.bestLoadout ? "" :
+      "Scoring the " + (cur.label || cur.classification) + " bracelet — the board ranks the highest, not this one";
     host.innerHTML = '<div class="bi-axis"><span class="lab">Loadout</span>' +
       '<span class="bi-axispills">' + pills + "</span>" +
       '<span class="bi-axisnote">' + esc(note) + "</span></div>";
@@ -1375,12 +1384,17 @@
     // calculator's defaults, which is what the board ranks them on.
     var canImport = !!(root.Profile && root.Profile.canImportStats && root.Profile.canImportStats());
 
-    // The economy is NOT seeded here any more. Gold-per-1% comes off the
-    // character's combat power and the baseline off the bracelet they already
-    // wear — both are that character's numbers, so they belong to "Import
-    // Character Stats" with the rest of the left column, not to merely opening
-    // someone (Shizu, 2026-08-12). Loading a character leaves our defaults in
-    // place; the button fills them in.
+    // THE ECONOMY IS SEEDED ON LOAD, and deliberately NOT on "Import Character
+    // Stats". Gold-per-1% comes off the character's combat power and the
+    // baseline off the bracelet they already wear: neither is a setting the user
+    // chose, both are context about the character now on screen, and both are
+    // useless a moment later if you have to ask for them. So they arrive with
+    // the character (Shizu, 2026-08-12 — this reverses the day's earlier move
+    // onto the button). The left column is the opposite case and still waits for
+    // the button. seedEcon keys per character and never seeds over an edit.
+    if (app && typeof app.seedEcon === "function") {
+      try { app.seedEcon(built.patch.character); } catch (e) { /* economy is optional */ }
+    }
 
     state.picked = rec.name;
     state.error = null;
@@ -1394,8 +1408,9 @@
       n + " granted slot" + (n === 1 ? "" : "s") + ".";
     if (canImport) {
       note += " The settings are the calculator's defaults, which is what the board ranks everyone on — " +
-        "press Import Character Stats in the banner to put " + rec.name +
-        "'s own honing, accessories, gems and the two nodes in the panel instead.";
+        "press Import Character Stats on the character board to put " + rec.name +
+        "'s own honing, accessories, gems, karma and the rest in the panel instead. " +
+        "The gold rate and the baseline are already theirs.";
     }
     // The loadout/score commentary that used to live here is gone (Shizu,
     // 2026-08-11): the pills already show each loadout and its score, and the

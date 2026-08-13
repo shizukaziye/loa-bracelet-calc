@@ -6,6 +6,17 @@
  * Every figure quoted here is read from window.Bracelet / window.BraceletData at
  * render time, so the page cannot drift from the model the way a hand-written
  * write-up does.
+ *
+ * WHERE THE LINE IS DRAWN (docs/design/copy-rules.md, rule 3). Every other tab
+ * now carries a collapsed <details class="method"> at its foot, and that block
+ * answers one question: what am I looking at on THIS screen. It names the
+ * figures on that tab and gives the formula where the figure IS a formula.
+ *
+ * This tab is the model behind all of them — where the baseline comes from, how
+ * each bucket is scored, which tables the numbers were transcribed from, what is
+ * not modelled. So the short restatements a tab block now owns have come OUT of
+ * the paragraphs below, and what is left is the derivation. A formula may appear
+ * in both places; a paragraph may not.
  */
 (function () {
   "use strict";
@@ -41,6 +52,7 @@
       "<h2>What this tool answers</h2>" +
       "<p>Three questions, in the order you hit them. What is this bracelet worth in damage? Which lines should I lock before the next roll? The roll landed — do I keep it or take the new set?</p>" +
       "<p>Everything below is the model behind those answers. Where a number is a judgement call rather than a published fact, it says so.</p>" +
+      "<p>Each tab also carries its own short block at the foot of the page, on how to read the figures on that screen. This one is the model underneath them all.</p>" +
 
       "<h2>Damage adds up in logs</h2>" +
       "<p>Lost Ark stacks damage by multiplying. Two lines worth 10% each give 21%, not 20%. So each line is scored</p>" +
@@ -95,15 +107,15 @@
       "<p>The verdict never compares today's scores. It compares <b>continuation values</b> — what each set is worth with the remaining rolls still to come. A weaker set can genuinely be worth more, because the families it holds are cleared out of the pool and the next roll draws from a better one. Comparing raw scores would get that backwards.</p>" +
 
       "<h3>Which locks to buy</h3>" +
-      "<p>A lock is only worth it when the line it holds is scarcer than what a fresh draw would hand you. The tool works out the expected final score for every legal lock mask and ranks them. Locking a line that scores nothing is never offered: it freezes a slot for no reason.</p>" +
+      "<p>The tool works out the expected final score for every legal lock mask and ranks them, so the advice is a comparison of masks and never a judgement of one line on its own. Locking a line that scores nothing is never offered: it freezes a slot for no reason.</p>" +
 
       "<h2>Turning damage into gold</h2>" +
-      "<p>Set what one percent of damage is worth to you, and set the bracelet you would otherwise wear. A bracelet is then worth <code>E[max(0, final % − baseline %)] × gold per 1%</code>: you are paid only by the outcomes that BEAT the bracelet you already have, weighted by how often they land and by how far they clear it. It is never negative — one you would not equip is worth nothing, not a debt — and it is not <code>(expected final − baseline)</code>, a difference of means that goes negative and, by taking the expectation before the truncation, prices the upside short. With no lines and no baseline it is what an unrolled bracelet is worth to a buyer, which is the number the market actually needs. Slot count moves it a long way: three granted slots against two is a different item.</p>" +
+      "<p>Set what one percent of damage is worth to you, and set the bracelet you would otherwise wear. A bracelet is then worth <code>E[max(0, final % − baseline %)] × gold per 1%</code> — the truncation is inside the expectation, and that is the whole argument. It is not <code>(expected final − baseline)</code>, a difference of means that goes negative the moment the baseline outruns the bracelet and that, by taking the expectation before the truncation, prices the upside short. With no lines and no baseline it is what an unrolled bracelet is worth to a buyer, which is the number the market actually needs. Slot count moves it a long way: three granted slots against two is a different item.</p>" +
       "<p>The gold conversion is a rate you choose, not a market read. It is the same convention the accessory and astrogem tools use, so a bracelet, an accessory and a gem can be priced against each other.</p>" +
 
       "<h2>Where the tables come from</h2>" +
       "<p>Line values and probabilities are transcribed from the official Stove disclosure page, revised 2025-12-30. The listed special-effect percentages sum to 100.00016% because the page rounds; the model normalises at read time and never edits a published number. Basic-stat values are continuous bands from that page, not the four fixed points a community sheet lists — the official page wins. The character baseline is bebkok's gear tables and Arsonistic's DPS sheet, cross-checked against each other and against a live character payload.</p>" +
-      "<p>The model core ships with a battery of " + 1599 + " checks: JavaScript against first principles, the exact solver against a brute-force recursion on small cases, and the whole JavaScript model against an independent Python mirror. Both have to pass before anything ships.</p>" +
+      "<p>The model core ships with more than 1,600 checks on each side: JavaScript against first principles, the exact solver against a brute-force recursion on small cases, and the whole JavaScript model against an independent Python mirror. Both have to pass before anything ships.</p>" +
 
       "<h2>What this does not model</h2>" +
       "<ul>" +
@@ -117,7 +129,7 @@
       "</ul>" +
 
       "<h2>Reading the numbers honestly</h2>" +
-      "<p>\"Expected final\" is an average over every way the remaining rolls can land. Half of all bracelets finish below the median, and the p10 to p90 strip on the Calculator tab shows how wide that is. A bracelet worth 4% expected is not a bracelet that will be worth 4%.</p>" +
+      "<p>\"Expected final\" is an average over every way the remaining rolls can land. Half of all bracelets finish below the median, and the p10 to p90 strip on the Advisor tab shows how wide that is. A bracelet worth 4% expected is not a bracelet that will be worth 4%.</p>" +
       "<p>The community reads 7–9% as good and 10% or more as near-final. Those figures come from the same per-source percentage lostark.bible prints on a character page, so they are directly comparable to what this tool reports.</p>" +
 
       "</div>";

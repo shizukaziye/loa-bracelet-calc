@@ -663,6 +663,7 @@
      'color:var(--text);font-family:inherit;font-size:12px;padding:5px 6px;text-align:center}' +
 '  #tab-leaderboard .lb-hint{color:var(--dim);font-size:11px;margin-top:10px}' +
 '  #tab-leaderboard .lb-foot{color:var(--dim);font-size:11px;line-height:1.6;margin-top:14px;max-width:95ch}' +
+'  #tab-leaderboard .lb-foot:empty{display:none}' +
 '  #tab-leaderboard .lb-foot b{color:var(--text)}' +
 '  #tab-leaderboard .lb-foot p{margin:0 0 5px}' +
 // PHONES: the fixed columns overflow a 375px screen and squeeze the name to nothing.
@@ -728,14 +729,13 @@
 '  <summary>How the leaderboard ranks bracelets</summary>' +
 '  <p><b>The verdict.</b> Every bracelet is scored in <b>% damage</b> on one shared, canonical character &mdash; ' +
      'the calculator&rsquo;s untouched defaults, <code>normalizeProfile({})</code> &mdash; and the board sorts on that number, highest first.</p>' +
-'  <p><b>The arithmetic.</b> The two combat traits the bracelet came with score through the trait model; ' +
-     'every effect line, granted or locked, scores through the line model; the two add in log space and convert once to a percentage. ' +
-     'It is the same code the Calculator runs, called with different settings. The score is recomputed in your browser from each ' +
-     'character&rsquo;s raw stat lines every time this tab loads, so a change to the model shows up here immediately &mdash; the ' +
-     'numbers stored in the data file are only a fallback.</p>' +
 '  <p><b>Why your rank is not your Calculator number.</b> The Calculator scores your bracelet on <i>your</i> character: your crit, ' +
      'your gear, your fight. This board deliberately does not. If it used each player&rsquo;s own settings it would be ranking gear ' +
      'and fight profiles, not bracelets, and nobody&rsquo;s rank would mean anything.</p>' +
+'  <p><b>The arithmetic is the Calculator&rsquo;s</b>, called with different settings &mdash; the same trait model, the same line ' +
+     'model, added in log space and converted once. What is particular to this board: the score is recomputed in your browser from ' +
+     'each character&rsquo;s raw stat lines every time the tab loads, so a change to the model shows up here at once. The numbers ' +
+     'stored in the data file are only a fallback for a row with no raw stats.</p>' +
 '  <p><b>The 0&ndash;100 grade.</b> The Damage % column answers &ldquo;how much&rdquo;; the Grade column answers ' +
      '&ldquo;how close to the ceiling&rdquo;. It is a straight line between two fixed points: <b>0</b> is an empty bracelet &mdash; ' +
      'two combat traits at 40 and three effect lines worth nothing &mdash; and <b>100</b> is the three best distinct effect ' +
@@ -746,9 +746,14 @@
 '  <p><b>Loadouts.</b> A lostark.bible character page carries one loadout per tab &mdash; Raid, Chaos Dungeon, sometimes an ' +
      'estimated raid one &mdash; and each has its own bracelet. Every loadout is scored and the board ranks the highest. ' +
 '     The <span class="lb-lo">2</span> marker beside a name means that character wears more than one distinct bracelet; hover it for the others.</p>' +
+'  <p><b>Where the data comes from.</b> It is <b>self-reported</b>: collected from public lostark.bible character pages, showing ' +
+     'whatever the owner&rsquo;s roster last synced there, which can be weeks behind what they are wearing today. It is not a ' +
+     'verified snapshot and it is not a complete list of anything. The line under the table says which copy you are reading and ' +
+     'how old it is.</p>' +
 '  <p><b>What is left out.</b> Support scoring is not built, so support characters are ranked on their damage like everyone else. ' +
      'A line whose stat index the model does not map yet scores zero and is flagged rather than hidden. The default profile leaves ' +
      'the Demon/Archdemon share at zero, which costs the one family that depends on it &mdash; the Method tab has the working.</p>' +
+'  <p>Not affiliated with Smilegate, Amazon Games or lostark.bible.</p>' +
 '</details>';
   }
 
@@ -766,15 +771,18 @@
 
   // ---- footer ---------------------------------------------------------------
 
+  /**
+   * PROVENANCE ONLY — which source the table on screen came from, and how old it
+   * is. That is the one thing the footer can say that the table cannot, so it is
+   * the one thing left inline (docs/design/copy-rules.md, rule 4).
+   *
+   * The disclosure that used to sit here — scored on the default character,
+   * self-reported, not affiliated — is unchanged, but it moved into the
+   * methodology block at the foot of the tab, where it is read by anyone who
+   * opens it and is out of the way of anyone who does not.
+   */
   function footHtml() {
-    return '<p>' + (sourceNote ? esc(sourceNote) + " " : "") +
-      'Every bracelet here is scored on the <b>canonical default character</b> ' +
-      '(<span class="gloss" data-gloss="Bracelet.normalizeProfile({}) — the calculator with every setting left at its default. ' +
-      'Your own settings never touch this board.">the calculator&rsquo;s untouched defaults</span>), not on your settings.</p>' +
-      '<p>The data is <b>self-reported</b>: it is collected from public lostark.bible character pages and shows whatever the ' +
-      'owner&rsquo;s roster last synced there, which can be weeks behind what they are wearing today. It is not a verified snapshot ' +
-      'and it is not a complete list of anything.</p>' +
-      '<p>Not affiliated with Smilegate, Amazon Games or lostark.bible.</p>';
+    return sourceNote ? "<p>" + esc(sourceNote) + "</p>" : "";
   }
   function paintFoot() {
     var el = $("lb-foot");
@@ -883,7 +891,7 @@
   function headRow() {
     return '<thead><tr>' +
       (Favs ? '<th class="lb-star" aria-label="Favorite"></th>' : '') +
-      '<th>Rank</th>' +
+      '<th><span class="gloss" data-gloss="Position on this board, by damage %. Every bracelet is scored on the same default character, so a rank compares bracelets and nothing else.">Rank</span></th>' +
       '<th><span class="gloss" data-gloss="Item level, as the character page reported it.">iLvl</span></th>' +
       '<th>Character</th>' +
       '<th><span class="gloss" data-gloss="The whole bracelet on one 0–100 scale, and its subrank. 0 is an empty bracelet: two 40 combat traits and three lines worth nothing. 100 is the three best distinct effect families at their best roll with both traits at the cap.">Grade</span></th>' +
