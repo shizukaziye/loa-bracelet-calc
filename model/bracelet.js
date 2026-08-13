@@ -31,6 +31,16 @@
  *                  (msPct / wpPct), so the gain is a full AP ratio; with
  *                  flatAP = 0 it collapses to the plain sqrt ratio.
  *                  deriveBaseline() turns a gear setup into those raw numbers.
+ *                  flatWP — flat WEAPON power, from a weapon ark-grid core or an
+ *                  accessory's "Weapon Power +480" roll — is weapon power, not
+ *                  attack power: it joins weaponPowerRaw INSIDE the square root
+ *                  and takes the wpPct bucket with it. Sitting beside flatAP
+ *                  instead would be wrong by construction, and the 59 saved
+ *                  character pages agree: of the 69 loadouts carrying a flat
+ *                  weapon-power roll, (raw + flat)·(1+wpPct) reproduces the
+ *                  page's own weapon-power total on 34 and never misses by more
+ *                  than the sources we cannot read, while raw·(1+wpPct) + flat
+ *                  reproduces it on exactly none.
  *   Crit           a list of skills, each { share, critRate, critDamage }.
  *                  critDamage 2.8 means a crit deals 2.8× (not 3.8×). Per-skill
  *                  expected factor = 1 + cr·(cd−1); the character factor is the
@@ -146,6 +156,11 @@
     wpPct: 0.085,                   // 6% earring WP lines + 2.5% karma
     baseApPct: 0.125,               // 11 × lv9 damage gems (1.0% ea) + 9/7 stone (1.5%)
     flatAP: 2700,                   // ark-grid cores
+    // Flat WEAPON power: an ark-grid WEAPON core instead of an attack one, plus
+    // any "Weapon Power +195/480/960" accessory roll. Default 0 — the reference
+    // build runs attack cores and no flat rolls — so it changes no score until
+    // someone sets it.
+    flatWP: 0,
 
     // Damage share and crit numbers per skill. critDamage 2.8 = a crit deals 2.8×.
     skills: [{ share: 1, critRate: 0.90, critDamage: 2.8 }],
@@ -252,8 +267,8 @@
    * mainStatRaw / weaponPowerRaw directly and skip this.
    *
    * o = { pieceLevels:{head,shoulder,chest,pants,gloves,weapon},
-   *       msPct, wpPct, baseApPct, flatAP, rosterBonus, accessoryMainStat,
-   *       baseMainStat }
+   *       msPct, wpPct, baseApPct, flatAP, flatWP, rosterBonus,
+   *       accessoryMainStat, baseMainStat }
    */
   function deriveBaseline(o) {
     o = o || {};
@@ -279,16 +294,23 @@
     var wpPct = o.wpPct !== undefined ? o.wpPct : D.wpPct;
 
     var mainStatRaw = armor + accMs + baseMs + roster;
+    // Flat weapon power is WEAPON POWER: it joins the weapon's own raw figure
+    // before the bucket, so weaponPowerTotal carries it. It is kept as its own
+    // field rather than folded into weaponPowerRaw, because weaponPowerRaw means
+    // "the weapon table value" everywhere else — including the deck's raw
+    // override pair, which must stay the weapon alone.
+    var flatWP = o.flatWP !== undefined ? o.flatWP : D.flatWP;
     return {
       ilvl: Math.round(ilvlSum / 6),
       armorMainStat: armor,
       mainStatRaw: mainStatRaw,
       weaponPowerRaw: weaponPowerRaw,
       mainStatTotal: mainStatRaw * (1 + msPct),
-      weaponPowerTotal: weaponPowerRaw * (1 + wpPct),
+      weaponPowerTotal: (weaponPowerRaw + flatWP) * (1 + wpPct),
       msPct: msPct, wpPct: wpPct,
       baseApPct: o.baseApPct !== undefined ? o.baseApPct : D.baseApPct,
-      flatAP: o.flatAP !== undefined ? o.flatAP : D.flatAP
+      flatAP: o.flatAP !== undefined ? o.flatAP : D.flatAP,
+      flatWP: flatWP
     };
   }
 
@@ -296,10 +318,16 @@
    * Attack power. AP = sqrt(MStot · WPtot / 6) · (1 + baseApPct) + flatAP.
    * dMsRaw / dWpRaw are bracelet-line additions to the RAW stat, so they are
    * amplified by the percentage buckets exactly as gear stats are.
+   *
+   * flatWP sits with dWpRaw and NOT with flatAP. Flat weapon power is weapon
+   * power: the game adds it to the weapon's figure and then applies the
+   * weapon-power percentage bucket, so it belongs inside the square root. Put
+   * beside flatAP it would escape both the root and the bucket and would score
+   * a weapon core as though it were an attack core.
    */
   function attackPower(profile, dMsRaw, dWpRaw) {
     var ms = (profile.mainStatRaw + (dMsRaw || 0)) * (1 + profile.msPct);
-    var wp = (profile.weaponPowerRaw + (dWpRaw || 0)) * (1 + profile.wpPct);
+    var wp = (profile.weaponPowerRaw + (profile.flatWP || 0) + (dWpRaw || 0)) * (1 + profile.wpPct);
     return Math.sqrt(ms * wp / 6) * (1 + profile.baseApPct) + profile.flatAP;
   }
 

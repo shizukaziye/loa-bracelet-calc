@@ -43,4 +43,7 @@ DEFAULTS = {
     "wpPct": 0.085,
     "baseApPct": 0.125,
     "flatAP": 2700,
+    # Flat WEAPON power - zero on the reference build (attack cores, no flat
+    # weapon-power rolls). It is weapon power, so it goes inside the square root.
+    "flatWP": 0,
 }

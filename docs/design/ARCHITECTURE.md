@@ -81,8 +81,20 @@ Companion docs — read before changing anything here:
                            // `bracelet` above mirrors. 9 of 30 seeded characters carry
                            // different brackets per loadout, by up to 5.76pp.
 
-  profile: {               // for grader auto-fill; every field optional
-    weaponPower, mainStat, critRate, critDamage, gemLevels, combatPower
+  profile: {               // for grader auto-fill; EVERY FIELD OPTIONAL, and a field
+                           // the page did not carry is absent rather than guessed
+    itemLevel, classId, combatPower, apPoints,
+    honing: {…}, advancedHoning: {…},          // six pieces; advanced is reported, not used
+    neckAddDmg, earring1Wp, earring2Wp,        // accessory percentage lines
+    gemLevel, gemLevels: [], gemCounts: [],    // modal level, every level, counts per level
+    stone97, master,
+    karmaWp,                 // % weapon power = karma.enlightenment ÷ 10
+    apPct,                   // % attack power = battlePoint.parts[type 1].attackPowerMultiplier
+    accessoryMainStat,       // the five accessories' base main stat, summed
+    accessoryFlatAP,         // their "Attack Power +80/195/390" rolls, summed
+    accessoryFlatWP,         // their "Weapon Power +195/480/960" rolls, summed
+    raw: {…}                 // the unsnapped readings, the karma triple, the ark-grid
+                             // cores, and what the gems alone make of apPct
   },
   source: "bible"|"seed"|"import",
   parseVersion: N,         // bump when the decoder changes; lets a rescore find stale rows
@@ -93,6 +105,18 @@ Companion docs — read before changing anything here:
 
 Raw `stats` is the point. Decoding is a client concern and decoder bugs are then fixable
 without refetching 60 characters.
+
+The `profile` block is CARRIED, never applied. Loading a character fills the bracelet and
+the banner, and seeds the economy (gold per 1% from combat power, baseline from the
+bracelet they already wear). Everything else waits for "Import Character Stats" on the
+character board. The calculator opens on its own defaults and returns to them on "Reset to
+Default", so the number on screen is the number the board shows, until the user asks
+otherwise.
+
+NOT ON THE PAGE, and therefore never in this block: what the ark-grid CORES give in flat
+attack or weapon power. The page names each core and totals the points its gems carry and
+stops there, so `accessoryFlatAP` / `accessoryFlatWP` are the ACCESSORY halves only and the
+deck keeps its own figure for the cores — with the import note saying which half is which.
 
 ### 1.2 Snapshot (leaderboard payload)
 

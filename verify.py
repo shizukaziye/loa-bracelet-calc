@@ -73,6 +73,7 @@ for i, c in enumerate(refs["derivation"]):
     check("derivation[%d].weaponPowerRaw" % i, d["weaponPowerRaw"], c["out"]["weaponPowerRaw"], exact=True)
     check("derivation[%d].mainStatTotal" % i, r9(d["mainStatTotal"]), c["out"]["mainStatTotal"])
     check("derivation[%d].weaponPowerTotal" % i, r9(d["weaponPowerTotal"]), c["out"]["weaponPowerTotal"])
+    check("derivation[%d].flatWP" % i, d["flatWP"], c["out"]["flatWP"], exact=True)
 
 S = GEAR.SERCA
 _armor = S[21][0] + S[21][1] + S[21][2] + S[21][3] + S[23][4]
@@ -87,6 +88,15 @@ check("analytic.mainStatTotal", r9(_d["mainStatTotal"]), r9(703826 * 1.09))
 check("analytic.weaponPowerTotal", r9(_d["weaponPowerTotal"]), r9(241367 * 1.085))
 check("analytic.ilvl", _d["ilvl"], 1785, exact=True)
 
+# Flat WEAPON power is weapon power: it joins the weapon's raw figure and the
+# wpPct bucket amplifies the sum. Main stat is untouched.
+_d_wp = B.derive_baseline({"flatWP": 9000})
+check("analytic.flatWP.total", r9(_d_wp["weaponPowerTotal"]), r9((241367 + 9000) * 1.085))
+check("analytic.flatWP.raisesTotalByTheBucket",
+      r9(_d_wp["weaponPowerTotal"] - _d["weaponPowerTotal"]), r9(9000 * 1.085))
+check("analytic.flatWP.leavesWeaponPowerRawAlone", _d_wp["weaponPowerRaw"], 241367, exact=True)
+check("analytic.flatWP.leavesMainStatAlone", r9(_d_wp["mainStatTotal"]), r9(_d["mainStatTotal"]))
+
 # ================= 2. profile scalars =================
 _s = refs["profileScalars"]
 check("scalars.addDamagePool", r9(B.add_damage_pool(P)), _s["addDamagePool"])
@@ -97,6 +107,8 @@ check("scalars.allyCritFactor", r9(B.ally_crit_factor(P, 0, 0)), _s["allyCritFac
 check("scalars.attackPower", r9(B.attack_power(P, 0, 0)), _s["attackPower"])
 check("scalars.attackPowerNoFlat", r9(B.attack_power(B.normalize_profile({"flatAP": 0}), 0, 0)),
       _s["attackPowerNoFlat"])
+check("scalars.attackPowerFlatWP", r9(B.attack_power(B.normalize_profile({"flatWP": 9000}), 0, 0)),
+      _s["attackPowerFlatWP"])
 check("scalars.defShredGain2_1", r9(B.def_shred_gain(P, 2.1)), _s["defShredGain2_1"])
 check("scalars.basicExpectedRelic", r9(B.basic_band_expected("mainStat", "relic")), _s["basicExpectedRelic"])
 check("scalars.basicExpectedAncient", r9(B.basic_band_expected("mainStat", "ancient")), _s["basicExpectedAncient"])
@@ -109,6 +121,22 @@ check("analytic.critFactor", r9(B.crit_factor(P, 0, 0)), r9(1 + 0.9 * (2.8 - 1))
 check("analytic.attackPower", r9(B.attack_power(P, 0, 0)),
       r9(math.sqrt(703826 * 1.09 * 241367 * 1.085 / 6) * 1.125 + 2700))
 check("analytic.defShred", r9(B.def_shred_gain(P, 2.1)), r9(2 / (2 - 0.021)))
+
+# WHERE FLAT WEAPON POWER GOES - the same three-way pin as verify.js.
+_p_flat_wp = B.normalize_profile({"flatWP": 9000})
+check("analytic.flatWP.attackPower", r9(B.attack_power(_p_flat_wp, 0, 0)),
+      r9(math.sqrt(703826 * 1.09 * (241367 + 9000) * 1.085 / 6) * 1.125 + 2700))
+check("analytic.flatWP.isRawWeaponPower", r9(B.attack_power(_p_flat_wp, 0, 0)),
+      r9(B.attack_power(B.normalize_profile({"weaponPowerRaw": 241367 + 9000}), 0, 0)))
+check("analytic.flatWP.isABraceletWeaponPowerLine", r9(B.attack_power(_p_flat_wp, 0, 0)),
+      r9(B.attack_power(P, 0, 9000)))
+check_true("analytic.flatWP is not flatAP",
+           abs(B.attack_power(_p_flat_wp, 0, 0)
+               - B.attack_power(B.normalize_profile({"flatAP": 2700 + 9000}), 0, 0)) > 1)
+check_true("analytic.flatWP is worth less per point than flatAP",
+           B.attack_power(_p_flat_wp, 0, 0)
+           < B.attack_power(B.normalize_profile({"flatAP": 2700 + 9000}), 0, 0))
+check("analytic.flatWP.defaultIsZero", P["flatWP"], 0, exact=True)
 
 # ================= 3. listed probabilities =================
 _L = refs["listed"]

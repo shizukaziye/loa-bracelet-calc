@@ -27,8 +27,8 @@
 /* global importScripts, Bracelet */
 importScripts(
   "data/bracelet-data.js?v=2",
-  "data/gear-data.js?v=2",
-  "model/bracelet.js?v=5"
+  "data/gear-data.js?v=3",
+  "model/bracelet.js?v=6"
 );
 
 var lastCtx = null;

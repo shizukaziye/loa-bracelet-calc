@@ -49,9 +49,13 @@
  * tooltip says "read 2.60% from the neck" or "gems are 10,10,9,… — set to 10", and
  * the user can disagree with a number they can see.
  *
- * COLLAPSED FIRST. The deck's body starts shut, on every tab that mounts it: the
- * score and the table under it are what a visitor came for. The open/shut choice is
- * part of the saved state, so it sticks after the first click.
+ * COLLAPSED ON EVERY SWITCH. The deck's body starts shut, and it shuts again every
+ * time a tab claims it — Calculator, Advisor, Tier List alike. The thing a visitor
+ * came to that tab for is the tab's own work, not thirty controls; the controls are
+ * one click away. Opening it sticks until the next switch, and nothing about the
+ * values moves: the fold is visibility, not a reset. The two buttons that act on the
+ * deck ("Import Character Stats", "Reset to Default") are in its HEADER row, which
+ * stays on screen while the body is shut, so a fresh switch never hides them.
  *
  * TWO RESETS, NEITHER OF WHICH ASKS. "Reset character" clears gear, accessories,
  * gems, the two nodes, fight, skills and economy; "Reset bracelet" (adopted into
@@ -109,7 +113,12 @@
       ov: { mainStatRaw: 703826, weaponPowerRaw: 241367 },
       // Accessories, gems and the two on/off nodes. wpPct and baseApPct are
       // DERIVED from these (see wpPctOf / baseApPctOf), not stored.
-      kit: { neck: 2.6, ear1: 3, ear2: 3, gems: 9, stone: true, master: false },
+      // `gems` is the ONE level a hand-typing user sets, and eleven gems ride on
+      // it. `gemSplit` is the real distribution when we have one — counts per
+      // level, [lv6, lv7, lv8, lv9, lv10] — and it OVERRIDES the slider while it
+      // is there. Default null: a fresh page is eleven level-9 gems, exactly as
+      // it always was, and the slider alone still works for anyone typing.
+      kit: { neck: 2.6, ear1: 3, ear2: 3, gems: 9, gemSplit: null, stone: true, master: false },
       // Where the damage lands, how the cooldown line is judged, and what the
       // class pays for a Spec / Swiftness trait line (points per 100 points).
       fight: { back: 100, front: 100, nonDir: 100, cdWeight: 70, demon: false, supportEffects: true, wSpec: 2.5, wSwift: 2.5 },
@@ -120,6 +129,11 @@
       traits: { crit: { on: true, v: 120 }, spec: { on: true, v: 120 }, swift: { on: false, v: 120 } },
       adv: {
         msPct: 9, karmaWp: 2.5, baseApOverride: false, baseApPct: 12.5, flatAP: 2700,
+        // Flat WEAPON power — a weapon ark-grid core instead of an attack one,
+        // plus any "Weapon Power +195/480/960" accessory roll. Default 0: the
+        // reference build runs attack cores and rolled none, so this field
+        // changes nothing until somebody sets it.
+        flatWP: 0,
         accessoryMainStat: 71429, rosterBonus: 2085,
         addWeapon: 30, addPet: 1, addAstrogem: 4.84,
         staggerShare: 10, demonBase: 7.3, shieldUptime: 60, enemyDR: 50,
@@ -153,6 +167,9 @@
 
   // Per-gem base attack power by gem level; eleven of them plus a 9/7 stone.
   var GEM_AP = { 6: 0.4, 7: 0.6, 8: 0.8, 9: 1.0, 10: 1.2 };
+  // The split's column order, and how many gems a character carries.
+  var GEM_LEVELS = [6, 7, 8, 9, 10];
+  var GEM_COUNT = 11;
   var STONE_AP = 1.5;
   // Slider order, Shizu's: armour first, the weapon last because it is the one
   // piece that moves weapon power.
@@ -297,11 +314,57 @@
 
   /** Weapon-power % bucket = the two earring lines + karma. */
   function wpPctOf() { return num(S.kit.ear1, 0) + num(S.kit.ear2, 0) + num(S.adv.karmaWp, 0); }
-  /** Attack-power % bucket = eleven gems at their level + the ability stone. */
+  /**
+   * The eleven damage gems' share of the attack-power bucket.
+   *
+   * A real character runs a MIXED set — ten at 9 and one at 10 is the ordinary
+   * case, and that is 11.2%, not 11 × 1.0%. So when a split is on the state it is
+   * summed level by level; otherwise the one slider stands for all eleven, which
+   * is what someone typing by hand has.
+   *
+   * A split that sums to nothing is treated as no split at all, so an empty row
+   * of zeroes cannot silently zero the whole bucket.
+   */
+  function gemApSum() {
+    var sp = S.kit.gemSplit, i, c, n = 0, s = 0;
+    if (sp && sp.length === GEM_LEVELS.length) {
+      for (i = 0; i < GEM_LEVELS.length; i++) {
+        c = Math.max(0, Math.round(num(sp[i], 0)));
+        n += c;
+        s += c * GEM_AP[GEM_LEVELS[i]];
+      }
+      if (n > 0) return s;
+    }
+    return GEM_COUNT * (GEM_AP[Math.round(num(S.kit.gems, 9))] || 0);
+  }
+  /** How many gems the split accounts for; 11 when there is no split. */
+  function gemSplitCount() {
+    var sp = S.kit.gemSplit, i, n = 0;
+    if (!sp || sp.length !== GEM_LEVELS.length) return GEM_COUNT;
+    for (i = 0; i < GEM_LEVELS.length; i++) n += Math.max(0, Math.round(num(sp[i], 0)));
+    return n > 0 ? n : GEM_COUNT;
+  }
+  /** Is a real per-gem split in force, rather than the single slider? */
+  function hasGemSplit() {
+    var sp = S.kit.gemSplit, i;
+    if (!sp || sp.length !== GEM_LEVELS.length) return false;
+    for (i = 0; i < GEM_LEVELS.length; i++) if (Math.max(0, Math.round(num(sp[i], 0))) > 0) return true;
+    return false;
+  }
+  /** "10 × lv9 · 1 × lv10", highest level first. */
+  function gemSplitText() {
+    var sp = S.kit.gemSplit, i, c, out = [];
+    if (!hasGemSplit()) return GEM_COUNT + " × lv" + Math.round(num(S.kit.gems, 9));
+    for (i = GEM_LEVELS.length - 1; i >= 0; i--) {
+      c = Math.max(0, Math.round(num(sp[i], 0)));
+      if (c) out.push(c + " × lv" + GEM_LEVELS[i]);
+    }
+    return out.join(" · ");
+  }
+  /** Attack-power % bucket = the eleven gems + the ability stone. */
   function baseApPctOf() {
     if (S.adv.baseApOverride) return num(S.adv.baseApPct, 0);
-    var per = GEM_AP[Math.round(num(S.kit.gems, 9))] || 0;
-    return 11 * per + (S.kit.stone ? STONE_AP : 0);
+    return gemApSum() + (S.kit.stone ? STONE_AP : 0);
   }
   /** The official starting-value band, which moves with the grade. */
   function traitBand() { return S.grade === "relic" ? [41, 100] : [61, 120]; }
@@ -346,7 +409,8 @@
     var a = S.adv;
     return B.deriveBaseline({
       pieceLevels: pieceLevels(),
-      msPct: a.msPct / 100, wpPct: wpPctOf() / 100, baseApPct: baseApPctOf() / 100, flatAP: a.flatAP,
+      msPct: a.msPct / 100, wpPct: wpPctOf() / 100, baseApPct: baseApPctOf() / 100,
+      flatAP: a.flatAP, flatWP: num(a.flatWP, 0),
       accessoryMainStat: a.accessoryMainStat, rosterBonus: a.rosterBonus
     });
   }
@@ -366,7 +430,8 @@
       ilvl: base.ilvl || 0,
       mainStatRaw: base.mainStatRaw,
       weaponPowerRaw: base.weaponPowerRaw,
-      msPct: a.msPct / 100, wpPct: wpPctOf() / 100, baseApPct: baseApPctOf() / 100, flatAP: a.flatAP,
+      msPct: a.msPct / 100, wpPct: wpPctOf() / 100, baseApPct: baseApPctOf() / 100,
+      flatAP: a.flatAP, flatWP: num(a.flatWP, 0),
       skills: sk,
       master: !!S.kit.master,
       traitWeights: traitWeights(),
@@ -440,23 +505,40 @@
   }
 
   /**
-   * ROW 3 of the character header: the two buttons.
+   * THE TWO BUTTONS, and they live on the character board itself.
    *
-   * Rendered by EVERY tab from here so the wording cannot drift apart, and the
-   * clicks are caught by one delegated listener on the document, so there are no
-   * ids to collide when two panes each hold a copy.
+   * They were in the character BANNER until 2026-08-12, one copy per tab. They
+   * act on the deck, so they belong to the deck (Shizu). They sit in its HEADER
+   * ROW rather than in its body, which matters: the deck is shut when a tab opens
+   * and shut again after every tab switch, and "Import Character Stats" is the
+   * thing you press the moment you have loaded somebody. A button you must first
+   * expand a panel to reach is a button in the wrong place.
    *
-   * Returns "" with no character loaded: the banner is hidden then, and the
-   * deck's own "Reset to defaults" button covers that state.
+   * BOTH ARE ALWAYS THERE. There used to be a third, hidden button doing the same
+   * job as one of these ("Reset to defaults", in the Gear column, shown only when
+   * nobody was loaded); it is gone. "Reset to Default" is one button in one place
+   * whether or not a character is loaded, and "Import Character Stats" sits
+   * beside it saying why it cannot run when there is nobody to import.
    *
-   * The dead half of the pair is aria-disabled rather than disabled, because a
-   * disabled button fires no mouse events and would swallow the tooltip that
-   * says WHY it is dead.
+   * The dead half is aria-disabled rather than disabled, because a disabled
+   * button fires no mouse events and would swallow the tooltip that says WHY it
+   * is dead. Clicks are caught by one delegated listener on the document.
    */
   function charControlsHtml() {
-    if (!hasCharacter()) return "";
-    var who = esc(S.char.name), can = canImportStats();
+    var loaded = hasCharacter();
+    var who = loaded ? esc(S.char.name) : "", can = loaded && canImportStats();
     var h = '<div class="bc-ctlrow">';
+    if (!loaded) {
+      return h +
+        '<button type="button" class="mbtn" aria-disabled="true" data-bcimport="1"' +
+        ' data-gloss="No character is loaded. Look one up above and this fills the panel with their own honing,' +
+        ' accessories, gems, karma and the rest.">Import Character Stats</button>' +
+        '<button type="button" class="mbtn" data-bcreset="defaults"' +
+        ' data-gloss="Puts the settings back to the calculator\'s defaults — gear, accessories, gems and the two' +
+        ' nodes on the left, the fight, trait, skill and Advanced settings on the right. The bracelet — its lines,' +
+        ' its traits, its grade, its slots and its padlocks — and the gold rate and baseline in the Grader are' +
+        ' all left exactly as they are.">Reset to Default</button></div>';
+    }
     h += '<button type="button" class="mbtn"' + (can ? "" : ' aria-disabled="true"') +
       ' data-bcimport="1" data-gloss="' + (can
         ? "Overwrite the left column with what " + who + "'s character page says: the six honing levels, the " +
@@ -467,9 +549,9 @@
       '">Import Character Stats</button>';
     h += '<button type="button" class="mbtn" data-bcreset="defaults"' +
       ' data-gloss="Puts the settings back to the calculator\'s defaults — gear, accessories, gems and the two' +
-      ' nodes on the left, the fight, trait, skill and economy settings on the right. ' + who +
+      ' nodes on the left, the fight, trait, skill and Advanced settings on the right. ' + who +
       ' stays loaded, and the bracelet — its lines, its traits, its grade, its slots and its padlocks — is left' +
-      ' exactly as it is.">Reset to Default</button>';
+      ' exactly as it is, and so are the gold rate and baseline in the Grader.">Reset to Default</button>';
     return h + "</div>";
   }
 
@@ -646,16 +728,44 @@
       vals["kit.ear2"] = { value: pr.earring2Wp, note: accNote(raw.earring2Wp, pr.earring2Wp, "earring 2") };
     }
 
-    // ---- the one gem slider, out of eleven gems ----
+    // ---- the eleven gems: the modal level AND the real spread ----
+    // The slider still gets the modal level, because switching the split off has
+    // to leave something sensible behind. The split gets the distribution, and
+    // while it is there it is what the attack-power bucket sums — so "gems are
+    // 9,9,9,10,9..., set to 9" stops being a rounding and becomes the truth.
     if (pr.gemLevel != null) {
       var lv = clamp(Math.round(num(pr.gemLevel, 9)), 6, 10);
       var spread = raw.gemSpread || (pr.gemLevels || []).join(",");
       vals["kit.gems"] = {
         value: lv,
         note: raw.gemMixed
-          ? "gems are " + spread + " — the deck holds one level, so it is set to " + lv
+          ? "gems are " + spread + " — the modal level is " + lv + ", and the split below carries all of them"
           : "all " + (pr.gemLevels ? pr.gemLevels.length : 11) + " gems are level " + lv
       };
+    }
+    // THE REAL DISTRIBUTION. Ten at 9 and one at 10 is 11.2% of attack power, and
+    // the deck can hold that now, so the spread stops being a note on a rounding.
+    if (pr.gemCounts && pr.gemCounts.length === GEM_LEVELS.length) {
+      var counts = [], gemTotal = 0, gi;
+      for (gi = 0; gi < GEM_LEVELS.length; gi++) {
+        counts.push(Math.max(0, Math.round(num(pr.gemCounts[gi], 0))));
+        gemTotal += counts[gi];
+      }
+      if (gemTotal > 0) {
+        var parts = [], apSum = 0;
+        for (gi = GEM_LEVELS.length - 1; gi >= 0; gi--) {
+          if (counts[gi]) parts.push(counts[gi] + " × lv" + GEM_LEVELS[gi]);
+          apSum += counts[gi] * GEM_AP[GEM_LEVELS[gi]];
+        }
+        vals["kit.gemSplit"] = {
+          value: counts,
+          note: "the page has " + parts.join(" and ") + " — " + fx(apSum, 1) + "% of attack power" +
+            (gemTotal !== GEM_COUNT
+              ? ", and only " + gemTotal + " of the " + GEM_COUNT + " gems could be read" +
+                (raw.gemsUnreadable ? " (" + raw.gemsUnreadable + " carry no attack-power effect)" : "")
+              : "")
+        };
+      }
     }
 
     // ---- the two on/off nodes ----
@@ -678,7 +788,117 @@
       };
     }
 
+    // ---- karma's weapon power ----
+    // The page carries the karma levels, and Enlightenment in tenths of a percent
+    // is the weapon-power share. That is where the sheets' "up to 3%, 2.5%
+    // non-whale" comes from: Enlightenment 30 and Enlightenment 25.
+    if (pr.karmaWp != null) {
+      var km = raw.karma || {};
+      vals["adv.karmaWp"] = {
+        value: num(pr.karmaWp, 2.5),
+        note: km.enlightenment != null
+          ? "the character's karma Enlightenment is " + km.enlightenment + ", which is " +
+            fx(num(pr.karmaWp, 0), 1) + "% weapon power"
+          : "read " + fx(num(pr.karmaWp, 0), 1) + "% karma weapon power"
+      };
+    }
+
+    // ---- the attack-power bucket ----
+    // The page prints its own multiplier on the square-root term, and that IS the
+    // model's field — baseApPct, exactly. On four fifths of the corpus it is the
+    // eleven gems plus 1.5 for the ability stone, which is what the deck builds
+    // out of the controls above; on the rest it reads higher, by 0.35 to 2.05,
+    // from sources the page does not name.
+    //
+    // So the override is turned on ONLY when the two disagree. When they agree it
+    // would be a switch that changes no number while quietly making the gem split
+    // above it decorative — and a control that does nothing is worse than one
+    // that is not there.
+    if (pr.apPct != null) {
+      var fromGems = raw.apPctFromGems;
+      var apGap = (fromGems == null) ? null : num(pr.apPct, 0) - num(fromGems, 0);
+      // The switch is ALWAYS written, on or off. Leaving it alone when the two
+      // agree would strand the last character's override on this one, which is
+      // how importing Astoryu (page 14.7, gems 13.2) used to hold the bucket at
+      // 14.7 through the next character whose gems said 12.4.
+      if (apGap == null || Math.abs(apGap) > 1e-9) {
+        vals["adv.baseApOverride"] = {
+          value: true,
+          note: "the page's attack power multiplier is used, because the gems and the stone do not account for all of it"
+        };
+        vals["adv.baseApPct"] = {
+          value: num(pr.apPct, 12.5),
+          note: "the page reads " + fx(num(pr.apPct, 0), 2) + "%" +
+            (fromGems != null
+              ? "; the gems and the ability stone account for " + fx(num(fromGems, 0), 2) +
+                "%, so " + fx(apGap, 2) + "% comes from somewhere the page does not name"
+              : "")
+        };
+      } else {
+        vals["adv.baseApOverride"] = {
+          value: false,
+          note: "the page reads " + fx(num(pr.apPct, 0), 2) + "% attack power, which is exactly what the " +
+            "gems and the ability stone come to — so the gem controls drive it and no override is needed"
+        };
+      }
+    }
+
+    // ---- the five accessories' main stat ----
+    if (pr.accessoryMainStat != null) {
+      var slots = raw.accessorySlots;
+      vals["adv.accessoryMainStat"] = {
+        value: Math.round(num(pr.accessoryMainStat, 71429)),
+        note: "the " + (slots != null ? slots : 5) + " equipped accessories carry " +
+          nfInt(pr.accessoryMainStat) + " main stat between them" +
+          (slots != null && slots < 5 ? " — " + (5 - slots) + " slots were empty, so this is short" : "")
+      };
+    }
+
+    // ---- the two flats ----
+    // The accessories' own rolls are exact. What the ARK-GRID CORES give is not on
+    // the page at all: it names the cores and totals their points and stops there.
+    // So the model's standing figure for the cores is left standing under the
+    // accessory reading rather than being replaced by a zero, and the note says
+    // which half is which, because the sum is part derived and part assumed.
+    if (pr.accessoryFlatAP != null) {
+      var cores = raw.arkGridCores ? raw.arkGridCores.length : 0;
+      vals["adv.flatAP"] = {
+        value: Math.round(arkGridFlatAP() + num(pr.accessoryFlatAP, 0)),
+        note: "the accessories roll " + nfInt(pr.accessoryFlatAP) + " flat attack power; the page does not say what " +
+          (cores ? "the " + cores + " ark-grid cores" : "the ark-grid cores") +
+          " give, so the calculator's " + nfInt(arkGridFlatAP()) + " for those still stands on top"
+      };
+    }
+    if (pr.accessoryFlatWP != null) {
+      vals["adv.flatWP"] = {
+        value: Math.round(num(pr.accessoryFlatWP, 0)),
+        note: (num(pr.accessoryFlatWP, 0) > 0
+          ? "the accessories roll " + nfInt(pr.accessoryFlatWP) + " flat weapon power"
+          : "no accessory rolls flat weapon power") +
+          "; a weapon ark-grid core would add more, and the page does not carry that"
+      };
+    }
+
     return vals;
+  }
+
+  /**
+   * What the ark-grid CORES are assumed to give in flat attack power.
+   *
+   * It is the model's own default rather than a second constant: the deck opens
+   * on it, and an import that cannot read the cores leaves it where it is. Every
+   * character in the corpus runs six cores, so the assumption is as good for them
+   * as for the reference build — but it IS an assumption, and the import note
+   * says so rather than passing it off as a reading.
+   */
+  function arkGridFlatAP() {
+    var G = window.BraceletGearData;
+    return (G && G.DEFAULTS && G.DEFAULTS.flatAP != null) ? G.DEFAULTS.flatAP : 2700;
+  }
+
+  /** A thousands-separated integer, for the import notes. */
+  function nfInt(v) {
+    return String(Math.round(num(v, 0))).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   }
 
   /** "read 2.60% from the neck", plus the snap when the page is off the pills. */
@@ -767,16 +987,10 @@
     for (k in vals) if (Object.prototype.hasOwnProperty.call(vals, k)) n++;
     if (!n) return 0;
     applyImported(vals, c);
-    // The economy is this character's too: the gold rate follows their combat
-    // power and the baseline is the bracelet they already wear. Both used to be
-    // seeded the moment someone loaded, which contradicted "defaults until you
-    // ask" — so they ride this button with the rest of the left column
-    // (Shizu, 2026-08-12). seedEcon is keyed per character and only fills a
-    // value it has not already set, so pressing twice cannot stomp an edit.
-    var app = window.BraceletApp;
-    if (app && typeof app.seedEcon === "function") {
-      try { app.seedEcon(c); } catch (e) { /* economy is optional; the gear still landed */ }
-    }
+    // THE ECONOMY IS NOT HERE. Gold-per-1% and the baseline are seeded the moment
+    // a character is LOADED (bible-import.js), because they are context about
+    // whoever is on screen rather than settings anybody chose. This button owns
+    // the left column and nothing else (Shizu, 2026-08-12).
     return n;
   }
 
@@ -784,6 +998,16 @@
    * Paint the markers after a render: an imported field's label turns accent and
    * says where the number came from; an edited one keeps the "suggests" wording.
    */
+  /** Look for a control inside the movable elements (grade, slots, economy). */
+  function movQuery(sel) {
+    var k, el;
+    for (k in movEls) if (Object.prototype.hasOwnProperty.call(movEls, k)) {
+      el = movEls[k] && movEls[k].querySelector(sel);
+      if (el) return el;
+    }
+    return null;
+  }
+
   function markProvenance() {
     var seen = {}, k;
     for (k in S.provWas) if (Object.prototype.hasOwnProperty.call(S.provWas, k)) seen[k] = 1;
@@ -793,9 +1017,7 @@
       // Sliders and typed fields carry the path as an id; segmented controls and
       // toggles are buttons that carry it as data-seg / data-tgl instead.
       var sel = '[data-seg="' + k + '"],[data-tgl="' + k + '"]';
-      var el = $(fldId(k)) ||
-        (deckEl && deckEl.querySelector(sel)) ||
-        (topEl && topEl.querySelector(sel));
+      var el = $(fldId(k)) || (deckEl && deckEl.querySelector(sel)) || movQuery(sel);
       if (!el) continue;
       // A TOGGLE has no row and no label: the button is the whole control, and
       // it carries the gloss itself. The 9/7 stone and Master are both toggles,
@@ -803,7 +1025,7 @@
       var isTgl = !!(el.getAttribute && el.getAttribute("data-tgl"));
       var row = isTgl ? el : el.parentNode;
       if (!isTgl) {
-        while (row && row !== document.body && !(row.className && /\b(bc-sl|bc-segrow|fld)\b/.test(String(row.className)))) row = row.parentNode;
+        while (row && row !== document.body && !(row.className && /\b(bc-sl|bc-segrow|fld|bc-gems)\b/.test(String(row.className)))) row = row.parentNode;
         if (!row || row === document.body) continue;
       }
       var live = !!S.prov[k], was = S.provWas[k];
@@ -854,8 +1076,17 @@
   // must not forget who you are.
   // ------------------------------------------------------------------
 
-  /** Everything that describes the PLAYER. Nothing about the bracelet. */
-  var CHARACTER_BLOCKS = ["gear", "ov", "kit", "fight", "adv", "econ"];
+  /**
+   * Everything that describes the PLAYER. Nothing about the bracelet.
+   *
+   * `econ` is NOT here. The gold rate and the baseline are not settings the user
+   * chose — they are the loaded character's own numbers, seeded on load, and
+   * throwing them away because someone reset their gear sliders would leave the
+   * results priced against nothing (Shizu, 2026-08-12). The two *AutoKey fields
+   * survive with them, so a reset cannot make the next change re-seed over a
+   * hand-typed rate either.
+   */
+  var CHARACTER_BLOCKS = ["gear", "ov", "kit", "fight", "adv"];
 
   function resetCharacter() {
     var d = defaults(), i, k;
@@ -937,6 +1168,13 @@
       // you could read the results under it — Shizu's complaint, 2026-08-11.
       "#bc-inputs{position:static;max-height:none;overflow:visible}" +
       "#bc-inputs .ihdr{cursor:pointer}" +
+      // The two buttons sit between the panel name and the caret, and they are
+      // not part of the fold hit area. Normal sentence case, because they are
+      // buttons rather than a heading.
+      ".bc-deckctl{flex:1 1 auto;display:flex;justify-content:flex-end;min-width:0;" +
+        "cursor:default;text-transform:none;letter-spacing:0}" +
+      ".bc-deckctl .bc-ctlrow{margin:0}" +
+      ".bc-deckctl .mbtn{font-size:11.5px;padding:4px 11px}" +
       ".bc-busy{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--border);margin-left:8px;vertical-align:middle;transition:background .15s}" +
       ".bc-busy.on{background:var(--accent);animation:bc-pulse 1s ease-in-out infinite}" +
       "@keyframes bc-pulse{0%,100%{opacity:.25}50%{opacity:1}}" +
@@ -1025,6 +1263,23 @@
       "#bc-tophost .bc-toprow>*{flex:0 0 auto}" +
       "#bc-tophost .bc-toprow .bc-segrow{min-width:132px}" +
       "#bc-tophost .bc-toprow .bc-sl{flex:1 1 200px;min-width:180px}" +
+      // The slot pills beside the trait rows, and the economy under the panel.
+      "#bc-slotshost .bc-toprow{gap:0}" +
+      "#bc-slotshost .bc-segrow{min-width:0}" +
+      "#bc-econhost .bc-toprow{gap:9px}" +
+      // ---- the gem spread: one line shut, five counts open ----
+      ".bc-mini{padding:3px 10px;font-size:11px;line-height:1.4}" +
+      ".bc-gems{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:-2px 0 9px}" +
+      ".bc-gems .t{font-size:11.5px;color:var(--dim);flex:1 1 auto;min-width:0;text-transform:none;letter-spacing:0}" +
+      ".bc-gems.bc-imp .t{color:var(--accent)}" +
+      ".bc-gems .t b.warn{color:var(--bad);font-weight:700}" +
+      // Five equal cells, each a caption over its own count. They wrap on a
+      // phone rather than shrinking the boxes past readable.
+      ".bc-gemrow{flex:1 0 100%;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}" +
+      ".bc-gemcell{display:flex;flex-direction:column;gap:3px;min-width:0}" +
+      ".bc-gemcell span{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}" +
+      ".bc-gemcell input{width:100%;min-width:0;background:var(--panel2);border:1px solid var(--border);" +
+        "border-radius:6px;color:var(--text);font-family:inherit;font-size:12.5px;padding:5px 6px;text-align:center}" +
       ".bc-seg{display:flex;gap:4px}" +
       ".bc-seg button{flex:1 1 0;min-width:0;background:var(--panel2);border:1px solid var(--border);color:var(--dim);" +
         "border-radius:6px;padding:5px 2px;font-size:11.5px;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap}" +
@@ -1205,7 +1460,13 @@
   function deckMarkup() {
     return '' +
       '<div class="inputs" id="bc-inputs">' +
+      // The header row stays on screen when the body is shut, so the two buttons
+      // in it stay reachable — which is the point: the deck is collapsed every
+      // time a tab opens, and Import is what you press right after loading
+      // somebody. Clicking either must not also fold the panel, so the fold
+      // listener steps over #bc-deckctl.
       '  <div class="ihdr"><span>Character<span class="bc-busy" id="bc-busy"></span></span>' +
+      '    <span class="bc-deckctl" id="bc-deckctl"></span>' +
       '    <span class="tgl" id="bc-toggle"><span id="bc-caret">&#9656;</span></span></div>' +
       '  <div id="bc-inputs-body" style="display:none">' +
       '    <div class="bc-prov" id="bc-prov" style="display:none"></div>' +
@@ -1223,7 +1484,10 @@
       '        <div id="bc-kit"></div>' +
       '        <div class="barrow">' +
       '          <button class="mbtn" id="bc-advtoggle" type="button">Advanced ▾</button>' +
-      '          <button class="mbtn" id="bc-reset" type="button" data-gloss="Puts the settings back to the calculator\'s defaults — gear, accessories, gems and the two nodes on the left, the fight, trait, skill and economy settings on the right, and the bracelet\'s grade, granted slots and rolls left in the Grader. The character stays loaded, and the lines you typed are left alone.">Reset to defaults</button>' +
+      // "Reset to defaults" used to sit here too, hidden whenever a character
+      // was loaded because the banner carried the same button. Both buttons are
+      // in the deck's HEADER ROW now, so this one is gone rather than hidden
+      // (Shizu, 2026-08-12: not two buttons doing one job under two spellings).
       '        </div>' +
       '      </div>' +
       '      <div class="bc-col">' +
@@ -1234,8 +1498,10 @@
       '        <div class="subh">Skills — share, crit rate, crit damage</div>' +
       '        <div id="bc-skills"></div>' +
       '        <div class="barrow"><button class="mbtn" id="bc-addskill" type="button">+ Add skill</button></div>' +
-      '        <div class="subh">Economy</div>' +
-      '        <div id="bc-econ"></div>' +
+      // ECONOMY IS NOT HERE. Gold per 1% and the baseline moved to the Grader
+      // (Shizu, 2026-08-12): they are the character's own numbers rather than
+      // settings anybody chose, and they are read against the results, which sit
+      // directly under the Grader and nowhere near this fold.
       '      </div>' +
       '    </div>' +
       '    <div id="bc-adv" style="display:none"></div>' +
@@ -1248,10 +1514,12 @@
   // ------------------------------------------------------------------
 
   /**
-   * Grade, granted slots and rolls left.
+   * Grade and rolls left — plus, in their own elements, the granted-slot count
+   * and the economy.
    *
-   * They render into #bc-top, one element this file builds and parents into the
-   * GRADER panel's own #bc-tophost (app.js's markup, adoptBraceletPanel does the
+   * They render into #bc-top, #bc-slotsctl and #bc-econctl, three elements this
+   * file builds and parents into the GRADER panel's own #bc-tophost,
+   * #bc-slotshost and #bc-econhost (app.js's markup, adoptBraceletPanel does the
    * placing). They sat in the character header's control cluster until
    * 2026-08-11, which was wrong twice over: that banner is rebuilt by
    * renderCharHeader, so a rolls-left drag destroyed the slider under the hand,
@@ -1264,20 +1532,44 @@
    * pills like the loadout switch. Rolls left keeps a tight track because it
    * genuinely has eight positions.
    */
+  /**
+   * Grade and rolls left. GRANTED SLOTS IS NOT HERE any more: it moved next to
+   * the combat traits (Shizu, 2026-08-12), which is why it has an element of its
+   * own. Grade is two narrow pills, so the rolls slider takes the rest of the
+   * row rather than leaving the gap the slot pills used to fill.
+   */
   function renderTop() {
-    var ch = slotChoices();
     var h = '<div class="bc-toprow">';
     h += segmented("grade", "Grade", ["ancient", "relic"],
       function (v) { return v === "ancient" ? "Ancient" : "Relic"; },
       "Ancient bracelets roll 2 or 3 granted slots and higher line values; Relic rolls 1 or 2.");
-    h += segmented("slots", "Granted slots", ch, function (v) { return String(v); },
-      "The rerollable lines. Ancient: 3 slots on 25% of drops, 2 on 75%. Slot count moves the value of an unrolled bracelet a lot.");
     h += slider("rollsLeft", "Rolls left", 0, 7, 1, "rolls",
       { cls: "bc-sl-tight",
         ticks: ["0", "1", "2", "3", "4", "5", "6", "7"],
         gloss: "A fresh bracelet has 4 rolls plus up to 3 reconversion-ticket rolls = 7. The chip splits the two while the ticket rolls are still there. The cut flow counts this down." });
     h += "</div>";
     buildTop().innerHTML = h;
+    renderSlotsCtl();
+    renderEconCtl();
+  }
+
+  /** The granted-slot count, in the element that sits beside the trait rows. */
+  function renderSlotsCtl() {
+    buildSlotsCtl().innerHTML = '<div class="bc-toprow">' +
+      segmented("slots", "Granted slots", slotChoices(), function (v) { return String(v); },
+        "The rerollable lines. Ancient: 3 slots on 25% of drops, 2 on 75%. Slot count moves the value of an unrolled bracelet a lot.") +
+      "</div>";
+  }
+
+  /**
+   * The economy, in the element the Grader hosts.
+   *
+   * It used to be a column of the deck. It is neither a setting the user chose
+   * nor something they want folded away: both numbers arrive with the character
+   * and both are adjusted while reading the results right below them.
+   */
+  function renderEconCtl() {
+    buildEconCtl().innerHTML = econHtml();
   }
 
 
@@ -1331,9 +1623,19 @@
       "The first earring's weapon-power line. Both earrings plus karma make the weapon-power percentage bucket, which multiplies your raw weapon power and every flat weapon-power line the bracelet gives you.");
     h += segmented("kit.ear2", "Earring 2 WP", [0, 0.8, 1.8, 3], pc,
       "The second earring's weapon-power line. Same bucket as the first.");
+    // THE GEM SLIDER AND THE SPLIT. The slider is one level for all eleven, which
+    // is what a hand-typing user has and what the deck always held. A real
+    // character usually runs a MIXED set, so the split below takes counts per
+    // level and overrides the slider while it holds anything — ten at 9 and one
+    // at 10 is 11.2%, not 11.0%. Switching the split off puts the slider back in
+    // charge without disturbing the level it is on.
     h += slider("kit.gems", "Damage gems", 6, 10, 1, "lv",
-      { ticks: ["6", "7", "8", "9", "10"],
-        gloss: "All eleven damage gems at this level. Per gem: lv6 0.4% · lv7 0.6% · lv8 0.8% · lv9 1.0% · lv10 1.2% attack power. It cancels out of most line ratios, but it shifts the balance between the square-root term and flat attack power." });
+      { disabled: hasGemSplit(),
+        ticks: ["6", "7", "8", "9", "10"],
+        gloss: hasGemSplit()
+          ? "All eleven damage gems at one level. A per-gem split is in force, so this slider is standing by — switch the split off and it takes over again."
+          : "All eleven damage gems at this level. Per gem: lv6 0.4% · lv7 0.6% · lv8 0.8% · lv9 1.0% · lv10 1.2% attack power. Real characters run mixed sets; press Split levels to enter one." });
+    h += renderGemSplit();
     h += '<div class="barrow">' +
       toggle("kit.stone", "9/7 stone",
         "A 9/7 ability stone is +1.5% attack power on top of the eleven gems. Turn it off for a 9/6 or worse.") +
@@ -1346,6 +1648,56 @@
   }
 
   /** The one derived line under the gem slider that a drag has to keep honest. */
+  /**
+   * The gem spread, shown and edited.
+   *
+   * Shut, it is one line — "10 × lv9 · 1 × lv10" — and a button that opens it.
+   * Open, it is five small counts, one per level, and a button that puts the
+   * single slider back. The counts are ordinary state paths (kit.gemSplit.0 …
+   * kit.gemSplit.4), so they ride the deck's own change handling with everything
+   * else, and the reading under them says what the eleven add up to.
+   */
+  function renderGemSplit() {
+    var split = hasGemSplit(), i, h;
+    var n = gemSplitCount(), pct = gemApSum();
+    // While the attack-power override is on, none of this reaches the score. Say
+    // so on the line itself rather than letting somebody edit eleven counts and
+    // watch nothing move.
+    var inert = S.adv.baseApOverride
+      ? ' <b class="warn">not in use — the attack power % override is on</b>' : "";
+    if (!split) {
+      return '<div class="bc-gems" id="bc-gemsplit">' +
+        // The line IS this control's label: it carries the id and the `lb` class
+        // so markProvenance can find it and say where the spread came from.
+        '<span class="t lb" id="' + fldId("kit.gemSplit") + '" data-gloss="What the eleven damage gems are, and what they add up to in the attack-power bucket.">' +
+        esc(gemSplitText()) + " &middot; " + esc(fx(pct, 1)) + "%" + inert + '</span>' +
+        '<button type="button" class="mbtn bc-mini" id="bc-gemsplit-on"' +
+        ' data-gloss="Enter the gems level by level. Real characters run mixed sets — ten at 9 and one at 10 is 11.2% of attack power, not 11.0% — and importing a character fills this in from their page.">Split levels</button>' +
+        "</div>";
+    }
+    h = '<div class="bc-gems open" id="bc-gemsplit">' +
+      '<span class="t lb" id="' + fldId("kit.gemSplit") + '" data-gloss="What the split adds up to in the attack-power bucket.">' +
+      esc(gemSplitText()) + " &middot; " + esc(fx(pct, 1)) + "%" +
+      (n === GEM_COUNT ? "" : ' <b class="warn">' + n + " gems, not " + GEM_COUNT + "</b>") + inert + "</span>" +
+      '<button type="button" class="mbtn bc-mini" id="bc-gemsplit-off"' +
+      ' data-gloss="Back to one level for all eleven gems. The slider above takes over again.">One level</button>' +
+      '<div class="bc-gemrow">';
+    for (i = 0; i < GEM_LEVELS.length; i++) {
+      h += '<label class="bc-gemcell" for="' + fldId("kit.gemSplit." + i) + '">' +
+        '<span>lv' + GEM_LEVELS[i] + "</span>" +
+        '<input id="' + fldId("kit.gemSplit." + i) + '" type="number" min="0" max="' + GEM_COUNT + '" step="1"' +
+        ' data-k="kit.gemSplit.' + i + '" data-t="num" value="' + esc(Math.max(0, Math.round(num(S.kit.gemSplit[i], 0)))) + '"></label>';
+    }
+    return h + "</div></div>";
+  }
+
+  /** Turn the split on, seeded from whatever the single slider says. */
+  function gemSplitOn() {
+    var lv = clamp(Math.round(num(S.kit.gems, 9)), 6, 10), a = [], i;
+    for (i = 0; i < GEM_LEVELS.length; i++) a.push(GEM_LEVELS[i] === lv ? GEM_COUNT : 0);
+    S.kit.gemSplit = a;
+  }
+
   function updateKitNote() {
     var box = $("bc-kit");
     if (!box) return;
@@ -1525,12 +1877,13 @@
     }
     if (!moved) return false;
     save();
-    if (deckEl) { renderEcon(); markProvenance(); }
+    if (movEls.econ) { renderEconCtl(); markProvenance(); }
     notify({ path: "econ", immediate: false, seeded: true });
     return true;
   }
 
-  function renderEcon() {
+  /** The economy's two controls as markup. The Grader hosts them (renderEconCtl). */
+  function econHtml() {
     var h = '<div class="bc-sl">' +
       '<label class="lb" for="bc-gpd" data-gloss="What one percent of damage is worth to you in gold. It is a rate you choose, not a market read — the same convention the accessory and astrogem tools use, so a bracelet, an accessory and a gem can be priced against each other. Higher for a whale roster, lower for a fresh one. The track is logarithmic: 100k at the left, 10M at the right.">Gold per 1%</label>' +
       '<div class="tk"><input id="bc-gpd" type="range" data-gpd="1" min="0" max="' + GPD_STEPS + '" step="1" value="' + gpdPos(S.econ.gpd) + '"></div>' +
@@ -1541,7 +1894,7 @@
       gloss: "The bracelet you would wear instead. Worth counts only the rolls that BEAT it — how often they land, times how far they clear it, times gold per 1% — so leaving it at 0 prices this bracelet against no bracelet at all, and a bracelet that cannot clear the baseline is worth nothing rather than a negative number. Importing a character sets it to the bracelet that character is already wearing, which is the comparison that answers \"is upgrading worth it\". Click the number to type an exact one."
     });
     h += baselineNoteHtml();
-    $("bc-econ").innerHTML = h;
+    return h;
   }
 
   function renderAdvanced() {
@@ -1554,11 +1907,12 @@
 
     var h = '<div class="subh">Stat buckets</div><div class="ig">';
     h += fldNum("adv.msPct", "Main stat %", "0.1", "Everything multiplying raw main stat: 8% skins + 1% stronghold ranch by default.");
-    h += fldNum("adv.karmaWp", "Karma weapon power %", "0.1", "Karma's share of the weapon-power bucket. The two earring lines are set in the Gear column.");
+    h += fldNum("adv.karmaWp", "Karma weapon power %", "0.1", "Karma's share of the weapon-power bucket — your karma Enlightenment level in tenths of a percent, so Enlightenment 30 is 3.0% and 25 is 2.5%. The two earring lines are set in the Gear column.");
     h += fldChk("adv.baseApOverride", "Override attack power % (ignore the gem slider)",
       "By default the attack-power bucket is eleven gems at their level plus the ability stone. Tick this to type it instead.");
     h += fldNum("adv.baseApPct", "Attack power %", "0.1", "It cancels out of most ratios but shifts the balance between the square-root term and flat attack power.");
-    h += fldNum("adv.flatAP", "Flat attack power", "1", "Ark-grid cores. Flat attack power is what stops a weapon-power line from being a pure square-root ratio.");
+    h += fldNum("adv.flatAP", "Flat attack power", "1", "Ark-grid attack cores plus any “Attack Power +80/195/390” rolls on your accessories. Flat attack power is what stops a weapon-power line from being a pure square-root ratio.");
+    h += fldNum("adv.flatWP", "Flat weapon power", "1", "Flat WEAPON power — an ark-grid WEAPON core instead of an attack one, plus any “Weapon Power +195/480/960” rolls on your accessories. It is weapon power, not attack power: it joins your raw weapon power inside the square root and the weapon-power bucket amplifies it, so it is worth less per point than the same number of flat attack power. Default 0.");
     h += fldNum("adv.accessoryMainStat", "Accessory main stat", "1", "Neck 17,857 + two earrings 13,889 + two rings 12,897, all at the top of their range with no flat-stat rolls.");
     h += fldNum("adv.rosterBonus", "Roster bonus", "1", "Main stat from roster level.");
     h += "</div>";
@@ -1611,14 +1965,12 @@
   function renderAll() {
     if (!deckEl) return;
     renderProvStrip();
+    // renderTop paints all three movable elements: grade + rolls, the granted
+    // slot count, and the economy. None of them is inside the deck any more.
     renderTop(); renderGear(); renderKit(); renderFight(); renderTraitWeights();
-    renderSkills(); renderEcon(); renderAdvanced();
+    renderSkills(); renderAdvanced();
     markProvenance();
     applyFold();
-    // With a character loaded the header's control row carries this pair, so the
-    // deck's own copy would be the third button doing the same thing.
-    var rb = $("bc-reset");
-    if (rb) rb.style.display = hasCharacter() ? "none" : "";
     ctlRepaint();
   }
 
@@ -1636,30 +1988,34 @@
     }
   }
   function paintCtlHost(e) {
+    // A tab's cluster no longer draws the two buttons — they are in the deck's
+    // header row, and the deck follows the user from tab to tab. What is left
+    // here is the room for the bracelet's own movable controls, which
+    // mountCharControls parents in. Any stale copy of the old row is cleared.
     var row = e.host.getElementsByClassName("bc-ctlstack")[0];
-    if (!row) {
-      // Only this row is ever rewritten. #bc-top is a LIVE element that moves
-      // between clusters, so it must not be inside anything we innerHTML.
-      row = document.createElement("div");
-      row.className = "bc-ctlstack";
-      e.host.insertBefore(row, e.host.firstChild);
-    }
-    row.innerHTML = charControlsHtml();
+    if (row && row.parentNode) row.parentNode.removeChild(row);
   }
+  /** Repaint the deck's header cluster, and clear any stale tab copy. */
   function ctlRepaint() {
     pruneCtlHosts();
     for (var i = 0; i < ctlHosts.length; i++) paintCtlHost(ctlHosts[i]);
+    var box = $("bc-deckctl");
+    if (box) box.innerHTML = charControlsHtml();
   }
 
   /**
-   * A tab hands over its right-hand control cluster: the character's two
-   * buttons, and — unless it says otherwise — the bracelet's three settings.
+   * A tab hands over a control cluster and gets the MOVABLE CONTROLS in it:
+   * grade and rolls left, the granted-slot count, and the economy.
    *
-   * `opts.withTop === false` leaves those three where they are. The Calculator
-   * passes it, because they live in its Grader panel now (see
+   * The character's two buttons are NOT here any more — they are in the deck's
+   * own header row, and the deck follows the user from tab to tab (Shizu,
+   * 2026-08-12).
+   *
+   * `opts.withTop === false` leaves the movable controls where they are. The
+   * Calculator passes it, because they live in its Grader panel (see
    * adoptBraceletPanel) and a cluster repaint must never drag them back into the
-   * banner. Every other tab has no Grader to put them in, so they still ride
-   * along with the cluster and the tab that asked last keeps them.
+   * banner. Every other tab has no Grader to put them in, so they ride along
+   * with the cluster and the tab that asked last keeps them.
    */
   function mountCharControls(hostEl, opts) {
     if (!hostEl) return null;
@@ -1669,8 +2025,11 @@
     if (!e) { e = { host: hostEl }; ctlHosts.push(e); }
     paintCtlHost(e);
     if ((!opts || opts.withTop !== false) && onScreen(hostEl)) {
-      var top = buildTop();
-      if (top.parentNode !== hostEl) { hostEl.appendChild(top); renderTop(); }
+      var els = movableEls(), moved = false, j;
+      for (j = 0; j < els.length; j++) {
+        if (els[j].parentNode !== hostEl) { hostEl.appendChild(els[j]); moved = true; }
+      }
+      if (moved) renderTop();
     }
     return hostEl;
   }
@@ -1759,6 +2118,10 @@
     var also = null;
     if (path === "adv.baseApOverride") {
       also = function () { renderKit(); renderAdvanced(); markProvenance(); };
+    } else if (path.indexOf("kit.gemSplit.") === 0) {
+      // The split line, the bucket total and the single slider's enabled state
+      // all move with a count, so the Gear column is redrawn whole.
+      also = function () { renderKit(); markProvenance(); };
     } else if (path.indexOf("adv.") === 0) {
       // Karma and the attack-power override feed the two derived buckets the
       // Gear column prints; refresh that line without rebuilding the field.
@@ -1896,15 +2259,24 @@
           save(); renderSkills(); markProvenance();
           notify({ path: "skills", immediate: true });
         }
+      } else if (t.id === "bc-gemsplit-on" || t.id === "bc-gemsplit-off") {
+        if (t.id === "bc-gemsplit-on") gemSplitOn(); else S.kit.gemSplit = null;
+        clearProv("kit.gemSplit");
+        save(); renderKit(); markProvenance();
+        notify({ path: "kit.gemSplit", immediate: true });
       } else if (t.id === "bc-advtoggle") { S.advOpen = !S.advOpen; save(); renderAdvanced(); markProvenance(); }
       else if (t.id === "bc-addfixed") {
         if (S.fixedRows.length < 2) { S.fixedRows.push(blankRow()); save(); renderAdvanced(); notify({ path: "fixedRows", immediate: false }); }
-      } else if (t.id === "bc-reset") { resetCharacter(); }
+      }
     });
 
     // The whole header row collapses the panel, not just the little arrow.
     var hdr = panel.getElementsByClassName("ihdr")[0];
-    if (hdr) hdr.addEventListener("click", function () {
+    if (hdr) hdr.addEventListener("click", function (e) {
+      // The two buttons live in this row. Pressing one must not also fold the
+      // panel underneath it.
+      var t = e.target;
+      if (t && t.closest && t.closest(".bc-deckctl")) return;
       S.deckOpen = !S.deckOpen;
       save();
       applyFold();
@@ -1914,9 +2286,10 @@
   /**
    * Open or shut the deck body to match S.deckOpen.
    *
-   * The deck starts SHUT — on every tab that mounts it. The thing a visitor came
-   * for is the score and the table under it, not thirty controls; the controls
-   * are one click away and the choice sticks from then on.
+   * The deck starts SHUT, and shuts again on every tab switch (see mount). The
+   * thing a visitor came for is the score and the table under it, not thirty
+   * controls; the controls are one click away and the choice sticks until the
+   * next switch.
    */
   function applyFold() {
     var body = $("bc-inputs-body"), c = $("bc-caret");
@@ -1937,17 +2310,26 @@
   function adoptBraceletPanel() {
     var panel = document.getElementById("bc-braceletpanel");
     if (!panel) return;
-    // The bracelet's own three settings live HERE, in the panel that grades the
-    // bracelet — not in the character banner, which is rebuilt on every repaint
-    // and is not drawn at all until a character is loaded. Another tab may have
-    // borrowed the element (see mountCharControls); this claims it back, so it
-    // runs before the early return below rather than after it.
-    var host = document.getElementById("bc-tophost");
-    if (host && onScreen(host)) {
-      var top = buildTop();
-      if (top.parentNode !== host) host.appendChild(top);
-      renderTop();
+    // THE MOVABLE CONTROLS live HERE, in the panel that grades the bracelet —
+    // not in the character banner, which is rebuilt on every repaint and is not
+    // drawn at all until a character is loaded. Another tab may have borrowed
+    // them (see mountCharControls); this claims them back, so it runs before the
+    // early return below rather than after it.
+    //
+    // Three hosts, three elements, each in the place it belongs: grade and rolls
+    // under the panel header, the granted-slot count beside the combat traits,
+    // and the economy at the foot of the panel, immediately above the results it
+    // prices.
+    var placed = false, i;
+    var spots = [["bc-tophost", buildTop], ["bc-slotshost", buildSlotsCtl], ["bc-econhost", buildEconCtl]];
+    for (i = 0; i < spots.length; i++) {
+      var host = document.getElementById(spots[i][0]);
+      if (!host || !onScreen(host)) continue;
+      var el = spots[i][1]();
+      if (el.parentNode !== host) host.appendChild(el);
+      placed = true;
     }
+    if (placed) renderTop();
     var hdr = panel.getElementsByClassName("bc-hdrow")[0];
     if (!hdr) return;
     var h2 = hdr.getElementsByTagName("h2")[0];
@@ -1968,25 +2350,42 @@
   // ------------------------------------------------------------------
 
   /**
-   * The bracelet's three settings, as one element that lives outside the deck.
+   * THE MOVABLE CONTROLS: three elements that live outside the deck.
    *
-   * Built detached and parented into the Grader panel's #bc-tophost on the first
-   * mount, so renderTop() always has something to write into — even on the Tier
-   * List, which has no Grader and borrows the element into its control cluster
-   * instead. The Calculator claims it back on activation.
+   *   #bc-top        grade and rolls left
+   *   #bc-slotsctl   how many granted slots
+   *   #bc-econctl    gold per 1% and the baseline
+   *
+   * Each is built detached and parented into its own host in the Grader panel on
+   * the first mount, so renderTop() always has somewhere to write — even on the
+   * Tier List and the Advisor, which have no Grader and borrow all three into
+   * their control cluster instead. The Calculator claims them back on activation.
+   *
+   * They are separate elements because they belong in separate places: the count
+   * sits beside the combat traits and the economy at the foot of the panel, and
+   * a single element could only ever be in one of them.
    */
-  var topEl = null;
-  function buildTop() {
-    if (topEl) return topEl;
+  var movEls = {};
+  function buildMovable(key, id, cls) {
+    if (movEls[key]) return movEls[key];
     injectStyle();
-    topEl = document.createElement("div");
-    topEl.id = "bc-top";
-    topEl.className = "bc-brachdr";
-    // The pills and the slider are bound by the deck's own delegated listeners,
-    // which are on the deck element — this one needs its own copy.
-    bindDeck(topEl);
-    return topEl;
+    var el = document.createElement("div");
+    el.id = id;
+    if (cls) el.className = cls;
+    // The pills and the sliders are bound by the deck's own delegated listeners,
+    // which are on the deck element — each of these needs its own copy.
+    bindDeck(el);
+    movEls[key] = el;
+    return el;
   }
+  /** Grade and rolls left. */
+  function buildTop() { return buildMovable("top", "bc-top", "bc-brachdr"); }
+  /** How many granted slots. Its own element so it can sit beside the traits. */
+  function buildSlotsCtl() { return buildMovable("slots", "bc-slotsctl", "bc-brachdr"); }
+  /** Gold per 1% and the baseline. */
+  function buildEconCtl() { return buildMovable("econ", "bc-econctl", ""); }
+  /** All three, in the order a borrowing tab should stack them. */
+  function movableEls() { return [buildTop(), buildSlotsCtl(), buildEconCtl()]; }
 
   var deckEl = null;
   function buildDeck() {
@@ -2044,6 +2443,16 @@
     mount: function (hostEl) {
       if (!hostEl) return null;
       var el = buildDeck();
+      // COLLAPSED ON EVERY CLAIM. mount() is called exactly once per tab
+      // activation and never on an ordinary redraw, so this is the tab switch:
+      // each tab opens showing its own work — the results, the advice, the
+      // table — and not a panel of sliders to scroll past (Shizu, 2026-08-12).
+      // No per-tab memory of the fold: guessing which tab you had it open on is
+      // the kind of cleverness that reads as a bug when it guesses wrong. What
+      // the user opens after the switch stays open until the next one, and the
+      // deck's VALUES are untouched — this is visibility, not a reset.
+      S.deckOpen = false;
+      save();
       if (el.parentNode !== hostEl) hostEl.appendChild(el);
       renderAll();
       adoptBraceletPanel();

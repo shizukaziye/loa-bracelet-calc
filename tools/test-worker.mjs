@@ -231,23 +231,44 @@ const GEAR = ["weapon:25", "head:21", "upper_body:22", "lower_body:20", "hand:23
   .join(",");
 const ACC =
   '{id:2,slot:"neck",data:{type:"tier4_accessory",stats:[' +
+    "{type:2,index:3,base:true,id:6003,value:17563}," +         // main stat, the BASE block
+    "{type:2,index:4,base:true,id:6003,value:17563}," +         // the same number under another name
     "{type:2,index:6,base:true,id:6003,value:3835}," +          // base block, not a roll
     "{type:2,index:27,base:false,id:6009,value:1300}," +        // a roll the deck has no control for
     "{type:2,index:50,base:false,id:6009,value:260}]}}," +      // Additional Damage 2.60%
   '{id:3,slot:"ear1",data:{type:"tier4_accessory",stats:[' +
+    "{type:2,index:3,base:true,id:6103,value:13702}," +
+    "{type:2,index:124,base:false,id:6109,value:390}," +        // Attack Power +390, FLAT
     "{type:2,index:152,base:false,id:6109,value:180}]}}," +     // Weapon Power 1.80%
   '{id:4,slot:"ear2",data:{type:"tier4_accessory",stats:[' +
-    "{type:2,index:49,base:false,id:6109,value:155}]}}";        // crit rate only: no WP line at all
+    "{type:2,index:3,base:true,id:6103,value:13640}," +
+    "{type:2,index:49,base:false,id:6109,value:155}]}}," +      // crit rate only: no WP line at all
+  '{id:6,slot:"finger1",data:{type:"tier4_accessory",stats:[' +
+    "{type:2,index:3,base:true,id:6203,value:12065}," +
+    "{type:2,index:151,base:false,id:6209,value:480}]}}," +     // Weapon Power +480, FLAT
+  '{id:7,slot:"finger2",data:{type:"tier4_accessory",stats:[' +
+    "{type:2,index:3,base:true,id:6203,value:12839}," +
+    "{type:2,index:124,base:false,id:6209,value:80}]}}";        // Attack Power +80, FLAT
 const STONE = '{id:5,slot:"ability_stone",data:{engravings:[{id:141,nodes:7},{id:247,nodes:9},{id:800,nodes:1}],type:"ability_stone"}}';
 const GEMS = "gems:[" +
   Array.from({ length: 10 }, (_, i) => "{slot:" + i + ",id:65032100,effects:[{type:27,id:47250,value:2400},{type:2,id:150,value:120}]}").join(",") +
   ",{slot:10,id:65032090,effects:[{type:27,id:47250,value:2200},{type:2,id:150,value:100}]}]";
 const APASS = "arkPassive:{evolution:[{id:1010100,level:10},{id:1032200,level:1},{id:1032300,level:1}],enlightenment:[],leap:[]}";
+// Karma: enlightenment 29 is the one that matters — 2.9% weapon power. Evolution
+// and Leap are here precisely so a wrong reading of either would show up.
+const KARMA = "karma:{evolution:25,enlightenment:29,leap:21}";
+// Two ark-grid cores, gem points and all — counted, never converted into an
+// attack-power figure the page does not carry.
+const CORES = "arkGridCores:[" +
+  "{id:673003425,base:10001,gems:[{id:1,idx:0,corePoints:5},{id:2,idx:1,corePoints:4}]}," +
+  "{id:673112006,base:10004,gems:[{id:3,idx:0,corePoints:3}]}]";
 const PROFILE_HTML = "loadouts:[{classification:\"most_recent_raid\",lastUpdated:1,itemLevel:1789.1661," +
   "combatPower:{id:1,score:7200.5},classId:\"blade\",apPoints:{enlightenment:101,evolution:140,leap:70}," +
   GEMS + ",items:[" + GEAR + "," + ACC + "," + STONE + "," +
   '{id:9,slot:"bracelet",data:{type:"bracelet",stats:[{type:2,index:15,id:1,value:101,fixed:true}],numRerolls:1,numTicketRerolls:0}}],' +
-  "battlePoint:{parts:[{type:1,value:1,mainStat:827342,weaponPower:265706}]}," + APASS + "}]";
+  "battlePoint:{parts:[{type:1,value:1,mainStat:827342,weaponPower:265706," +
+  "attackPowerMultiplier:14.700000000000001,baseAttackPower:197890.5}]}," +
+  KARMA + "," + CORES + "," + APASS + "}]";
 
 const pf = parseCharacterProfile(PROFILE_HTML);
 ok("reads all six honing levels", pf && pf.honing &&
@@ -283,6 +304,45 @@ ok("a page with no loadouts array yields null rather than throwing",
   parseCharacterProfile("nothing here at all") === null);
 ok("a truncated loadout does not throw",
   parseCharacterProfile('loadouts:[{classification:"x",items:[{id:1,slot:"head"') !== undefined);
+// ---- the five derived numbers, added 2026-08-12 ----
+ok("karma weapon power is enlightenment tenths, not evolution's and not leap's",
+  pf.karmaWp === 2.9, String(pf.karmaWp));
+ok("the whole karma triple is reported, so a reader can check the tenths",
+  pf.raw.karma && pf.raw.karma.evolution === 25 && pf.raw.karma.enlightenment === 29 &&
+  pf.raw.karma.leap === 21, JSON.stringify(pf.raw.karma));
+ok("no karma block leaves karmaWp absent rather than guessed",
+  parseCharacterProfile(PROFILE_HTML.replace(KARMA + ",", "")).karmaWp === undefined);
+ok("attack power % is the page's own multiplier, float noise rounded off",
+  pf.apPct === 14.7, String(pf.apPct));
+ok("the page's unrounded multiplier is kept in raw",
+  pf.raw.attackPowerMultiplier === 14.700000000000001, String(pf.raw.attackPowerMultiplier));
+ok("the gems-and-stone second opinion is reported beside it (10×1.2 + 1.0 + 1.5 stone)",
+  pf.raw.apPctFromGems === 14.5, String(pf.raw.apPctFromGems));
+ok("the gem spread ships as counts per level, ten at 10 and one at 9",
+  pf.gemCounts && pf.gemCounts.join(",") === "0,0,0,1,10", JSON.stringify(pf.gemCounts));
+ok("the counts sum to the gems that were read",
+  pf.gemCounts.reduce((a, b) => a + b, 0) === pf.gemLevels.length);
+ok("accessory main stat is the five BASE blocks summed, index 3 only (not 3+4+5)",
+  pf.accessoryMainStat === 17563 + 13702 + 13640 + 12065 + 12839,
+  String(pf.accessoryMainStat));
+ok("flat attack power is the accessories' index-124 rolls", pf.accessoryFlatAP === 470,
+  String(pf.accessoryFlatAP));
+ok("flat weapon power is the accessories' index-151 rolls, kept APART from flat AP",
+  pf.accessoryFlatWP === 480, String(pf.accessoryFlatWP));
+ok("an accessory with no flat roll reads zero for it, not nothing",
+  pf.raw.accessoryBySlot.ear2.flatAP === 0 && pf.raw.accessoryBySlot.ear2.flatWP === 0);
+ok("all five accessory slots were seen", pf.raw.accessorySlots === 5, String(pf.raw.accessorySlots));
+ok("a missing accessory is named in `missing`, not silently summed as zero", (function () {
+  const p2 = parseCharacterProfile(PROFILE_HTML.replace(/,\{id:7,slot:"finger2".*?\}\]\}\}/, ""));
+  return p2.raw.accessorySlots === 4 && (p2.missing || []).indexOf("accessory:finger2") !== -1;
+})());
+ok("the ark grid is COUNTED, never converted — two cores, their points totalled",
+  pf.raw.arkGridCores && pf.raw.arkGridCores.length === 2 &&
+  pf.raw.arkGridCores[0].points === 9 && pf.raw.arkGridCores[1].points === 3,
+  JSON.stringify(pf.raw.arkGridCores));
+ok("the page never yields a flat attack power for the CORES, only for accessories",
+  pf.arkGridFlatAP === undefined && pf.arkGridFlatWP === undefined);
+
 ok("snapTo picks the nearest legal option", snapTo([0, 0.7, 1.6, 2.6], 1.59) === 1.6 &&
   snapTo([0, 0.8, 1.8, 3], 2.9) === 3 && snapTo([0, 0.7, 1.6, 2.6], 0.1) === 0);
 ok("modal breaks a tie upwards", modal([9, 9, 10, 10]) === 10 && modal([8, 9, 9]) === 9);
@@ -297,20 +357,54 @@ try { corpusFiles = readdirSync(corpusDir).filter(f => f.endsWith(".html")); } c
 if (!corpusFiles.length) {
   console.log("  --   .corpus/ is not here (it is gitignored); skipping the real-page sweep");
 } else {
-  const need = ["honing", "neckAddDmg", "earring1Wp", "earring2Wp", "stone97", "master", "itemLevel"];
+  const need = ["honing", "neckAddDmg", "earring1Wp", "earring2Wp", "stone97", "master", "itemLevel",
+    // The 2026-08-12 additions. All five accessories are on every page in the
+    // corpus, so these four are as universal as the honing levels.
+    "accessoryMainStat", "accessoryFlatAP", "accessoryFlatWP", "apPct"];
   const missed = {};
-  let los = 0, gems = 0;
+  let los = 0, gems = 0, karma = 0, splits = 0, mixed = 0;
+  const badMs = [], badKarma = [], badFlat = [];
   for (const f of corpusFiles) {
     for (const l of extractLoadouts(readFileSync(join(corpusDir, f), "utf8"))) {
       los++;
       if (!l.profile) { missed.PROFILE = (missed.PROFILE || 0) + 1; continue; }
-      for (const k of need) if (l.profile[k] === undefined) missed[k] = (missed[k] || 0) + 1;
-      if (l.profile.gemLevel !== undefined) gems++;
+      const p = l.profile;
+      for (const k of need) if (p[k] === undefined) missed[k] = (missed[k] || 0) + 1;
+      if (p.gemLevel !== undefined) gems++;
+      if (p.karmaWp !== undefined) karma++;
+      if (p.gemCounts) {
+        splits++;
+        if (p.gemCounts.filter(c => c > 0).length > 1) mixed++;
+        if (p.gemCounts.reduce((a, b) => a + b, 0) !== p.gemLevels.length) {
+          missed.GEM_COUNT_SUM = (missed.GEM_COUNT_SUM || 0) + 1;
+        }
+      }
+      // SANITY, against the accessory tool's own bands rather than against
+      // ourselves: neck 15,178–17,857 + 2 earrings 11,806–13,889 + 2 rings
+      // 10,962–12,897 can only ever sum between 61,714 and 71,429, and a page
+      // outside that means we read the wrong index.
+      if (p.accessoryMainStat != null && p.raw.accessorySlots === 5 &&
+          (p.accessoryMainStat < 58000 || p.accessoryMainStat > 72000)) {
+        badMs.push(f + ":" + p.accessoryMainStat);
+      }
+      // Karma is a percentage of weapon power. Enlightenment caps at 30.
+      if (p.karmaWp != null && (p.karmaWp < 0 || p.karmaWp > 3)) badKarma.push(f + ":" + p.karmaWp);
+      // Five accessories, best roll each: 5 × 390 flat AP, 5 × 960 flat WP.
+      if (p.accessoryFlatAP > 5 * 390 || p.accessoryFlatWP > 5 * 960) {
+        badFlat.push(f + ":" + p.accessoryFlatAP + "/" + p.accessoryFlatWP);
+      }
     }
   }
   ok("every loadout in .corpus yields every non-gem field (" + corpusFiles.length + " pages, " + los + " loadouts)",
     Object.keys(missed).length === 0, JSON.stringify(missed));
   ok("gems read on all but the loadouts that have none", gems >= los - 15, gems + "/" + los);
+  ok("karma read on all but the loadouts with no karma block", karma >= los - 5, karma + "/" + los);
+  ok("a gem spread comes with every readable gem set, and some are MIXED",
+    splits === gems && mixed > 0, splits + "/" + gems + ", " + mixed + " mixed");
+  ok("every five-accessory main stat lands inside the accessory tool's bands",
+    badMs.length === 0, badMs.join(" "));
+  ok("every karma weapon power lands in 0…3%", badKarma.length === 0, badKarma.join(" "));
+  ok("no flat roll exceeds five accessories at their best", badFlat.length === 0, badFlat.join(" "));
 }
 
 // ---------------------------------------------------------------------------

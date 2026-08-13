@@ -951,6 +951,49 @@ function braceletInLoadout(loadoutSrc) {
  *               (unanimous, 15 of 59 characters have it; its tier-4 neighbours
  *               are 1032100 Critical and 1032300 Pulverize).
  *
+ *   ACCESSORY   items[neck|ear1|ear2|finger1|finger2].data.stats[], the
+ *   MAIN STAT   `base:true` block this time rather than the rolls. Indices 3, 4
+ *               and 5 are Strength, Dexterity and Intelligence and an accessory
+ *               carries all three at the SAME value — only the class's own one
+ *               counts in game — so index 3 is read and the other two ignored.
+ *               Across the 59 pages the five slots land inside the accessory
+ *               tool's own bands without exception (neck 15,446–17,857, earring
+ *               11,806–13,889, ring 11,001–12,897), and the five sum to the
+ *               60–72k the deck's `accessoryMainStat` field holds.
+ *
+ *   FLAT AP     accessory roll index 124, values {80, 195, 390} across the whole
+ *   FLAT WP     corpus — the "Attack Power +N" grinding line. Index 151 is
+ *               "Weapon Power +N", values {195, 480, 960}. Both are FLAT, both
+ *               are summed over the five accessories, and the two are reported
+ *               apart because the model treats them apart: flat attack power
+ *               sits outside the square root, flat weapon power inside it.
+ *               NOT READ, because the page does not carry it: what the ark-grid
+ *               CORES contribute. `arkGridCores[]` gives each core's id and the
+ *               points its gems total, and `battlePoint` type 29 gives each a
+ *               combat-power figure — but nowhere does the page say how much
+ *               attack or weapon power a core is granting. raw.arkGridCores
+ *               reports the cores we can see so a reader knows what is missing.
+ *
+ *   ATTACK      battlePoint.parts[type=1].attackPowerMultiplier — the character's
+ *   POWER %     whole AP% bucket, as a percentage, and the model's `baseApPct`
+ *               exactly. On 78 of the 100 corpus loadouts with eleven readable
+ *               gems it equals the eleven gems plus 1.5 for a 9/7-or-better
+ *               ability stone, which is how the deck builds the number itself;
+ *               on the other 22 the page reads HIGHER, by 0.35 to 2.05, from
+ *               sources the page does not itemise. So the page's own figure is
+ *               what ships, with the gem-and-stone sum reported beside it.
+ *
+ *   KARMA WP    karma.enlightenment ÷ 10, as a percentage. Derived, not assumed:
+ *               take the page's own weapon-power total, divide out the weapon's
+ *               Serca value plus every flat weapon-power roll, subtract the two
+ *               earrings' weapon-power percentages, and what is left is a
+ *               0.1-quantised residual. On the 65 corpus loadouts where nothing
+ *               else is unaccounted for, that residual equals enlightenment ÷ 10
+ *               on EVERY ONE — 21→2.1%, 26→2.6%, … 30→3.0% — and it is never
+ *               below it anywhere. Evolution and Leap do not predict it; only
+ *               Enlightenment does. The community's "up to 3%, 2.5% non-whale"
+ *               is enlightenment 30 and enlightenment 25.
+ *
  *   COMBAT      the page header's estimatedMaxCombatPower.score — NOT the
  *   POWER       `combatPower` on the loadout, which is only what that tab was
  *               wearing when bible last synced it. On 36 of the 59 corpus pages
@@ -985,6 +1028,19 @@ const ACC_ADD_DAMAGE = 50;        // neck, centi-%
 const ACC_WEAPON_POWER = 152;     // earring, centi-%
 const NECK_OPTIONS = [0, 0.7, 1.6, 2.6];
 const EAR_OPTIONS = [0, 0.8, 1.8, 3];
+
+// The five accessory slots, in the order the deck's own field adds them up.
+const ACC_SLOTS = ["neck", "ear1", "ear2", "finger1", "finger2"];
+// base:true main stat. 3/4/5 are Strength/Dexterity/Intelligence at one value.
+const ACC_MAIN_STAT = 3;
+const ACC_FLAT_AP = 124;          // "Attack Power +80/195/390", flat
+const ACC_FLAT_WP = 151;          // "Weapon Power +195/480/960", flat
+// A damage gem's attack-power percentage, per level. The same ladder the deck
+// holds; it is here so the parser can say what the gems account for.
+const GEM_AP_PCT = { 6: 0.4, 7: 0.6, 8: 0.8, 9: 1.0, 10: 1.2 };
+const STONE_AP_PCT = 1.5;         // a 9/7-or-better ability stone
+// Karma's weapon-power percentage is enlightenment tenths. See the header.
+const KARMA_WP_PER_ENLIGHTENMENT = 0.1;
 
 // A gem's attack-power effect -> its level. The effect is {type:2, id:150}.
 const GEM_AP_LEVEL = { 45: 6, 60: 7, 80: 8, 100: 9, 120: 10 };
@@ -1029,6 +1085,20 @@ function rolledLine(dataSrc, index) {
   const lines = rolledAccessoryLines(dataSrc);
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].type === 2 && lines[i].index === index) return lines[i].value;
+  }
+  return null;
+}
+
+/** The BASE (`base:true`) value of one index on an accessory, or null. */
+function baseLine(dataSrc, index) {
+  const stats = field(dataSrc, "stats");
+  if (!stats || stats[0] !== "[") return null;
+  const els = splitTop(stats);
+  for (let i = 0; i < els.length; i++) {
+    if (field(els[i], "base") !== "true") continue;
+    if (numOrNull(field(els[i], "type")) !== 2) continue;
+    if (numOrNull(field(els[i], "index")) !== index) continue;
+    return numOrNull(field(els[i], "value"));
   }
   return null;
 }
@@ -1108,8 +1178,8 @@ function parseCharacterProfile(html, loadoutSrc) {
 
   // ---- one pass over items: honing, accessories, the stone ------------------
   const itemsSrc = field(src, "items");
-  const honing = {}, advanced = {};
-  let neckData = null, ear1Data = null, ear2Data = null, stoneSrc = null;
+  const honing = {}, advanced = {}, accData = {};
+  let stoneSrc = null;
   if (itemsSrc && itemsSrc[0] === "[") {
     const els = splitTop(itemsSrc);
     for (let i = 0; i < els.length; i++) {
@@ -1122,12 +1192,11 @@ function parseCharacterProfile(html, loadoutSrc) {
         if (h != null) honing[GEAR_SLOTS[slot]] = h;
         const a = numOrNull(field(data, "advancedHoning"));
         if (a != null) advanced[GEAR_SLOTS[slot]] = a;
-      } else if (slot === "neck") neckData = data;
-      else if (slot === "ear1") ear1Data = data;
-      else if (slot === "ear2") ear2Data = data;
+      } else if (ACC_SLOTS.indexOf(slot) !== -1) accData[slot] = data;
       else if (slot === "ability_stone") stoneSrc = data;
     }
   }
+  const neckData = accData.neck || null, ear1Data = accData.ear1 || null, ear2Data = accData.ear2 || null;
 
   let honingCount = 0;
   for (let i = 0; i < GEAR_PIECES.length; i++) if (honing[GEAR_PIECES[i]] != null) honingCount++;
@@ -1159,6 +1228,38 @@ function parseCharacterProfile(html, loadoutSrc) {
     out.raw[key] = pct;
     out[key] = snapTo(EAR_OPTIONS, pct);
   }
+
+  // ---- the five accessories: main stat, flat AP, flat WP --------------------
+  // The main stat is the accessories' BASE block; the two flats are ROLLS. Every
+  // slot that is actually there contributes, and a slot that is not is named in
+  // `missing` rather than counted as a zero — five-of-five or say so, because a
+  // four-accessory sum quietly understates the whole main-stat bucket.
+  const accSlots = [], accBySlot = {};
+  let accMainStat = 0, accFlatAP = 0, accFlatWP = 0, accSeen = 0;
+  for (let i = 0; i < ACC_SLOTS.length; i++) {
+    const slot = ACC_SLOTS[i], data = accData[slot];
+    if (!data) { out.missing.push("accessory:" + slot); continue; }
+    accSeen++;
+    const ms = baseLine(data, ACC_MAIN_STAT);
+    const fap = rolledLine(data, ACC_FLAT_AP);
+    const fwp = rolledLine(data, ACC_FLAT_WP);
+    if (ms != null) accMainStat += ms;
+    if (fap != null) accFlatAP += fap;
+    if (fwp != null) accFlatWP += fwp;
+    accSlots.push(slot);
+    accBySlot[slot] = { mainStat: ms, flatAP: fap || 0, flatWP: fwp || 0 };
+  }
+  if (accSeen) {
+    out.raw.accessorySlots = accSeen;
+    out.raw.accessoryBySlot = accBySlot;
+    // A rolled flat line that is absent is a reading of ZERO, not a failure —
+    // the slot is there and simply did not roll one. So both flats ship for any
+    // character whose accessories we could read at all.
+    out.accessoryFlatAP = accFlatAP;
+    out.accessoryFlatWP = accFlatWP;
+    if (accMainStat > 0) out.accessoryMainStat = accMainStat;
+    else out.missing.push("accessoryMainStat");
+  } else out.missing.push("accessories");
 
   // ---- the 9/7 stone -------------------------------------------------------
   if (stoneSrc) {
@@ -1200,6 +1301,13 @@ function parseCharacterProfile(html, loadoutSrc) {
     if (levels.length) {
       out.gemLevels = levels;
       out.gemLevel = modal(levels);
+      // THE SPREAD, as counts per level — [lv6, lv7, lv8, lv9, lv10]. The modal
+      // level above is the one number a single slider can hold; this is the real
+      // distribution, and it is what the deck's attack-power bucket sums when it
+      // has it. "10 × lv9 and 1 × lv10" is 11.2%, not 11 × 1.0%.
+      const counts = [0, 0, 0, 0, 0];
+      for (let g = 0; g < levels.length; g++) counts[levels[g] - 6]++;
+      out.gemCounts = counts;
       out.raw.gemCount = levels.length + unreadable;
       out.raw.gemSpread = spreadText(levels);
       out.raw.gemMixed = levels.length > 1 && Math.min.apply(null, levels) !== Math.max.apply(null, levels);
@@ -1212,6 +1320,43 @@ function parseCharacterProfile(html, loadoutSrc) {
       out.raw.gemsUnreadable = els.length;
     } else out.missing.push("gems");
   } else out.missing.push("gems");
+
+  // ---- karma's weapon power -------------------------------------------------
+  // enlightenment ÷ 10, in percent. Derived from the corpus, not assumed — see
+  // the header for the residual that pins it down.
+  const karmaSrc = field(src, "karma");
+  if (karmaSrc && karmaSrc[0] === "{") {
+    const kEvo = numOrNull(field(karmaSrc, "evolution"));
+    const kEnl = numOrNull(field(karmaSrc, "enlightenment"));
+    const kLeap = numOrNull(field(karmaSrc, "leap"));
+    out.raw.karma = { evolution: kEvo, enlightenment: kEnl, leap: kLeap };
+    if (kEnl != null) {
+      // Rounded to the tenth the game itself shows: enlightenment is an integer,
+      // so this is exact arithmetic printed honestly rather than a snap.
+      out.karmaWp = Math.round(kEnl * KARMA_WP_PER_ENLIGHTENMENT * 10) / 10;
+    } else out.missing.push("karmaWp");
+  } else out.missing.push("karma");
+
+  // ---- the ark grid ---------------------------------------------------------
+  // Counted, never converted. The page names each core and totals the points its
+  // gems carry, but says NOTHING about the attack or weapon power the core then
+  // grants — so this reports what is there and the deck keeps its own figure for
+  // the cores. Reading a number that is not on the page would be an invention.
+  const coresSrc = field(src, "arkGridCores");
+  if (coresSrc && coresSrc[0] === "[") {
+    const els = splitTop(coresSrc), ids = [];
+    for (let i = 0; i < els.length; i++) {
+      const id = numOrNull(field(els[i], "id"));
+      const gems = field(els[i], "gems");
+      let pts = 0;
+      if (gems && gems[0] === "[") {
+        const gs = splitTop(gems);
+        for (let j = 0; j < gs.length; j++) pts += numOrNull(field(gs[j], "corePoints")) || 0;
+      }
+      ids.push({ id: id, points: pts });
+    }
+    if (ids.length) out.raw.arkGridCores = ids;
+  }
 
   // ---- Master ---------------------------------------------------------------
   const arkSrc = field(src, "arkPassive");
@@ -1242,9 +1387,30 @@ function parseCharacterProfile(html, loadoutSrc) {
         // mistake them for the deck's raw override pair.
         if (ms != null) out.raw.mainStatTotal = ms;
         if (wp != null) out.raw.weaponPowerTotal = wp;
+        // ATTACK POWER %, and it IS the deck's field: the page's own multiplier
+        // on the square-root term, in percent. baseAttackPower divided by
+        // sqrt(mainStat × weaponPower / 6) reproduces 1 + apm/100 on every
+        // corpus page, which is the model's formula exactly.
+        // The page carries float noise on this one (13.200000000000001), so it
+        // is rounded to the ten-thousandth of a percent — far finer than any
+        // real value, and it stops the deck printing sixteen digits.
+        const apm = numOrNull(field(els[i], "attackPowerMultiplier"));
+        if (apm != null) { out.apPct = Math.round(apm * 1e4) / 1e4; out.raw.attackPowerMultiplier = apm; }
+        const bap = numOrNull(field(els[i], "baseAttackPower"));
+        if (bap != null) out.raw.baseAttackPower = bap;
         break;
       }
     }
+  }
+
+  // What the gems and the stone account for, beside what the page reported. Not
+  // a correction to apPct — a second opinion, so a reader can see the gap. The
+  // deck prints both in the field's tooltip.
+  if (out.gemLevels && out.gemLevels.length) {
+    let gemPct = 0;
+    for (let i = 0; i < out.gemLevels.length; i++) gemPct += GEM_AP_PCT[out.gemLevels[i]] || 0;
+    const stonePct = out.stone97 ? STONE_AP_PCT : 0;
+    out.raw.apPctFromGems = Math.round((gemPct + stonePct) * 1000) / 1000;
   }
 
   if (!out.missing.length) delete out.missing;

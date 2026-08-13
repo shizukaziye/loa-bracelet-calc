@@ -45,7 +45,19 @@ refs.derivation.forEach(function (c, i) {
   check("derivation[" + i + "].weaponPowerRaw", d.weaponPowerRaw, c.out.weaponPowerRaw, true);
   check("derivation[" + i + "].mainStatTotal", r9(d.mainStatTotal), c.out.mainStatTotal);
   check("derivation[" + i + "].weaponPowerTotal", r9(d.weaponPowerTotal), c.out.weaponPowerTotal);
+  check("derivation[" + i + "].flatWP", d.flatWP, c.out.flatWP, true);
 });
+
+// First principles: flat WEAPON power is weapon power. It joins the weapon's own
+// raw figure and the wpPct bucket amplifies the sum, so a 9000 flat weapon-power
+// core raises the TOTAL by 9000 × 1.085 and leaves the main stat alone.
+(function () {
+  var d0 = B.deriveBaseline(), d1 = B.deriveBaseline({ flatWP: 9000 });
+  check("analytic.flatWP.total", r9(d1.weaponPowerTotal), r9((241367 + 9000) * 1.085));
+  check("analytic.flatWP.raisesTotalByTheBucket", r9(d1.weaponPowerTotal - d0.weaponPowerTotal), r9(9000 * 1.085));
+  check("analytic.flatWP.leavesWeaponPowerRawAlone", d1.weaponPowerRaw, 241367, true);
+  check("analytic.flatWP.leavesMainStatAlone", r9(d1.mainStatTotal), r9(d0.mainStatTotal));
+})();
 
 // First principles: the reference build, summed by hand from the Serca table.
 (function () {
@@ -72,6 +84,7 @@ refs.derivation.forEach(function (c, i) {
   check("scalars.allyCritFactor", r9(B.allyCritFactor(P, 0, 0)), s.allyCritFactor);
   check("scalars.attackPower", r9(B.attackPower(P, 0, 0)), s.attackPower);
   check("scalars.attackPowerNoFlat", r9(B.attackPower(B.normalizeProfile({ flatAP: 0 }), 0, 0)), s.attackPowerNoFlat);
+  check("scalars.attackPowerFlatWP", r9(B.attackPower(B.normalizeProfile({ flatWP: 9000 }), 0, 0)), s.attackPowerFlatWP);
   check("scalars.defShredGain2_1", r9(B.defShredGain(P, 2.1)), s.defShredGain2_1);
   check("scalars.basicExpectedRelic", r9(B.basicBandExpected("mainStat", "relic")), s.basicExpectedRelic);
   check("scalars.basicExpectedAncient", r9(B.basicBandExpected("mainStat", "ancient")), s.basicExpectedAncient);
@@ -84,6 +97,27 @@ refs.derivation.forEach(function (c, i) {
   check("analytic.critFactor", r9(B.critFactor(P, 0, 0)), r9(1 + 0.9 * (2.8 - 1)));
   check("analytic.attackPower", r9(B.attackPower(P, 0, 0)),
     r9(Math.sqrt(703826 * 1.09 * 241367 * 1.085 / 6) * 1.125 + 2700));
+  // WHERE FLAT WEAPON POWER GOES, from first principles and from both wrong
+  // answers. Inside the root, before the bucket:
+  var pFlatWP = B.normalizeProfile({ flatWP: 9000 });
+  check("analytic.flatWP.attackPower", r9(B.attackPower(pFlatWP, 0, 0)),
+    r9(Math.sqrt(703826 * 1.09 * (241367 + 9000) * 1.085 / 6) * 1.125 + 2700));
+  // ...which is the same character carrying 9000 more raw weapon power...
+  check("analytic.flatWP.isRawWeaponPower", r9(B.attackPower(pFlatWP, 0, 0)),
+    r9(B.attackPower(B.normalizeProfile({ weaponPowerRaw: 241367 + 9000 }), 0, 0)));
+  // ...and the same as a bracelet line worth 9000 weapon power, which is the
+  // path the model already had right.
+  check("analytic.flatWP.isABraceletWeaponPowerLine", r9(B.attackPower(pFlatWP, 0, 0)),
+    r9(B.attackPower(P, 0, 9000)));
+  // NOT the same as 9000 flat ATTACK power — the wrong home for it. Attack power
+  // escapes the root and the bucket, so it is worth far more per point.
+  checkTrue("analytic.flatWP is not flatAP",
+    Math.abs(B.attackPower(pFlatWP, 0, 0) - B.attackPower(B.normalizeProfile({ flatAP: 2700 + 9000 }), 0, 0)) > 1);
+  // And it is worth strictly LESS than the same number of flat attack power.
+  checkTrue("analytic.flatWP is worth less per point than flatAP",
+    B.attackPower(pFlatWP, 0, 0) < B.attackPower(B.normalizeProfile({ flatAP: 2700 + 9000 }), 0, 0));
+  // Default 0, so nothing already scored moves.
+  check("analytic.flatWP.defaultIsZero", P.flatWP, 0, true);
   // Enemy DR 50% -> D = K, so shredding A of the defense gives 2/(2−A).
   check("analytic.defShred", r9(B.defShredGain(P, 2.1)), r9(2 / (2 - 0.021)));
 })();

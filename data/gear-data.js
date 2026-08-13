@@ -58,7 +58,12 @@
     // Per-gem tiers: lv7 0.6% · lv8 0.8% · lv9 1.0% · lv10 1.2%.
     // Cancels out of every line ratio when flatAP = 0.
     baseApPct: 0.125,
-    flatAP: 2700        // ark-grid cores
+    flatAP: 2700,       // ark-grid cores
+    // Flat WEAPON power. Zero on the reference build: it runs attack cores and
+    // its accessories carry no "Weapon Power +195/480/960" roll. It is weapon
+    // power, so the model adds it to the weapon's raw figure inside the square
+    // root rather than beside flatAP.
+    flatWP: 0
   };
 
   var API = { SERCA: SERCA, PIECES: PIECES, ILVL0: ILVL0, ILVL_STEP: ILVL_STEP, DEFAULTS: DEFAULTS };

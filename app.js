@@ -632,7 +632,7 @@
   function ensureWorker() {
     if (worker) return worker;
     try {
-      worker = new Worker("solver-worker.js?v=5");
+      worker = new Worker("solver-worker.js?v=6");
     } catch (e) {
       worker = null;
       return null;
@@ -827,7 +827,7 @@
       "#tab-calculator .bc-traitgrid>#bc-traits{flex:1 1 auto;min-width:0}" +
       "#tab-calculator .bc-traitgrid>#bc-slotshost{flex:0 0 auto;min-width:154px;padding-top:1px}" +
       "@media(max-width:700px){#tab-calculator .bc-traitgrid{flex-direction:column;gap:8px}" +
-      "#tab-calculator .bc-traitgrid>#bc-slotshost{width:100%}}" +
+      "#tab-calculator .bc-traitgrid>#bc-traits,#tab-calculator .bc-traitgrid>#bc-slotshost{width:100%}}" +
       // The character / default settings toggle is styled by profile.js, with the
       // rest of the control row it sits in: the Tier List draws the same row, and
       // a "#tab-calculator …" prefix here would have left that copy unstyled.

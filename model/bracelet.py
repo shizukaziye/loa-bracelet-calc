@@ -44,6 +44,10 @@ DEFAULT_PROFILE = {
     "wpPct": 0.085,
     "baseApPct": 0.125,
     "flatAP": 2700,
+    # Flat WEAPON power (weapon ark-grid core, accessory "Weapon Power +480").
+    # It is weapon power, so attack_power() puts it INSIDE the square root with
+    # weaponPowerRaw and lets the wpPct bucket amplify it. Default 0.
+    "flatWP": 0,
 
     "skills": [{"share": 1, "critRate": 0.90, "critDamage": 2.8}],
     "master": False,
@@ -139,22 +143,32 @@ def derive_baseline(o=None):
     wp_pct = o.get("wpPct", D["wpPct"])
 
     main_stat_raw = armor + acc_ms + base_ms + roster
+    # Flat weapon power joins the weapon's raw figure BEFORE the bucket; it stays
+    # its own field because weaponPowerRaw means "the weapon table value"
+    # everywhere else, the deck's raw override included.
+    flat_wp = o.get("flatWP", D["flatWP"])
     return {
         "ilvl": int(round(ilvl_sum / 6.0)),
         "armorMainStat": armor,
         "mainStatRaw": main_stat_raw,
         "weaponPowerRaw": weapon_power_raw,
         "mainStatTotal": main_stat_raw * (1 + ms_pct),
-        "weaponPowerTotal": weapon_power_raw * (1 + wp_pct),
+        "weaponPowerTotal": (weapon_power_raw + flat_wp) * (1 + wp_pct),
         "msPct": ms_pct, "wpPct": wp_pct,
         "baseApPct": o.get("baseApPct", D["baseApPct"]),
         "flatAP": o.get("flatAP", D["flatAP"]),
+        "flatWP": flat_wp,
     }
 
 
 def attack_power(profile, d_ms_raw=0, d_wp_raw=0):
+    """AP = sqrt(MStot . WPtot / 6) * (1 + baseApPct) + flatAP.
+
+    flatWP rides with d_wp_raw, not with flatAP: flat weapon power is weapon
+    power, so it goes inside the square root and takes the wpPct bucket.
+    """
     ms = (profile["mainStatRaw"] + d_ms_raw) * (1 + profile["msPct"])
-    wp = (profile["weaponPowerRaw"] + d_wp_raw) * (1 + profile["wpPct"])
+    wp = (profile["weaponPowerRaw"] + profile.get("flatWP", 0) + d_wp_raw) * (1 + profile["wpPct"])
     return math.sqrt(ms * wp / 6.0) * (1 + profile["baseApPct"]) + profile["flatAP"]
 
 

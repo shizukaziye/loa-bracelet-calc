@@ -23,13 +23,16 @@ var derivation = [
   { label: "default 1785 build", input: {} },
   { label: "flat AP off", input: { flatAP: 0 } },
   { label: "all +21, no karma/ranch", input: { pieceLevels: { weapon: 21, gloves: 21 }, msPct: 0.08, wpPct: 0.06 } },
-  { label: "fresh 1700 build", input: { pieceLevels: { head: 5, shoulder: 5, chest: 5, pants: 5, gloves: 5, weapon: 5 } } }
+  { label: "fresh 1700 build", input: { pieceLevels: { head: 5, shoulder: 5, chest: 5, pants: 5, gloves: 5, weapon: 5 } } },
+  // A weapon ark-grid core instead of an attack one: flat WEAPON power, which
+  // lands inside the square root and takes the wpPct bucket with it.
+  { label: "weapon core: flat WP 9000", input: { flatWP: 9000 } }
 ].map(function (c) {
   var d = B.deriveBaseline(c.input);
   return { label: c.label, input: c.input, out: {
     ilvl: d.ilvl, armorMainStat: d.armorMainStat, mainStatRaw: d.mainStatRaw,
     weaponPowerRaw: d.weaponPowerRaw, mainStatTotal: r9(d.mainStatTotal),
-    weaponPowerTotal: r9(d.weaponPowerTotal) } };
+    weaponPowerTotal: r9(d.weaponPowerTotal), flatWP: d.flatWP } };
 });
 
 // ---------------------------------------------------------------- profile scalars
@@ -40,6 +43,10 @@ var profileScalars = {
   allyCritFactor: r9(B.allyCritFactor(P, 0, 0)),
   attackPower: r9(B.attackPower(P, 0, 0)),
   attackPowerNoFlat: r9(B.attackPower(B.normalizeProfile({ flatAP: 0 }), 0, 0)),
+  // Flat weapon power inside the root. Equal to the same character with 9000
+  // more weaponPowerRaw, and NOT to the same character with 9000 more flatAP —
+  // which is exactly the claim the two checks in verify.js pin down.
+  attackPowerFlatWP: r9(B.attackPower(B.normalizeProfile({ flatWP: 9000 }), 0, 0)),
   defShredGain2_1: r9(B.defShredGain(P, 2.1)),
   basicExpectedRelic: r9(B.basicBandExpected("mainStat", "relic")),
   basicExpectedAncient: r9(B.basicBandExpected("mainStat", "ancient")),
