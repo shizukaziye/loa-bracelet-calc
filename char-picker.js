@@ -2,9 +2,14 @@
  * char-picker.js — "which character am I looking at?", in one box, for any tab.
  *
  * The Calculator has always been able to answer that: type a name, press Grade,
- * or click a saved ★. The Advisor and the Tier List could not — you had to go to
- * the Calculator, load someone there, and come back. This is that control, small
- * enough to sit on any tab, and it exists ONCE so the two copies cannot drift.
+ * or click a saved ★. No other tab could — you had to go to the Calculator, load
+ * someone there, and come back. This is that control, small enough to sit on any
+ * tab, and it exists ONCE so no two copies can drift.
+ *
+ * The Advisor is the only tab mounting it today (the Tier List dropped its copy
+ * on 2026-08-12 along with the deck, and is scored on the default character
+ * instead). Nothing here assumes that: mount() still takes any number of hosts
+ * and every one of them repaints on the same state.
  *
  * It is a port of the astrogem calculator's advisor-setup.js character row, whose
  * two-path design this keeps exactly:
@@ -14,7 +19,11 @@
  *               escape, closes on an outside click.
  *   ★ STRIP     the saved characters, one click each. A favourite need not be on
  *               the board — a name with no snapshot row is still selectable and
- *               goes straight to the lookup.
+ *               goes straight to the lookup. It is a GRID of identical chips that
+ *               WRAPS, never a scroller: twenty favourites are twenty boxes on as
+ *               many lines as that takes, and Shizu does not want a scrollbar over
+ *               them ever (2026-08-12). Long names are cut to fit — see fitNames()
+ *               for why the cut is done in the DOM and not left to the CSS.
  *
  * IT LOADS NOTHING ITSELF. bible-import.js owns fetching, decoding, loadout
  * choice and applying a character; BraceletImport.loadCharacter(region, name) is
@@ -138,13 +147,10 @@
       ".cp-inline .cp-hd{margin:0}" +
       ".cp-inline .cp-wrap{width:210px;flex:0 1 210px}" +
       ".cp-inline .cp-sel{margin-top:0}" +
-      // A long roster must not push the table down the page: on the one-line
-      // variant the ★ strip scrolls sideways inside itself instead of wrapping.
-      ".cp-inline .cp-favs{margin-top:0;flex:1 1 120px;min-width:0;flex-wrap:nowrap;overflow-x:auto;" +
-        "scrollbar-width:thin;padding-bottom:2px}" +
-      ".cp-inline .cp-fav{flex:0 0 auto}" +
-      ".cp-inline .cp-favs::-webkit-scrollbar{height:5px}" +
-      ".cp-inline .cp-favs::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}" +
+      // The ★ strip takes the whole width on its own line and WRAPS. It never
+      // scrolls: a roster of twenty is twenty chips on as many lines as that
+      // needs, all of them on screen without a gesture.
+      ".cp-inline .cp-favs{flex:1 0 100%;margin-top:2px;min-width:0}" +
       ".cp-inline .cp-status,.cp-inline .cp-note{flex:1 0 100%;margin-top:0}" +
       ".cp-inline .cp-status:empty,.cp-inline .cp-note:empty{display:none}" +
       ".cp-wrap{position:relative;display:block}" +
@@ -172,14 +178,27 @@
       ".cp-clear{background:none;border:1px solid var(--border);border-radius:99px;color:var(--dim);" +
         "font-family:inherit;font-size:10.5px;font-weight:700;padding:1px 9px;cursor:pointer}" +
       ".cp-clear:hover{color:var(--text);border-color:var(--accent)}" +
-      ".cp-favs{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;min-width:0}" +
-      ".cp-fav{display:inline-flex;gap:6px;align-items:center;background:var(--panel2);border:1px solid var(--border);" +
-        "border-radius:99px;padding:3px 10px;color:var(--text);cursor:pointer;font-size:12px;font-family:inherit;max-width:100%}" +
+      // EVERY CHIP IS THE SAME BOX. A grid of fixed tracks, not a flex flow: a
+      // one-letter name and a twenty-letter one get the identical rectangle, so
+      // the strip reads as a grid instead of a ragged edge. The name is cut with
+      // an ellipsis and the whole name stays in the chip’s title.
+      // minmax(0,…), not a bare track: below one chip’s width the column shrinks
+      // with the page rather than pushing it sideways.
+      ".cp{--cp-chip-w:150px;--cp-chip-h:26px}" +
+      ".cp-favs{display:grid;grid-template-columns:repeat(auto-fill,minmax(0,var(--cp-chip-w)));" +
+        "gap:6px;margin-top:8px;min-width:0}" +
+      ".cp-fav{display:flex;gap:5px;align-items:center;box-sizing:border-box;width:100%;min-width:0;" +
+        "height:var(--cp-chip-h);overflow:hidden;background:var(--panel2);border:1px solid var(--border);" +
+        "border-radius:99px;padding:0 9px;color:var(--text);cursor:pointer;font-size:12px;font-family:inherit;" +
+        // line-height BELOW the font's own line box would make each span's content
+        // taller than its box — nothing a reader would see, but it is overflow,
+        // and the rule here is that nothing in this strip overflows anything.
+        "line-height:1.35;text-align:left}" +
       ".cp-fav:hover{border-color:var(--accent)}" +
-      ".cp-fav .st{color:var(--high)}" +
-      ".cp-fav .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
+      ".cp-fav .st{color:var(--high);flex:0 0 auto;font-size:11px}" +
+      ".cp-fav .nm{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
       ".cp-fav .rg{color:var(--dim);font-size:10px;flex:0 0 auto}" +
-      ".cp-favnone{color:var(--dim);font-size:11px;line-height:1.5}" +
+      ".cp-favnone{grid-column:1/-1;color:var(--dim);font-size:11px;line-height:1.5}" +
       ".cp-status{font-size:11.5px;color:var(--dim);margin-top:7px;line-height:1.5}" +
       ".cp-status.working{color:var(--accent)}" +
       ".cp-status.err{color:var(--bad)}" +
@@ -257,6 +276,46 @@
         " (" + esc(f.region) + ')"><span class="st">&#9733;</span><span class="nm">' + esc(f.name) +
         '</span><span class="rg">' + esc(f.region) + "</span></button>";
     }).join("");
+    fitNames(inst);
+  }
+
+  /**
+   * Cut each chip's name to what its box actually holds, and put the ellipsis in
+   * ourselves.
+   *
+   * The CSS rule draws the same picture on its own, but text-overflow leaves the
+   * whole string inside a clipped box: the span's scrollWidth stays wider than
+   * its clientWidth, which is the signature of a thing that scrolls. Nothing in
+   * this strip may even look like it scrolls, so the DOM carries the short name
+   * and the CSS rule stays behind it as the backstop.
+   *
+   * Binary search over the real layout rather than a canvas measurement: no
+   * guess about which font arrived, and it costs about five reflows per chip
+   * that is too long, only when the strip is redrawn.
+   *
+   * A HIDDEN TAB measures every box at zero. Leave the names whole there and fit
+   * them when the tab is shown — until then the CSS is drawing the ellipsis
+   * anyway, so the worst case is exactly the old behaviour.
+   */
+  function fitNames(inst) {
+    if (!inst.favs || !inst.favs.clientWidth) return;
+    var spans = inst.favs.querySelectorAll(".cp-fav .nm"), i;
+    for (i = 0; i < spans.length; i++) fitOne(spans[i]);
+  }
+
+  function fitOne(sp) {
+    var full = sp.getAttribute("data-nm");
+    if (full === null) { full = sp.textContent; sp.setAttribute("data-nm", full); }
+    else if (sp.textContent !== full) sp.textContent = full;
+    if (sp.scrollWidth <= sp.clientWidth) return;
+    // The longest prefix that fits, with the ellipsis counted in.
+    var lo = 0, hi = full.length, mid;
+    while (lo < hi) {
+      mid = (lo + hi + 1) >> 1;
+      sp.textContent = full.slice(0, mid) + "\u2026";
+      if (sp.scrollWidth <= sp.clientWidth) lo = mid; else hi = mid - 1;
+    }
+    sp.textContent = lo ? full.slice(0, lo) + "\u2026" : "\u2026";
   }
 
   /** One line, from the host. Repainted on every profile change. */
@@ -511,6 +570,16 @@
         if (e.target && e.target.closest && e.target.closest(".cp-wrap") === inst.wrap) return;
         close(inst);
       });
+    });
+
+    // A picker mounted in a hidden tab measured its chips at zero width, so the
+    // names it could not fit are still whole. Both of these are the moment that
+    // stops being true.
+    document.addEventListener("tabselected", function () { eachInstance(fitNames); });
+    var rt = null;
+    window.addEventListener("resize", function () {
+      clearTimeout(rt);
+      rt = setTimeout(function () { eachInstance(fitNames); }, 120);
     });
 
     var P = prof();

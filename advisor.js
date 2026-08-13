@@ -7,8 +7,8 @@
  *
  *   CHARACTER  name the character to advise on — type-ahead over the board
  *              snapshot, or one click on a saved ★. The control is
- *              char-picker.js (the Tier List mounts the same one); this tab
- *              only gives it a box beside the intake zone.
+ *              char-picker.js, and this is now the only tab that mounts it;
+ *              this file only gives it a box at the top, above the deck.
  *   INTAKE     drop / paste a screenshot, or "Read screen now" — the reader
  *              itself is advisor-capture.js, which plugs in through
  *              window.BraceletAdvisor (see THE CAPTURE SEAM below). Everything
@@ -625,14 +625,15 @@
       "#tab-advisor .av-lead b{color:var(--text);font-weight:600}" +
       // ---- intake ----
       "#tab-advisor .av-intake{margin-bottom:14px}" +
-      // The character picker and the screenshot zone answer the same question —
-      // "which bracelet am I advising on?" — so they share one row, and stack on
-      // a phone rather than squeezing.
-      "#tab-advisor .av-intakegrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:start}" +
-      "@media(max-width:760px){#tab-advisor .av-intakegrid{grid-template-columns:1fr}}" +
+      // The screenshot zone has the row to itself now: the character picker used
+      // to sit beside it and has moved to the top of the tab, above the deck.
+      "#tab-advisor .av-intakegrid{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-items:start}" +
       // The picker itself is char-picker.js's; this is only the frame it sits in.
-      // Styled by id, because CharPicker.mount() owns the host's class list.
-      "#av-who{border:1px solid var(--border);border-radius:10px;background:var(--panel);padding:11px 12px;min-width:0}" +
+      // Styled by id, because CharPicker.mount() owns the host's class list. It is
+      // the FIRST thing on the tab — name the character, then read the board it
+      // feeds — and it takes the full width, so the ★ strip can wrap freely.
+      "#av-who{border:1px solid var(--border);border-radius:10px;background:var(--panel);" +
+        "padding:11px 12px;min-width:0;margin:0 0 12px}" +
       "#tab-advisor .av-nopicker{color:var(--dim);font-size:12.5px;line-height:1.55}" +
       "#tab-advisor .av-nopicker b{color:var(--text)}" +
       "#tab-advisor .av-drop{border:2px dashed var(--border);border-radius:10px;padding:14px 12px;text-align:center;" +
@@ -724,8 +725,7 @@
       "#tab-advisor .av-empty{border:1px dashed var(--border);border-radius:10px;background:var(--panel2);color:var(--dim);" +
         "font-size:13px;padding:22px 16px;line-height:1.6}" +
       "#tab-advisor .av-empty b{color:var(--text)}" +
-      // The character's two buttons take their own line under the deck, as on
-      // the Tier List.
+      // The character's two buttons take their own line under the deck.
       "#tab-advisor .av-hdr{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0 6px}" +
       "#tab-advisor .av-hdr>.bc-hdrctl{flex:1 0 100%}" +
       // Phones: the tables scroll inside their own wrapper, never the page.
@@ -743,10 +743,14 @@
   // the character picker
   // ------------------------------------------------------------------
   //
-  // char-picker.js owns it, and the Tier List mounts the same control — one
-  // type-ahead over one board snapshot, so the two cannot drift. This file only
-  // gives it a box beside the screenshot zone: both answer the same question,
-  // "which bracelet am I advising on?", so they belong on one row.
+  // char-picker.js owns it. The Tier List used to mount the same control; Shizu
+  // took the picker and the deck off that tab (2026-08-12), so this is the only
+  // tab that mounts it now — char-picker.js still supports several, and the
+  // Calculator's own ★ chips are the other way in.
+  //
+  // This file only gives it a box at the top of the tab, above the character
+  // board: name the character first, then read what the board and the advice make
+  // of them.
   //
   // It loads nothing itself (BraceletImport.loadCharacter is the one load path —
   // see the module header). A pick lands in the shared state, Profile notifies,
@@ -769,8 +773,9 @@
       return;
     }
     whoCtl = window.CharPicker.mount(host, {
+      layout: "row",
       title: "Character",
-      emptyText: "No character loaded — the advice below is about whatever bracelet the Calculator holds."
+      emptyText: "None loaded — the advice below is about whatever bracelet the Calculator holds."
     });
   }
 
@@ -787,7 +792,6 @@
     return '' +
       '<div class="av-intake">' +
       '  <div class="av-intakegrid">' +
-      '    <div id="av-who"></div>' +
       '    <div class="av-drop" id="av-drop">' +
       '      <span class="hint" id="av-hint"></span>' +
       '      <img id="av-preview" class="av-preview" alt="screenshot preview">' +
@@ -1462,6 +1466,10 @@
     pane.setAttribute("data-init", "1");
     injectStyle();
     pane.innerHTML =
+      // Picker first, then the character board, then this tab's own work. Its OWN
+      // host, above the deck host: the deck is one element that moves between tabs,
+      // so nothing of ours may live inside it.
+      '<div id="av-who"></div>' +
       '<div id="' + DECK_HOST + '"></div>' +
       '<div class="av-hdr" id="av-hdrctl"></div>' +
       '<div id="av-lead"></div>' +

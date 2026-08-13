@@ -17,43 +17,58 @@
  *     low = Rare blue, mid = Epic purple, high = Legendary gold. A Legendary junk
  *     line sitting far below a Rare crit line is the lesson the table teaches.
  *
- * BANDING: the shared eighteen-step subrank ladder in subrank.js — S+ >=95,
- * S >=90, S- >=85, down to F- — applied to 100 x d / best, THE BEST LINE IN
- * THIS VIEW. Both views band the same way: by family against the best family,
- * by roll against the best roll. The best line is the best line FOR THE CURRENT
- * PROFILE, so the bands move as the profile does. That is the feature, and the
- * copy above the table says so.
+ * BANDING: the shared eighteen-step subrank ladder in subrank.js, applied to
+ * 100 x d / THE ANCHOR OF THIS VIEW — see rank() for what each view anchors on
+ * and why the two differ.
  *
  * A line that does no damage is pinned to F- whatever the arithmetic says. On a
  * six-band ladder every empty band was drawn, because an empty A tier was
  * information; on eighteen it is noise, so empty bands are skipped and the strip
  * above the table carries the shape of the distribution instead.
  *
- * THE DECK. There is exactly one control deck in the document and mount() MOVES
- * it (see profile.js's header). This tab claims it on activation; app.js claims
- * it back when the Calculator is selected. Nothing to release — the last
- * mount() wins, and only one tab is ever visible.
+ * ALWAYS THE DEFAULT CHARACTER (Shizu, 2026-08-12: "for tier list lets just make
+ * it simple and remove character select / character board and leave it to our
+ * defaults"). This tab had a character picker and the shared control deck; both
+ * are gone. Every row is scored on Bracelet.normalizeProfile({}) — the canonical
+ * build, every setting untouched — so the ranking is a fact about the game rather
+ * than about whoever last dragged a slider on another tab.
  *
- * THE CHARACTER PICKER. One line above the controls, mounted from char-picker.js
- * — the same control the Advisor mounts, over the same board snapshot, so the two
- * cannot drift. Picking someone loads their BRACELET into the shared state, and
- * nothing else: the deck keeps the calculator's defaults, which is what this
- * table is ranked on, until the user presses Import Character Stats in the
- * controls below. The picker's one-line note says where that button is.
+ * That buys three simplifications. There is no window.Profile here at all, so a
+ * deck edit on the Calculator cannot move this table and this table cannot move
+ * the Calculator. The GHOST TICK is gone with it: it marked where each line sat
+ * for the default character, and on a table that IS the default character it sat
+ * under the end of every bar, always. And the anchors below are stable, because
+ * nothing can move them.
  *
- * NO NETWORK OF ITS OWN. This file opens no connection. The picker's board
- * snapshot and its character lookups both go through bible-import.js, which owns
- * the Worker call and the rule that the browser never fetches a lostark.bible
- * page itself.
+ * WHAT STILL TOGGLES: the view (by family / by roll), the bracelet grade, and the
+ * two fight presets. All four are THIS TAB'S OWN state — plain module variables,
+ * never persisted, never written into the shared profile. The presets patch the
+ * default profile for the ranking and stop there.
+ *
+ * NO NETWORK OF ITS OWN. This file opens no connection and reads no character.
  */
 (function () {
   "use strict";
 
-  var B = window.Bracelet, DATA = window.BraceletData, P = window.Profile, SR = window.Subrank;
-  if (!B || !DATA || !P || !SR) return;          // model, spine or ladder missing; leave the placeholder
+  var B = window.Bracelet, DATA = window.BraceletData, SR = window.Subrank;
+  if (!B || !DATA || !SR) return;                // model, data or ladder missing; leave the placeholder
 
   var PANE_ID = "tab-tierlist";
-  var DECK_HOST = "bctl-deckhost";
+
+  // ---- this tab's own state. Four variables, none of them shared, none saved ----
+  var gradeSel = "ancient";                      // the same grade profile.js starts on
+  // The deck's own names, not the model's: `supportEffects` means "count the four
+  // party lines", the model's `supportHasEffects` means the opposite. Both start
+  // where the deck starts, so an untouched table is normalizeProfile({}) exactly.
+  var fight = { supportEffects: true, demon: false };
+
+  /** The default character, with only this tab's two presets patched in. */
+  function tlProfile() {
+    return B.normalizeProfile({
+      supportHasEffects: !fight.supportEffects,
+      demonShare: fight.demon ? 1 : 0
+    });
+  }
 
   // ------------------------------------------------------------------
   // small helpers (three lines each; there is no module system here)
@@ -94,11 +109,29 @@
   var BANDS = SR.BANDS;
   var BOTTOM = SR.BOTTOM;
 
+  /**
+   * The cut this tab opens a band at — TL_BANDS, never the shared ladder's own
+   * `min`. The two ladders carry the same eighteen keys and DIFFERENT numbers, and
+   * reading the wrong one is a wrong sentence about a right colour.
+   */
+  function tlCutOf(key) {
+    for (var i = 0; i < TL_BANDS.length; i++) if (TL_BANDS[i].key === key) return TL_BANDS[i].pct;
+    return 0;
+  }
+  /** The cut of the band ABOVE this one, or null at the top of the ladder. */
+  function tlCeilOf(key) {
+    for (var i = 0; i < TL_BANDS.length; i++) if (TL_BANDS[i].key === key) return i ? TL_BANDS[i - 1].pct : null;
+    return null;
+  }
+
   function tlBand(key) {
     var c = SR.colorOf(key, key === "S+");           // S+ takes the rainbow
     // `bg` and `hue` are the same value under two names: the strip and dots read
     // `hue`, the chips and pills read `bg`.
-    return { key: key, bg: c.bg, hue: c.bg, fg: c.fg, cls: c.cls, glow: key === "S+" };
+    // `min` is this band's own cut. It used to be left off, so the hover card's
+    // "N pp above the X cut" read `undefined` on every row, failed its isFinite
+    // test and told the reader that the best line in the game was under the F cut.
+    return { key: key, min: tlCutOf(key), bg: c.bg, hue: c.bg, fg: c.fg, cls: c.cls, glow: key === "S+" };
   }
   /**
    * pct is a percentage of the anchor (the best Epic roll = 100). A line worth no
@@ -240,7 +273,6 @@
   // ------------------------------------------------------------------
 
   var view = "roll";                                // "family" | "roll"
-  var defaultCache = {};                              // grade -> the canonical-profile ranking
 
   /** Per-tier log-space damage for one family under one profile. */
   function famDamages(fam, grade, prof) {
@@ -255,8 +287,9 @@
    * Every row of one view, scored under one profile, sorted best first and
    * banded as a percentage of the best row.
    *
-   * The whole cost of this tab: 33 families x 3 tiers of lineDamage, twice
-   * (yours, and the canonical default for the ghost markers — that one cached).
+   * The whole cost of this tab: 33 families x 3 tiers of lineDamage, once. It ran
+   * twice while a ghost marker needed the default ranking beside the live one;
+   * the table IS the default ranking now, so one pass is the whole job.
    */
   function rank(grade, prof) {
     var rows = [], i, t, fam, d;
@@ -299,44 +332,49 @@
 
     rows.sort(function (a, b) { return b.d - a.d || a.fam.id - b.fam.id; });
 
-    // THE ANCHOR IS THE BEST EPIC (mid-tier) ROLL, set to 100 — not the best row.
-    // A Legendary then scores above 100, which is the point: full marks is what a
-    // good Epic gets, and beating it should look like beating it. Computed from the
-    // family table rather than from `rows`, so both views share one scale and the
-    // by-family averages sit against the same yardstick.
+    // THE ANCHOR — what scores 100 — IS THE BEST THING IN THIS VIEW, and the two
+    // views hold different things.
+    //
+    // BY ROLL it is the best EPIC (mid-tier) roll, not the best row. A Legendary
+    // then scores above 100, which is the point: full marks is what a good Epic
+    // gets, and beating it should look like beating it. Shizu designed that scale
+    // and likes it, so it is untouched.
+    //
+    // BY FAMILY it is the best FAMILY AVERAGE. A family row is 0.6 low + 0.3 mid +
+    // 0.1 high, which is necessarily well below a pure Epic roll — so scoring that
+    // view against the best Epic put the best family in the game at 94.2 and read
+    // S-, and the whole top of the table with it. Nothing about that is a fact a
+    // player would recognise; it is the wrong yardstick (Shizu, 2026-08-12: "by
+    // family tier list the S- tier should be S or S+"). Anchored on the best
+    // family the top four read S. Nothing reaches S+ there, and cannot: S+ is
+    // above the anchor, and nothing beats the row the scale is built on.
+    //
+    // Main stat is skipped when picking the family anchor — it is a basic line
+    // riding along, not a special family — but it is still SCORED against it, so
+    // it may sit above 100 if it ever out-earns every family.
+    var best = rows.length ? rows[0].d : 0;          // the top row, for the bars
     var anchor = 0;
-    for (i = 0; i < DATA.SPECIALS.length; i++) {
-      var mid = B.lineDamage({ cat: "special", family: DATA.SPECIALS[i].id, tier: "mid" }, grade, prof);
-      if (mid > anchor) anchor = mid;
+    if (view === "family") {
+      for (i = 0; i < rows.length; i++) if (!rows[i].isBasic && rows[i].d > anchor) anchor = rows[i].d;
+    } else {
+      for (i = 0; i < DATA.SPECIALS.length; i++) {
+        var mid = B.lineDamage({ cat: "special", family: DATA.SPECIALS[i].id, tier: "mid" }, grade, prof);
+        if (mid > anchor) anchor = mid;
+      }
     }
-    var best = rows.length ? rows[0].d : 0;          // still the top row, for the bars
     if (anchor <= 0) anchor = best;
     for (i = 0; i < rows.length; i++) {
       var r = rows[i];
       r.rank = i + 1;
-      r.pct = anchor > 0 ? r.d / anchor * 100 : 0;        // the score: best Epic = 100
-      // The BAR stays a share of the #1 line. Drawing it against the Epic anchor
-      // made every Legendary overflow its own track, which just looked broken.
+      r.pct = anchor > 0 ? r.d / anchor * 100 : 0;        // the score: this view's anchor = 100
+      // The BAR stays a share of the #1 line, in both views. Drawing it against the
+      // Epic anchor made every Legendary overflow its own track, which just looked
+      // broken.
       r.barPct = best > 0 ? r.d / best * 100 : 0;
       r.band = bandFor(r.d, r.pct);
       r.dmg = B.damagePercent(r.d);
     }
     return { rows: rows, best: best, anchor: anchor, bestRow: rows[0] || null };
-  }
-
-  /**
-   * The same ranking on the CANONICAL default profile — the ghost markers, and
-   * the "how your build differs" half of every popover. Cached per grade and
-   * per view; the default profile never moves.
-   */
-  function defaultRank(grade) {
-    var k = grade + "|" + view;
-    if (!defaultCache[k]) {
-      var out = rank(grade, B.normalizeProfile({})), map = {};
-      for (var i = 0; i < out.rows.length; i++) map[out.rows[i].key] = out.rows[i];
-      defaultCache[k] = { by: map, best: out.best, bestRow: out.bestRow, rows: out.rows };
-    }
-    return defaultCache[k];
   }
 
   // ------------------------------------------------------------------
@@ -405,7 +443,7 @@
     axis += '<text x="' + (X1 - 2) + '" y="64" text-anchor="end" class="tlend">' +
       esc(bestRow.name) + (bestRow.tier ? " (" + bestRow.tier + ")" : "") + " · " + fx(bestRow.dmg, 2) + "%</text>";
     axis += '<text x="' + X0 + '" y="154" text-anchor="start" class="tlcap">% damage on ' +
-      (grade === "relic" ? "a Relic" : "an Ancient") + " bracelet, for your character →</text>";
+      (grade === "relic" ? "a Relic" : "an Ancient") + " bracelet, on the default character →</text>";
     axis += '<text x="' + X1 + '" y="154" text-anchor="end" class="tlcap">dashed cuts are the letter-group edges (% of the best line); each group holds three subranks</text>';
 
     return '<svg viewBox="0 0 1000 162" role="img" aria-label="Every effect on a damage-percent axis with the tier thresholds drawn to scale">' +
@@ -419,15 +457,11 @@
   var REG = {};        // tip id -> the row object; the popover HTML is built on hover
   var SEQ = 0;
 
-  function rowHTML(r, grade, ghostPct) {
+  function rowHTML(r, grade) {
     var id = "tl" + (SEQ++);
-    REG[id] = { row: r, grade: grade, ghost: ghostPct };
+    REG[id] = { row: r, grade: grade };
     var barHue = view === "roll" && r.tier ? RARITY[r.tier].hue : r.band.hue;
     var vals = r.valsOverride !== undefined ? r.valsOverride : tierValueText(r.fam, grade, r.tier || "mid");
-    var ghost = "";
-    if (ghostPct !== null && ghostPct !== undefined) {
-      ghost = '<u class="tl-ghost" style="left:' + fx(Math.max(0, Math.min(100, ghostPct)), 2) + '%"></u>';
-    }
     var rar = r.tier
       ? '<span class="tl-rar" style="background:' + RARITY[r.tier].hue + '" title="' + RARITY[r.tier].name + '"></span>'
       : "";
@@ -450,7 +484,7 @@
       '<span class="tl-nm">' + rar + esc(r.name) +
       (r.tier ? ' <em style="color:' + RARITY[r.tier].hue + '">' + RARITY[r.tier].name + "</em>" : "") + "</span>" +
       '<span class="tl-vals">' + esc(vals) + "</span>" +
-      '<span class="tl-bar"><i style="width:' + fx(Math.max(0, Math.min(100, r.barPct)), 2) + '%;background:' + barHue + '"></i>' + ghost + "</span>" +
+      '<span class="tl-bar"><i style="width:' + fx(Math.max(0, Math.min(100, r.barPct)), 2) + '%;background:' + barHue + '"></i></span>' +
       '<span class="tl-score">' + fx(r.pct, 1) + "</span>" +
       '<span class="tl-pct">' + fx(r.dmg, 2) + "%</span>" +
       "</div>";
@@ -464,7 +498,6 @@
    * shows where the gaps are, to scale.
    */
   function bandsHTML(res, grade) {
-    var dr = defaultRank(grade);
     var out = "", i, j;
     for (i = 0; i < BANDS.length; i++) {
       var b = BANDS[i];
@@ -472,14 +505,7 @@
       for (j = 0; j < res.rows.length; j++) if (res.rows[j].band.key === b.key) mine.push(res.rows[j]);
       if (!mine.length) continue;
       var body = "";
-      for (j = 0; j < mine.length; j++) {
-        var dref = dr.by[mine[j].key];
-        // The tick has to be on the BAR's scale (share of the #1 line), not the
-        // score's (best Epic = 100). Reading dref.pct put every tick in the wrong
-        // place and pinned anything over 100 to the far right.
-        var gp = (dref && dr.best > 0) ? dref.barPct : null;
-        body += rowHTML(mine[j], grade, gp);
-      }
+      for (j = 0; j < mine.length; j++) body += rowHTML(mine[j], grade);
       out += '<section class="tl-band">' +
         '<div class="tl-chip' + (b.top ? " tl-chip-z" : "") +
         '" style="--tl-bg:' + b.bg + ';--tl-fg:' + b.fg + '"><span data-gloss="' + esc(bandGloss(b, res)) + '">' +
@@ -494,12 +520,12 @@
     var best = res.bestRow;
     var name = best ? (best.name + (best.tier ? " (" + best.tier + ")" : "")) : "the best line";
     if (b === BOTTOM) {
-      return "F- — under 10% of the best line, or worth nothing at all. " +
-        "A line that does no damage for this character is pinned here whatever the arithmetic says.";
+      return "F- — worth nothing at all, or so near it that it rounds there. " +
+        "A line that does no damage is pinned here whatever the arithmetic says.";
     }
-    var upper = b.i === 0 ? 100 : BANDS[b.i - 1].min;
-    return b.key + " — " + b.min + "% to " + upper + "% of the best line, which is " + name +
-      " at " + fx(best ? best.dmg : 0, 2) + "% damage for your character.";
+    var lo = tlCutOf(b.key), hi = tlCeilOf(b.key);
+    return b.key + " — " + (hi === null ? lo + "% of this view's anchor and up" : lo + "% to " + hi + "% of this view's anchor") +
+      ". The top line is " + name + ", at " + fx(best ? best.dmg : 0, 2) + "% damage on the default character.";
   }
 
   // ------------------------------------------------------------------
@@ -525,7 +551,6 @@
 
   function tipHTML(entry, res) {
     var r = entry.row, grade = entry.grade, fam = r.fam;
-    var dr = defaultRank(grade), dref = dr.by[r.key];
     var pill = '<span class="tp-pill" style="background:' + r.band.bg + ';color:' + r.band.fg + '">' + r.band.key + "</span>";
     var h = '<div class="tp-head">' + esc(r.name) + " " + pill +
       '<span class="tp-rank">#' + pad2(r.rank) + " of " + res.rows.length + "</span></div>";
@@ -536,11 +561,14 @@
     // all three tiers, always — the row may be one of them, but the choice is
     // between three and the reader is deciding which they want.
     h += '<table class="tp-tbl"><thead><tr><th>Roll</th><th>Values</th><th class="tp-num">Odds</th>' +
-      '<th class="tp-num">% dmg</th><th class="tp-num">of best</th></tr></thead><tbody>';
+      '<th class="tp-num">% dmg</th><th class="tp-num">score</th></tr></thead><tbody>';
     for (var t = 0; t < TIERS.length; t++) {
       var tr = TIERS[t], d = r.tierD[t];
       var dmg = B.damagePercent(d);
-      var p = res.anchor > 0 ? d / res.anchor * 100 : 0;   // same anchor as the rows
+      // res.anchor, never a second reckoning of it: this card must band a tier the
+      // same way the row it came from does, and two ways of computing one number is
+      // how the card and the row came to disagree once already.
+      var p = res.anchor > 0 ? d / res.anchor * 100 : 0;
       // Find this tier's own rank in the current ranking so the card cannot show a
       // different band than the row it came from (the top five are S+ by rank, not
       // by percentage, so a rank-blind lookup here would read S).
@@ -572,28 +600,15 @@
       ' <span class="tp-dim">= 100 &#215; ln(' + fx(mult, 6) + ")</span></span>";
     kv += '<span class="tp-k">damage</span><span class="tp-v">' + fx(r.dmg, 3) +
       '% <span class="tp-dim">= (e<sup>' + fx(r.d, 3) + "/100</sup> &#8722; 1) &#215; 100</span></span>";
-    kv += '<span class="tp-k">subrank</span><span class="tp-v">' + fx(r.pct, 1) + "% of the best line" +
-      (r.d <= 0 ? ' <span class="tp-dim">&#183; does no damage for this character, so F-</span>'
-        : !isFinite(r.band.min) ? ' <span class="tp-dim">&#183; under the F cut, so F-</span>'
+    kv += '<span class="tp-k">subrank</span><span class="tp-v">' + fx(r.pct, 1) + "% of the anchor" +
+      (r.d <= 0 ? ' <span class="tp-dim">&#183; does no damage, so F-</span>'
         : ' <span class="tp-dim">&#183; ' + fx(r.pct - r.band.min, 1) + "pp above the " + r.band.key + " cut at " +
           r.band.min + "%</span>") + "</span>";
-    h += '<div class="tp-sec"><div class="tp-sec-h">Worth to your character</div><div class="tp-grid">' + kv + "</div></div>";
+    h += '<div class="tp-sec"><div class="tp-sec-h">What it is worth</div><div class="tp-grid">' + kv + "</div></div>";
 
-    // How your build differs from the canonical default — dropped while the deck
-    // still holds those defaults, where both columns would carry the same three
-    // numbers and the section would say nothing.
-    if (dref && (r.rank !== dref.rank || Math.abs(r.pct - dref.pct) >= 0.05)) {
-      var dd = r.pct - dref.pct;
-      var word = Math.abs(dd) < 0.05 ? "the same place" : (dd > 0 ? "higher" : "lower");
-      h += '<div class="tp-sec"><div class="tp-sec-h">Compared to the default character</div><div class="tp-grid">' +
-        '<span class="tp-k">default</span><span class="tp-v">#' + pad2(dref.rank) + " &#183; " + fx(dref.dmg, 2) +
-        "% &#183; score " + fx(dref.pct, 1) + ' <span class="tp-tier" style="background:' + dref.band.bg + ';color:' + dref.band.fg + '">' + dref.band.key + "</span></span>" +
-        '<span class="tp-k">yours</span><span class="tp-v">#' + pad2(r.rank) + " &#183; " + fx(r.dmg, 2) +
-        "% &#183; score " + fx(r.pct, 1) + "</span>" +
-        '<span class="tp-k">shift</span><span class="tp-v">' + (Math.abs(dd) < 0.05 ? "sits in " + word :
-          (dd > 0 ? "+" : "") + fx(dd, 1) + "pp " + word + " for you") + "</span>" +
-        "</div></div>";
-    }
+    // A "compared to the default character" section used to sit here. The table is
+    // the default character now, so both of its columns would carry the same three
+    // numbers.
 
     // odds, and where they come from
     var o = view === "family" ? famOdds(fam) : tierOdds(fam, r.tier);
@@ -690,56 +705,68 @@
    */
   function copyHTML() {
     return '<details class="method tl-method"><summary>How these ranks are worked out</summary>' +
-            "<p><b>Ranks are a percentage of the best line for <i>your</i> character.</b> " +
-      "The top five rolls all take a rainbow <b>S+</b> — they are the five Legendary crit and shred " +
-      "lines, and nothing honest separates them. Below that: <b>S</b> from 80%, <b>S-</b> from 70%, " +
-      "then A, B and C down to <b>F</b>, which means the line does no damage at all for you. " +
-      "The cuts sit in the gaps between natural clusters, so the same family one tier apart never " +
-      "lands two bands apart. " +
-      "That best line is whatever the profile makes best, so <b>every number here moves when you " +
-      "change the profile</b> — drag a slider and the table reorders under your hand, with no wait.</p>" +
+      "<p><b>Every row is scored on the " +
+      '<span data-gloss="Bracelet.normalizeProfile({}) — the canonical build, every setting untouched. The Leaderboard scores on the same one.">default character</span>' +
+      ", not on yours.</b> " +
+      "Nothing you do on the Calculator moves this table, and nothing you do here moves the " +
+      "Calculator. The three controls above are this tab's own: the view, the bracelet grade, and " +
+      "the two fight toggles.</p>" +
+      "<p><b>Each view is scored against the best line in that view</b>, and the two are not the same " +
+      "line. By roll the anchor is the best <i>Epic</i>, set to 100: the five Legendary crit and shred " +
+      "lines clear it and take the rainbow <b>S+</b>, their Epics land <b>S</b>, their Rares land " +
+      "<b>S-</b>. Beating a good Epic ought to look like beating it. By family every row is an " +
+      "odds-weighted average of all three tiers (0.6 low + 0.3 mid + 0.1 high), which no average can " +
+      "push as high as a pure Epic — so that view anchors on the best <i>family average</i> instead. " +
+      "Judged against the best Epic the best family in the game came out at 94.2 and read S-, which " +
+      "told a player nothing true.</p>" +
+      "<p>The ladder is a flat five-point step: <b>S</b> from 95%, <b>S-</b> from 90%, <b>A+</b> from " +
+      "85%, on down to <b>F-</b>, which means the line does no damage at all. <b>S+</b> sits above the " +
+      "anchor, so only the by-roll view reaches it. The <b>bar</b> measures something else and always " +
+      "has: it is the line as a share of the #1 row, so the top bar is always full.</p>" +
       "<p>These bands are more lenient than the Leaderboard's, deliberately: that one scores a whole " +
-      "bracelet against a perfect one, this ranks a single line against the best single line. " +
-      "The faint tick on each bar is where the line sits for the " +
-      '<span data-gloss="The canonical default character the leaderboard scores on — Bracelet.normalizeProfile({}), every setting untouched.">default character</span>' +
-      ": bar past the tick means the line is worth more to you than to the average build. " +
-      "The deck starts at those defaults, so until you change a setting the tick sits under the end of " +
-      "every bar — that is the two profiles agreeing, not a fault.</p>" +
+      "bracelet against a perfect one, this ranks a single line against the best single line.</p>" +
       "</details>";
   }
 
+  /**
+   * Three groups, all of them local. The grade pair replaces the one this tab used
+   * to borrow from the shared deck: the table is ranked per grade, and both grades
+   * are worth reading, so the control has to live somewhere.
+   */
   function controlsHTML() {
-    var S = P.get();
-    var fight = S.fight, off = "";
     return '<div class="tl-ctl">' +
       '<div class="tl-seg" role="group" aria-label="View">' +
       '<button type="button" class="mbtn' + (view === "family" ? " active" : "") + '" data-view="family">By family <span class="tl-n">33</span></button>' +
       '<button type="button" class="mbtn' + (view === "roll" ? " active" : "") + '" data-view="roll">By roll <span class="tl-n">99</span></button>' +
       "</div>" +
-      '<div class="tl-presets"><span class="tl-plabel">Presets</span>' +
-      '<button type="button" class="mbtn' + (fight.supportEffects ? " active" : "") + '" data-preset="support"' + off +
+      '<div class="tl-seg" role="group" aria-label="Bracelet grade">' +
+      '<span class="tl-plabel">Grade</span>' +
+      '<button type="button" class="mbtn' + (gradeSel === "ancient" ? " active" : "") + '" data-grade="ancient">Ancient</button>' +
+      '<button type="button" class="mbtn' + (gradeSel === "relic" ? " active" : "") + '" data-grade="relic">Relic</button>' +
+      "</div>" +
+      '<div class="tl-presets"><span class="tl-plabel">Fight</span>' +
+      '<button type="button" class="mbtn' + (fight.supportEffects ? " active" : "") + '" data-preset="support"' +
       ' data-gloss="On: you are the one bringing the party debuffs, so the four party lines score in full. Off: your support already applies them — they apply once per party, so a copy on your bracelet is worth nothing.">' +
       "Support effects · " + (fight.supportEffects ? "on" : "off") + "</button>" +
-      '<button type="button" class="mbtn' + (fight.demon ? " active" : "") + '" data-preset="demon"' + off +
-      ">Demon boss · " + (fight.demon ? "on" : "off") + "</button>" +
+      '<button type="button" class="mbtn' + (fight.demon ? " active" : "") + '" data-preset="demon"' +
+      ' data-gloss="On: the fight is a Demon or Archdemon boss, so demon-damage lines score in full. Off: they score nothing.">' +
+      "Demon boss · " + (fight.demon ? "on" : "off") + "</button>" +
       "</div>" +
-      // The SAME control cluster app.js's banner shows, from the same code in
-      // profile.js: the character's two buttons, and the bracelet's grade /
-      // granted slots / rolls left. Grade matters here — this table is ranked
-      // per grade — and mounting the shared cluster is how this tab gets it
-      // without a second control for the same state.
-      '<div class="bc-hdrctl" id="bctl-hdrctl"></div>' +
       "</div>";
   }
 
   function headHTML() {
     return '<div class="tl-head">' +
       '<span class="tl-rank">#</span>' +
-      '<span class="tl-gl" data-gloss="The subrank this row sits in, for your current character: its damage as a percentage of the best line in this view, on the shared S+ to F- ladder.">rank</span>' +
+      '<span class="tl-gl" data-gloss="The subrank this row sits in: its damage as a percentage of this view&apos;s anchor, on the shared S+ to F- ladder.">rank</span>' +
       '<span class="tl-nm">Effect</span>' +
       '<span class="tl-vals">' + (view === "family" ? "Roll (mid)" : "Roll") + "</span>" +
-      '<span class="tl-bar" data-gloss="The bar is this line as a share of the #1 line. The vertical tick is where the SAME line sits for the default character — bar past the tick means the line is worth more to you than to an average build. The deck starts at those defaults, so the tick sits under the end of every bar until you change a setting.">% of the best line</span>' +
-      '<span class="tl-score" data-gloss="Score for this line, with the best EPIC roll set to 100. A Legendary scores above 100 — beating a good Epic is exactly what that should look like.">Score</span>' +
+      '<span class="tl-bar" data-gloss="This line as a share of the #1 line in the table, so the top bar is always full. The Score beside it measures something else — see that column.">% of the best line</span>' +
+      '<span class="tl-score" data-gloss="' +
+      (view === "family"
+        ? "Score for this line, with the best FAMILY AVERAGE set to 100. A family row averages all three tiers, so it can never reach a pure Epic roll — this view is scored against the best of its own kind."
+        : "Score for this line, with the best EPIC roll set to 100. A Legendary scores above 100 — beating a good Epic is exactly what that should look like.") +
+      '">Score</span>' +
       '<span class="tl-pct">Damage</span>' +
       "</div>";
   }
@@ -761,23 +788,22 @@
   function render() {
     var pane = $(PANE_ID);
     if (!pane) return;
-    var S = P.get(), grade = S.grade;
-    // The SHARED toggle, not the deck: the Calculator and this table have always
-    // had to agree about which character they are scoring (Shizu, 2026-08-11).
-    var res = rank(grade, P.profile());
+    // The default character, patched by this tab's own two toggles and nothing
+    // else. window.Profile is not consulted, so no edit made anywhere else in the
+    // app can move a row here.
+    var res = rank(gradeSel, tlProfile());
     last = res;
     REG = {}; SEQ = 0;
 
     $("bctl-controls").innerHTML = controlsHTML();
-    P.mountCharControls($("bctl-hdrctl"));
-    $("bctl-strip").innerHTML = stripSVG(res, grade);
-    $("bctl-bands").innerHTML = headHTML() + bandsHTML(res, grade);
-    $("bctl-foot").innerHTML = footHTML(res, grade);
+    $("bctl-strip").innerHTML = stripSVG(res, gradeSel);
+    $("bctl-bands").innerHTML = headHTML() + bandsHTML(res, gradeSel);
+    $("bctl-foot").innerHTML = footHTML(res, gradeSel);
     reattachPop();
   }
 
-  // Coalesce into one frame: a slider drag fires many input events and the table
-  // only has to be right once per paint. Still live — no debounce, no worker.
+  // Coalesce into one frame. Nothing drags on this tab any more, but a rebuild is
+  // still cheap enough to ask for freely and this keeps two asks in one paint.
   //
   // A HIDDEN document never fires requestAnimationFrame, so a change made while
   // the page is in a background tab would leave the table showing the old
@@ -798,16 +824,15 @@
   // interactions
   // ------------------------------------------------------------------
 
-  var PRESETS = {
-    back: { back: 100, front: 0, nonDir: 100 },
-    front: { back: 0, front: 100, nonDir: 100 },
-    nonpos: { back: 0, front: 0, nonDir: 100 }
-  };
-
   // Clicking a row used to drop its effect into the first empty granted slot and
   // jump to the Calculator. Shizu cut it (2026-08-11): the table is for reading,
   // and a whole-row click target under a hover card was one interaction too many.
   // The buttons in the control row are the only things here that still act.
+  //
+  // Each of them moves a MODULE variable and calls render(). None of them touches
+  // window.Profile: these four settings belong to this table, and a player who
+  // turns the demon boss on to read the shred lines has not asked the Calculator
+  // to re-price their bracelet.
 
   function bind(pane) {
     pane.addEventListener("click", function (e) {
@@ -815,13 +840,15 @@
       if (!t.closest) return;
       var vb = t.closest("[data-view]");
       if (vb) { view = vb.getAttribute("data-view"); hidePop(); render(); return; }
+      var gb = t.closest("[data-grade]");
+      if (gb) { gradeSel = gb.getAttribute("data-grade"); hidePop(); render(); return; }
       var pb = t.closest("[data-preset]");
       if (pb) {
         var k = pb.getAttribute("data-preset");
-        if (k === "demon") P.set({ fight: { demon: !P.get().fight.demon } });
-        else if (k === "support") P.set({ fight: { supportEffects: !P.get().fight.supportEffects } });
-        else P.set({ fight: PRESETS[k] });
-        return;                                       // P.set notifies; the table redraws itself
+        if (k === "demon") fight.demon = !fight.demon;
+        else if (k === "support") fight.supportEffects = !fight.supportEffects;
+        else return;
+        hidePop(); render();
       }
     });
   }
@@ -840,19 +867,11 @@
       "#tab-tierlist .tl-copy{color:var(--dim);font-size:13px;line-height:1.6;max-width:78ch;margin:0 0 14px}" +
       "#tab-tierlist .tl-copy p{margin:0 0 8px}#tab-tierlist .tl-copy b{color:var(--text);font-weight:600}" +
       "#tab-tierlist .tl-copy i{font-style:italic;color:var(--text)}" +
-      // the character picker's one line — its own styles are char-picker.js's, so
-      // this is only the room it takes above the controls
-      "#bctl-who{margin:14px 0 0}" +
-      "#tab-tierlist .tl-nopicker{color:var(--dim);font-size:12.5px;line-height:1.55}" +
-      "#tab-tierlist .tl-nopicker b{color:var(--text)}" +
-      "#tab-tierlist .tl-ctl{display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin:14px 0 4px}" +
+      "#tab-tierlist .tl-ctl{display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin:0 0 4px}" +
       "#tab-tierlist .tl-seg,#tab-tierlist .tl-presets{display:flex;gap:6px;align-items:center;flex-wrap:wrap}" +
       "#tab-tierlist .tl-plabel{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-right:2px}" +
       "#tab-tierlist .tl-n{opacity:.6;font-weight:400;font-size:11px;margin-left:3px}" +
       "#tab-tierlist .tl-ctl .mbtn[disabled]{opacity:.45;cursor:default}" +
-      // The shared cluster and its note each take the whole width under the
-      // view and preset buttons, rather than competing with them for a line.
-      "#tab-tierlist .tl-ctl>.bc-hdrctl{flex:1 0 100%}" +
       // the spread strip
       "#tab-tierlist .tl-strip{margin:16px 0 4px;padding-bottom:8px;border-bottom:1px solid var(--border)}" +
       "#tab-tierlist .tl-strip svg{width:100%;height:auto;display:block}" +
@@ -898,11 +917,9 @@
       "#tab-tierlist .tl-vals{font-family:'SF Mono',Menlo,Consolas,monospace;font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
       "#tab-tierlist .tl-score{font-family:'SF Mono',Menlo,Consolas,monospace;font-size:12px;font-weight:700;text-align:right;color:var(--text)}" +
       "#tab-tierlist .tl-head .tl-score{background:none;border:0;font-weight:600;color:var(--dim)}" +
-      "#tab-tierlist .tl-bar{position:relative;height:9px;background:var(--panel2);border-radius:5px;overflow:visible}" +
+      "#tab-tierlist .tl-bar{position:relative;height:9px;background:var(--panel2);border-radius:5px;overflow:hidden}" +
       "#tab-tierlist .tl-head .tl-bar{height:auto;background:none}" +
       "#tab-tierlist .tl-bar i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;display:block}" +
-      "#tab-tierlist .tl-ghost{position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;background:var(--text);" +
-      "opacity:.55;text-decoration:none;border-radius:1px}" +
       "#tab-tierlist .tl-pct{font-family:'SF Mono',Menlo,Consolas,monospace;font-size:12px;text-align:right;font-variant-numeric:tabular-nums}" +
       "#tab-tierlist .tl-foot{margin-top:18px;color:var(--dim);font-size:12px;line-height:1.65;max-width:82ch}" +
       "#tab-tierlist .tl-foot b{color:var(--text)}" +
@@ -968,10 +985,6 @@
     pane.setAttribute("data-init", "1");
     injectStyle();
     pane.innerHTML =
-      '<div id="' + DECK_HOST + '"></div>' +
-      // Its OWN host, outside #bctl-controls: render() rewrites that block on every
-      // input event, which would blow the search box away mid-keystroke.
-      '<div id="bctl-who"></div>' +
       '<div id="bctl-controls"></div>' +
       '<div class="tl-strip" id="bctl-strip"></div>' +
       '<div id="bctl-bands"></div>' +
@@ -979,66 +992,18 @@
       copyHTML();                                  // explainer last, collapsed
     bind(pane);
     wirePop();
-    claimDeck();
-    mountWho();
-    P.onChange(function () { schedule(); });     // every change, no debounce: scoring is free
     render();
   }
 
-  // ------------------------------------------------------------------
-  // the character picker
-  // ------------------------------------------------------------------
-  //
-  // char-picker.js's control, mounted in one line. Picking someone loads their
-  // bracelet and gear into the shared deck and Profile notifies, so the table
-  // re-ranks through the same onChange the sliders use.
-  //
-  // It leaves the DECK alone on purpose: the table stays on the calculator's
-  // defaults until the user presses Import Character Stats, exactly as the
-  // Calculator behaves. Pointing at that button is the only thing the note below
-  // has to do, and it does it in a line.
-
-  var whoCtl = null;
-
-  function mountWho() {
-    var host = $("bctl-who");
-    if (!host || whoCtl) return;
-    if (!window.CharPicker || typeof window.CharPicker.mount !== "function") {
-      host.innerHTML = '<div class="tl-nopicker"><b>Character lookup did not load.</b> ' +
-        "char-picker.js is not on the page. Load a character in the Calculator instead — " +
-        "this table follows whatever the deck holds.</div>";
-      return;
-    }
-    whoCtl = window.CharPicker.mount(host, {
-      layout: "row",
-      title: "Character",
-      emptyText: "None loaded — ranked on the deck's settings.",
-      note: whoNote
-    });
-  }
-
-  /** One line: what the table is ranked on, and where the two buttons are. */
-  function whoNote() {
-    var c = P.get().char;
-    if (!c || !c.name) return "";
-    return "Ranked on the settings in the deck — <b>Import Character Stats</b> below fills it with " +
-      esc(c.name) + "&rsquo;s own gear, <b>Reset to Default</b> puts ours back.";
-  }
-
-  /**
-   * The deck is one element that MOVES (profile.js's header). Claim it whenever
-   * this tab is the one on screen; app.js claims it back for the Calculator.
-   */
-  function claimDeck() {
-    var host = $(DECK_HOST);
-    if (host) P.mount(host);
-  }
+  // The character picker and the shared control deck both used to be mounted here.
+  // Shizu removed them (2026-08-12) — see the header. Nothing replaced them: this
+  // tab never claims the deck, so the deck simply stays wherever the Calculator or
+  // the Advisor last put it, and switching through the Tier List and back cannot
+  // strand it.
 
   document.addEventListener("tabselected", function (e) {
     if (!e || !e.detail || e.detail.tab !== "tierlist") return;
     init();
-    claimDeck();
-    mountWho();          // char-picker.js may have arrived after init ran
     schedule();
   });
 
