@@ -408,6 +408,26 @@ number and pay for the wrong thing, and the tool should say so out loud.
   while the ally attack-power rider on the same line counted one — one line on two party
   sizes at once, inflating those four families about 1.65× against the clean buff lines.
   Party size belongs on the gold axis, not here.
+## 10b. One dealer, and only one
+
+**SETTLED, Shizu, 2026-08-14.** Every support figure this tool reports — score,
+percentage, gold — is what ONE damage dealer gains. There is no party multiplier in
+the model and none is wanted.
+
+loa-gpd carries `partySize: 3` and divides by it on its gold axis, because its job
+is the party's gold per damage. Ours is different: a support's number has to be
+readable against a damage dealer's own bracelet, and multiplying one axis by three
+would make that comparison meaningless.
+
+Both halves of a party line follow the rule. The debuff half of families 16-19 goes
+through the same crit and defence functions the damage-dealer side uses, counted
+once; the ally attack-power rider goes through `supportGain`, also counted once.
+Those two used to disagree — `partyMult` counted `allyDpsCount` dealers for the
+debuff and one for the rider — which is the bug named in §10.
+
+The party-wide figure is simply three times what is shown. Anyone who wants it can
+multiply.
+
 ## 11. Base attack power % is not attack power %
 
 **SETTLED, Shizu, 2026-08-14: base AP% and AP% are different stats. Do not merge them.**

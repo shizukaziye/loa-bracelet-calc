@@ -84,6 +84,10 @@
       "<p>Defense shred goes through the enemy's damage reduction: if the boss reduces damage by " + fx(p.enemyBaseDR * 100, 0) + "% then shredding a fraction A of its defense multiplies damage by <code>(D+K) / (D(1−A)+K)</code>. Crit resist down reads as crit rate up for the whole party; crit-damage resist down likewise. The shielded-target line is flat damage while a shield is up, scaled by a " + fx(p.shieldUptime * 100, 0) + "% uptime.</p>" +
       "<p>The \"ally attack power buff +B%\" rider that rides along on all four scores <b>zero</b> for a damage dealer: it scales a buff only a support hands out. Switch the role to Support and it is the reason those four families sit at the top of the list.</p>" +
 
+      "<h2>A support is scored on one damage dealer</h2>" +
+      "<p>Every support figure on this site &mdash; the score, the percentage, the gold &mdash; is <b>what one damage dealer gains</b>. Not the party total, and not multiplied by anything. A bracelet that reads 2.2% is 2.2% more damage for a dealer standing next to you.</p>" +
+      "<p>That is a reporting choice, not a limit. A support&rsquo;s buffs do land on every dealer in the party, so the party-wide figure is three times this one &mdash; but a number you can compare directly against a damage dealer&rsquo;s own bracelet is the more useful one, and multiplying it by party size would make the two axes incomparable. Both halves of a party line follow the same rule: the debuff half goes through the same crit and defence functions the damage-dealer side uses, counted once, and the ally attack-power rider goes through the buff model, also counted once.</p>" +
+
       "<h2>The two fixed combat traits</h2>" +
       "<p>Every bracelet arrives with two combat-trait lines, 61–120 points on Ancient and 41–100 on Relic. They never reroll, so whatever they are worth is a constant added to every score the solver can reach — it moves the headline number and the gold, and it changes nothing about which lines to lock.</p>" +
       "<p><b>Crit converts exactly.</b> A crit trait line gives <code>value × 25 / 699</code> percentage points of crit rate — 25 points of crit rate per 699 trait points — and that goes through the same per-skill crit model a granted crit-rate line does: additive with everything else, capped at 100%. A 120-point crit line is +" + fx(120 * 25 / 699, 2) + " pp of crit rate, worth " + fx(B.damagePercent(B.traitDamage({ crit: 120 }, p)), 2) + "% to the default character and worth nothing at all to a build already at cap.</p>" +
@@ -121,7 +125,7 @@
       "<h2>What this does not model</h2>" +
       "<ul>" +
       "<li><b>Speed lines.</b> Attack and move speed scores zero. It is worth real damage through Raid Captain, and that conversion is not built yet.</li>" +
-      "<li><b>A support’s gold.</b> The damage a support adds is now scored properly, but the gold axis still prices it like a solo dealer. A support’s 1% lands on every damage dealer in the party, so gold per damage should divide by party size and does not yet.</li>" +
+
       "<li><b>Support classes other than Bard.</b> The Specialization-to-buff coefficient is Bard’s. Paladin and Artist have their own and nobody has published them, so the field is there to type into and the default is a Bard.</li>" +
       "<li><b>Positional base multipliers.</b> A front attack is ×1.20 and a back attack ×1.05 with +10% crit rate before any bracelet line. The tool uses your share inputs but does not fold those base multipliers in, so a positional line is valued against your average damage rather than against the boosted hit.</li>" +
       "<li><b>Roll costs.</b> Silver per attempt rises with each roll and was never published. Treated as free.</li>" +

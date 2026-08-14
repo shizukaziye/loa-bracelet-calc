@@ -117,12 +117,14 @@ decisions — map class to role (Bard, Paladin, Artist are the three), and then 
 rank supports on their own board or interleave them on the support ladder so a
 letter still means one thing. Neither is a call to make while he sleeps.
 
-**3. A support's gold.** The damage side is right; the gold side still prices a
-support like a solo damage dealer. A support's 1% lands on every dealer in the party,
-so gold per damage should divide by party size — the astrogem calculator already does
-this with `SUPPORT_GPD_MULTIPLIER`. Left alone because it triples every support Worth
-figure, which is a product decision rather than a bug fix. Named in the Method tab so
-nobody reads the number as finished.
+**3. ~~A support's gold.~~ SETTLED — it was never a gap.** Shizu, 2026-08-14: the
+support axis reports **the damage gain on one damage dealer**, and that is what it
+should report. There is no party multiplier anywhere in the model and none is
+wanted. A support's buffs do land on all three dealers, so the party-wide figure is
+three times this one, but a number you can hold against a damage dealer's own
+bracelet is the more useful one and multiplying by party size would make the two
+axes incomparable. Stated in the Method tab under "A support is scored on one
+damage dealer". Do not "fix" this.
 
 **4. The Worker still needs a redeploy.** The model went to 0.3.0 and stored records
 will not re-score until it ships. The seed on disk is already rescored (59/59).
