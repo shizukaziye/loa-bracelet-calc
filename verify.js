@@ -96,12 +96,12 @@ refs.derivation.forEach(function (c, i) {
   check("analytic.master", r9(B.addDamagePool(B.normalizeProfile({ master: true })) - B.addDamagePool(P)), 0.07);
   check("analytic.critFactor", r9(B.critFactor(P, 0, 0)), r9(1 + 0.9 * (2.8 - 1)));
   check("analytic.attackPower", r9(B.attackPower(P, 0, 0)),
-    r9(Math.sqrt(703826 * 1.09 * 241367 * 1.085 / 6) * 1.125 + 2700));
+    r9(Math.sqrt(703826 * 1.09 * 241367 * 1.085 / 6) * 1.125 + 3600));
   // WHERE FLAT WEAPON POWER GOES, from first principles and from both wrong
   // answers. Inside the root, before the bucket:
   var pFlatWP = B.normalizeProfile({ flatWP: 9000 });
   check("analytic.flatWP.attackPower", r9(B.attackPower(pFlatWP, 0, 0)),
-    r9(Math.sqrt(703826 * 1.09 * (241367 + 9000) * 1.085 / 6) * 1.125 + 2700));
+    r9(Math.sqrt(703826 * 1.09 * (241367 + 9000) * 1.085 / 6) * 1.125 + 3600));
   // ...which is the same character carrying 9000 more raw weapon power...
   check("analytic.flatWP.isRawWeaponPower", r9(B.attackPower(pFlatWP, 0, 0)),
     r9(B.attackPower(B.normalizeProfile({ weaponPowerRaw: 241367 + 9000 }), 0, 0)));
@@ -112,10 +112,10 @@ refs.derivation.forEach(function (c, i) {
   // NOT the same as 9000 flat ATTACK power — the wrong home for it. Attack power
   // escapes the root and the bucket, so it is worth far more per point.
   checkTrue("analytic.flatWP is not flatAP",
-    Math.abs(B.attackPower(pFlatWP, 0, 0) - B.attackPower(B.normalizeProfile({ flatAP: 2700 + 9000 }), 0, 0)) > 1);
+    Math.abs(B.attackPower(pFlatWP, 0, 0) - B.attackPower(B.normalizeProfile({ flatAP: 3600 + 9000 }), 0, 0)) > 1);
   // And it is worth strictly LESS than the same number of flat attack power.
   checkTrue("analytic.flatWP is worth less per point than flatAP",
-    B.attackPower(pFlatWP, 0, 0) < B.attackPower(B.normalizeProfile({ flatAP: 2700 + 9000 }), 0, 0));
+    B.attackPower(pFlatWP, 0, 0) < B.attackPower(B.normalizeProfile({ flatAP: 3600 + 9000 }), 0, 0));
   // Default 0, so nothing already scored moves.
   check("analytic.flatWP.defaultIsZero", P.flatWP, 0, true);
   // Enemy DR 50% -> D = K, so shredding A of the defense gives 2/(2−A).
@@ -177,8 +177,8 @@ refs.profileVariants.forEach(function (c, i) {
   check("analytic.f12.ancient.high", r9(d(12, "high")),
     r9(D((1 + 0.9 * (2.9 * 1.015 - 1)) / (1 + 0.9 * 1.8))));
   // Weapon power: full attack-power ratio (flat AP breaks the pure sqrt).
-  var ap0 = Math.sqrt(703826 * 1.09 * 241367 * 1.085 / 6) * 1.125 + 2700;
-  var ap1 = Math.sqrt(703826 * 1.09 * 250367 * 1.085 / 6) * 1.125 + 2700;
+  var ap0 = Math.sqrt(703826 * 1.09 * 241367 * 1.085 / 6) * 1.125 + 3600;
+  var ap1 = Math.sqrt(703826 * 1.09 * 250367 * 1.085 / 6) * 1.125 + 3600;
   check("analytic.f33.ancient.high", r9(d(33, "high")), r9(D(ap1 / ap0)));
   // With flatAP = 0 it collapses to the sqrt ratio.
   var pNoFlat = B.normalizeProfile({ flatAP: 0 });
@@ -188,7 +188,7 @@ refs.profileVariants.forEach(function (c, i) {
   checkTrue("analytic.flatAP dampens WP lines", d(33, "high") <
     B.lineDamage({ cat: "special", family: 33, tier: "high" }, "ancient", pNoFlat));
   // Main stat, same shape.
-  var apMs = Math.sqrt((703826 + 13888) * 1.09 * 241367 * 1.085 / 6) * 1.125 + 2700;
+  var apMs = Math.sqrt((703826 + 13888) * 1.09 * 241367 * 1.085 / 6) * 1.125 + 3600;
   check("analytic.mainStat.13888",
     r9(B.lineDamage({ cat: "basic", family: "mainStat", value: 13888 }, "ancient", P)), r9(D(apMs / ap0)));
   // Family 15: burst-weighted mean of the burst and sustained cases (w = 0.7).
@@ -197,7 +197,7 @@ refs.profileVariants.forEach(function (c, i) {
   check("analytic.f13.ancient.high", r9(d(13, "high")), r9(D(1.03 * (1 + 0.10 * 0.05))));
   // Families 20/21/22: weapon power at the hard max-stack / full-uptime
   // assumption. Each component is its own attack-power ratio.
-  function apWp(dw) { return Math.sqrt(703826 * 1.09 * (241367 + dw) * 1.085 / 6) * 1.125 + 2700; }
+  function apWp(dw) { return Math.sqrt(703826 * 1.09 * (241367 + dw) * 1.085 / 6) * 1.125 + 3600; }
   // family 20 stacks 6x(+1% atk/move speed) alongside the weapon power, and log
   // space is additive, so the expected value carries both terms.
   check("analytic.f20.ancient.high", r9(d(20, "high")), r9(D(apWp(1480 * 6) / ap0) + D(1.006)));
@@ -262,9 +262,44 @@ refs.traits.forEach(function (c, i) {
   check("analytic.trait.crit120", r9(B.traitDamage({ crit: 120 }, P)),
     r9(D((1 + (0.9 + dcr) * 1.8) / (1 + 0.9 * 1.8))));
   check("analytic.trait.critPP", r9(120 * B.TRAIT_CRIT_PP_PER_POINT), 4.291845494);
-  // Spec / Swiftness: flat points per 100 trait points, no log-space curve.
-  check("analytic.trait.spec120", r9(B.traitDamage({ spec: 120 }, P)), 3);
-  check("analytic.trait.swift96", r9(B.traitDamage({ swift: 96 }, P)), 2.4);
+  // Spec / Swiftness: flat points per 100 trait points, no log-space curve. The
+  // shipped weight is crit's own worth per point, so on default settings all
+  // three combat traits price alike.
+  check("analytic.trait.spec120", r9(B.traitDamage({ spec: 120 }, P)), 2.9094);
+  check("analytic.trait.swift96", r9(B.traitDamage({ swift: 96 }, P)), 2.32752);
+  // It is ANCHORED AT 110 — subrank.js's own yardstick — and there it tracks
+  // crit to four decimal places.
+  check("analytic.trait.anchor110.spec", r9(B.traitDamage({ spec: 110 }, P)), 2.66695);
+  check("analytic.trait.anchor110.crit", r9(B.traitDamage({ crit: 110 }, P)), 2.666997141);
+  checkTrue("analytic.trait.anchorHolds",
+    Math.abs(B.traitDamage({ spec: 110 }, P) - B.traitDamage({ crit: 110 }, P)) < 0.001);
+  // Away from the anchor the two drift apart, and that is the design, not a slip:
+  // crit is faintly non-linear — 0.0244 a point at 61, 0.0242 at 120, because a
+  // character nearer the cap gains less from each point — so no one constant can
+  // track it everywhere. At the bottom of the Ancient band the gap is about 0.6%.
+  function gapAt(n) {
+    var c = B.traitDamage({ crit: n }, P);
+    return Math.abs(c - B.traitDamage({ spec: n }, P)) / c;
+  }
+  checkTrue("analytic.trait.critIsNonLinear",
+    B.traitDamage({ crit: 61 }, P) / 61 > B.traitDamage({ crit: 120 }, P) / 120);
+  checkTrue("analytic.trait.driftAt61", gapAt(61) > 0.005 && gapAt(61) < 0.007);
+  checkTrue("analytic.trait.anchorIsTightest", gapAt(110) < gapAt(61) && gapAt(110) < gapAt(120));
+  // A user-set weight overrides outright — the slider still means what it says.
+  check("analytic.trait.numericWeightSpec",
+    r9(B.traitDamage({ spec: 100 }, B.normalizeProfile({ traitWeights: { spec: 0.025 } }))), 2.5);
+  check("analytic.trait.numericWeightSwift",
+    r9(B.traitDamage({ swift: 96 }, B.normalizeProfile({ traitWeights: { swift: 0.025 } }))), 2.4);
+  // Zero scores nothing, and so does an explicit null: alias() skips both.
+  check("analytic.trait.zeroWeight",
+    r9(B.traitDamage({ spec: 120 }, B.normalizeProfile({ traitWeights: { spec: 0 } }))), 0);
+  check("analytic.trait.nullWeightScoresZero",
+    r9(B.traitDamage({ spec: 120 }, B.normalizeProfile({ traitWeights: { spec: null } }))), 0);
+  // An EMPTY override merges nothing and leaves the defaults standing. This is
+  // the JS/Python seam: {} is truthy in JS and falsy in Python, so the port has
+  // to reach for `is not None` rather than a plain truth test.
+  check("analytic.trait.emptyOverrideKeepsDefaults",
+    r9(B.traitDamage({ spec: 120 }, B.normalizeProfile({ traitWeights: {} }))), 2.9094);
   // Additive across the two active lines.
   check("analytic.trait.additive", r9(B.traitDamage({ crit: 120, spec: 120 }, P)),
     r9(B.traitDamage({ crit: 120 }, P) + B.traitDamage({ spec: 120 }, P)));
@@ -322,6 +357,147 @@ refs.traits.forEach(function (c, i) {
   }
   checkTrue("analytic.traitSolve.valueGold",
     Math.abs(withT.valueGold - wExp * t.goldPer1Pct) < 1e-6);
+})();
+
+// ================= 4d. the support channel =================
+// A support scores nothing for its own damage. What it scores is what its buffs
+// add to ONE damage dealer: ap · brand · identity, each channel scaled by its own
+// uptime. The whole model is re-derived here from docs/research/support-model.md
+// so the numbers are checked against the write-up rather than against themselves.
+(function () {
+  function D(m) { return 100 * Math.log(m); }
+  var S = B.normalizeProfile({ role: "support" });
+
+  // `lines` are the extra buff FRACTIONS a bracelet adds; dMs / dWp are flat main
+  // stat / weapon power it adds to the support itself.
+  function contribution(lines, dMs, dWp) {
+    lines = lines || {};
+    var allyDmg  = 38.26 / 100 + (lines.allyDmg || 0);
+    var allyDmgT =  9.26 / 100 + (lines.allyDmg || 0);
+    var atkEnh   = 68.55 / 100 + (lines.allyAtkEnh || 0);
+    var brandPow = 45.00 / 100 + (lines.brand || 0);
+    var specEff  = (1016 + (lines.spec || 0)) * 0.0005005722461;
+    // The support's own base attack power: no flat attack term, because the buff
+    // reads the base figure and not the total.
+    var supAtk = Math.sqrt(((703826 + (dMs || 0)) * 1.09) * ((241367 + (dWp || 0)) * 1.085) / 6) * 1.125;
+    var dpsAtk = Math.sqrt(260918 * 767170 / 6);
+    var mults = 1 + 0.2948;
+    var apMult = ((dpsAtk + supAtk * 0.22 * (1 + atkEnh)) * mults + 3600) / (dpsAtk * mults + 3600);
+    var ap = 1 + 0.95 * (apMult - 1);
+    var brand = 1 + 1.00 * (0.1 * (1 + brandPow));
+    // Serenade, Major Chord and the T-skill all raise the dealer's ADDITIONAL
+    // damage, so they share one bracket and the dealer's own base dilutes them.
+    var identity = 1 + (0.70 * (0.15 * (1 + allyDmg) * (1 + specEff)) +
+                        0.70 * (0.02 * (1 + allyDmg) * (1 + specEff)) +
+                        0.40 * (0.10 * (1 + allyDmgT))) / (1 + 0.3585);
+    return ap * brand * identity;
+  }
+  function gain(lines, dMs, dWp) { return contribution(lines, dMs, dWp) / contribution(null, 0, 0); }
+  function famD(id, tier, prof) { return B.lineDamage({ cat: "special", family: id, tier: tier }, "ancient", prof || S); }
+
+  // What a naked support is already worth to one dealer. Every other number in
+  // this block is a ratio against it, so pin it outright — twice: the model's own
+  // figure, and the re-derivation above landing on the same one.
+  check("analytic.support.contribution", r9(B.supportContribution(S, null, 0, 0)), 1.935042758);
+  check("analytic.support.contributionRederived", r9(contribution(null, 0, 0)), 1.935042758);
+  // A gain is that contribution with the line over the contribution without.
+  check("analytic.support.gainIsARatio", r9(B.supportGain(S, { allyDmg: 0.09 }, 0, 0)),
+    r9(B.supportContribution(S, { allyDmg: 0.09 }, 0, 0) / B.supportContribution(S, null, 0, 0)));
+  // The base the ally buff is a share of drops the flat ATTACK term, because the
+  // buff reads the base figure rather than the total. That one subtraction is the
+  // whole difference from attackPower().
+  check("analytic.support.baseAtkDropsFlatAP", r9(B.supportBaseAtk(S, 0, 0)), r9(B.attackPower(S, 0, 0) - 3600));
+
+  // Families 29 and 30 are the two ally-buff riders, and on a support they are
+  // the point of the item: 29 scales the attack-power buff, 30 the damage buff.
+  check("analytic.support.f29.high", r9(famD(29, "high")), r9(D(gain({ allyAtkEnh: 0.06 }))));
+  check("analytic.support.f30.high", r9(famD(30, "high")), r9(D(gain({ allyDmg: 0.09 }))));
+  checkTrue("analytic.support.f29.pays", famD(29, "high") > 0);
+  checkTrue("analytic.support.f30.pays", famD(30, "high") > 0);
+  // A legendary ally-DAMAGE line beats a legendary ally-AP line: 9% into the
+  // identity bracket outruns 6% into a buff that is only a share of the support's
+  // own attack power.
+  checkTrue("analytic.support.f30BeatsF29", famD(30, "high") > famD(29, "high"));
+
+  // Personal damage scores nothing on a support — crit, back attack and the
+  // additional-damage pool all move only the support's own hits, which nobody
+  // counts. These are the lines a DPS pays most for, so they are the ones a role
+  // mix-up would show up in first.
+  check("analytic.support.critRate", r9(famD(31, "high")), 0);
+  check("analytic.support.critPlusOnCrit", r9(famD(11, "high")), 0);
+  check("analytic.support.backAttack", r9(famD(25, "high")), 0);
+  check("analytic.support.addDamage", r9(famD(24, "high")), 0);
+
+  // Weapon power and main stat are NOT dead weight on a support: both raise the
+  // base its ally attack-power buff is a share of. Thin channels, but real ones.
+  check("analytic.support.weaponPower", r9(famD(33, "high")), r9(D(gain(null, 0, 9000))));
+  check("analytic.support.mainStat",
+    r9(B.lineDamage({ cat: "basic", family: "mainStat", value: 13888 }, "ancient", S)), r9(D(gain(null, 13888, 0))));
+  checkTrue("analytic.support.wpUnderBlueAllyDamage", famD(33, "high") < famD(30, "low"));
+
+  // The three channels MULTIPLY, so a line that touches only one of them prices
+  // the same whatever the other two are doing: the identity bracket cancels top
+  // and bottom of the ratio. Move the support's spec by 184 points and family 29
+  // must not budge — while family 30, which lives in that bracket, must.
+  var sup = {}, sk;
+  for (sk in B.DEFAULT_PROFILE.support) if (Object.prototype.hasOwnProperty.call(B.DEFAULT_PROFILE.support, sk)) sup[sk] = B.DEFAULT_PROFILE.support[sk];
+  sup.spec = 1200;
+  var moreSpec = B.normalizeProfile({ role: "support", support: sup });
+  check("analytic.support.apChannelIgnoresSpec", r9(famD(29, "high", moreSpec)), r9(famD(29, "high")));
+  checkTrue("analytic.support.identityChannelFollowsSpec", famD(30, "high", moreSpec) > famD(30, "high"));
+
+  // Families 16-19 carry a party DEBUFF that lands on every dealer who has it. A
+  // support is scored on ONE dealer — the unit its buff channels are already in —
+  // so the score must not move with allyDpsCount. Price the debuff across the
+  // party and the same line gets two different party sizes at once, since the
+  // ally-buff rider beside it is priced across one.
+  var bigParty = B.normalizeProfile({ role: "support", allyDpsCount: 7 });
+  check("analytic.support.partyLineIgnoresPartySize", r9(famD(16, "high", bigParty)), r9(famD(16, "high")));
+  checkTrue("analytic.support.partyLinePays", famD(16, "high") > 0);
+  // A DPS still counts itself plus its allies, so party size moves its score.
+  checkTrue("analytic.support.dpsStillCountsAllies",
+    B.lineDamage({ cat: "special", family: 16, tier: "high" }, "ancient", B.normalizeProfile({ allyDpsCount: 7 })) >
+    B.lineDamage({ cat: "special", family: 16, tier: "high" }, "ancient", P));
+
+  // Combat traits on a support are not a matter of taste, so traitWeights do not
+  // apply. Spec pays through the identity bracket and Swiftness is priced THE
+  // SAME (Shizu); crit, domination, endurance and expertise pay nothing.
+  check("analytic.support.traitSpec", r9(B.traitDamage({ spec: 120 }, S)), r9(D(gain({ spec: 120 }))));
+  check("analytic.support.traitSwiftEqualsSpec", r9(B.traitDamage({ swift: 120 }, S)), r9(B.traitDamage({ spec: 120 }, S)));
+  check("analytic.support.traitCrit", r9(B.traitDamage({ crit: 120 }, S)), 0);
+  check("analytic.support.traitIgnoresWeights",
+    r9(B.traitDamage({ spec: 120 }, B.normalizeProfile({ role: "support", traitWeights: { spec: 0.04 } }))),
+    r9(B.traitDamage({ spec: 120 }, S)));
+
+  // NESTED MERGE. normalizeProfile merges addDamage, traitWeights and support key
+  // by key, so a caller who sets one field of one of them means "this field,
+  // everything else as it was". For `support` that is not cosmetic: a partial
+  // override that REPLACED the block would leave supportContribution reading
+  // undefined for allyDmg and every support score would come out NaN. This was
+  // exactly the behaviour until 2026-08-14; the check guards the repair.
+  var partial = B.normalizeProfile({ support: { spec: 1200 } });
+  check("analytic.support.partialOverrideTakesTheField", partial.support.spec, 1200, true);
+  check("analytic.support.partialOverrideKeepsTheRest",
+    Object.keys(partial.support).length, Object.keys(B.DEFAULT_PROFILE.support).length, true);
+  check("analytic.support.partialOverrideStaysFinite",
+    isFinite(B.lineDamage({ cat: "special", family: 30, tier: "high" }, "ancient",
+      B.normalizeProfile({ role: "support", support: { spec: 1200 } }))) ? 1 : 0, 1, true);
+
+  // THE FAMILY LETTER FOLLOWS THE ROLE. Every other input is deliberately kept
+  // out of the letters so they label the family rather than the build — but the
+  // role decides which families score at all, so it has to reach them. A support
+  // was being offered "S · Crit Rate" on a line worth exactly 0.000 to them.
+  var gD = B.familyGrades("ancient"), gS = B.familyGrades("ancient", "support");
+  check("analytic.grades.critRateIsSForADealer", gD.special[11].letter, "S", true);
+  check("analytic.grades.critRateIsFForASupport", gS.special[11].letter, "F", true);
+  check("analytic.grades.critRateScoresNothingForASupport",
+    B.lineDamage({ cat: "special", family: 11, tier: "high" }, "ancient",
+      B.normalizeProfile({ role: "support" })), 0, true);
+  check("analytic.grades.critResistIsSForBoth",
+    gD.special[17].letter === "S" && gS.special[17].letter === "S" ? 1 : 0, 1, true);
+  check("analytic.grades.omittingRoleMeansDealer",
+    JSON.stringify(B.familyGrades("ancient")) === JSON.stringify(B.familyGrades("ancient", "dps")) ? 1 : 0,
+    1, true);
 })();
 
 // ================= 4c. family letter grades =================

@@ -56,11 +56,32 @@ WP total = raw × (1 + wpPct); wpPct = earring WP% lines 3%×2 = **6%** at max-n
 + karma (sheets: up to 3%, 2.5% "non-whale"; default TBD by Shizu).
 
 Attack power = sqrt(MStot × WPtot / 6) × (1 + baseApPct) + flatAP
-- baseApPct = damage gems + ability stone (lv8 gems ×11 ≈ 8.8% + stone ≥9/7 1.5%);
-  cancels in most ratios but shifts the sqrt-vs-flat balance.
-- flatAP: accessories 0 (no flats); ark-grid cores would give ~2700–3090 (default TBD).
-- The overall AP% bucket (accessory AP% 3.1%, Adrenaline, etc.) multiplies the whole
+- baseApPct = damage gems + ability stone, AND NOTHING ELSE (Shizu, 2026-08-12).
+  Gems: lv6 0.45% / lv7 0.6% / lv8 0.8% / lv9 1.0% / lv10 1.2%, eleven of them, with
+  anything below lv6 counting nothing. Stone: 1.5% once its two engraving levels
+  total five or more — 9/7, 10/6, 9/9 and up; 9/6, 8/7 and 7/7 pay nothing.
+  It cancels in most ratios but shifts the sqrt-vs-flat balance.
+- flatAP: the accessories' "Attack Power +80/195/390" rolls, plus an ark-grid ATTACK
+  core. A core's thresholds ADD: +900 at 10 points and +1,800 relic / +2,700 ancient
+  at 17, so a core at 17+ points totals **2,700 relic / 3,600 ancient**.
+- flatWP: the accessories' "Weapon Power +195/480/960" rolls, plus an ark-grid WEAPON
+  core: +1,300 at 10 and +2,600 / +3,900 at 17, totalling **3,900 relic / 5,200
+  ancient**. Points above 17 pay only a percentage (+0.16% each), which joins the
+  whole-term attack-power bucket and cancels out of every line ratio. Flat weapon
+  power goes INSIDE the square root, where the weapon-power bucket amplifies it.
+  A build runs an attack core or a weapon core, not both.
+- The overall AP% bucket (accessory AP% 3.1%, the ark-grid attack core's percentage
+  thresholds ~2.7%, the level-60 side node 2.2%, Adrenaline 9%) multiplies the whole
   AP term → cancels out of every bracelet-line ratio; ignore it.
+
+  **BASE AP% AND AP% ARE DIFFERENT STATS (Shizu, 2026-08-14, ruled twice).** Never fold
+  the second into the first. baseApPct sits INSIDE the square root and comes from gems
+  and the stone alone; the wider bucket sits outside it and takes the flats with it. On a
+  SUPPORT the distinction has teeth: the ally attack-power buff is a share of the
+  support's BASE attack power, so the wider bucket never reaches it, and putting those
+  eight-odd percentage points into baseApPct would overstate every support buff. See
+  support-model.md §11 — loa-gpd's reference-character.md argues the other way and is
+  wrong on this point.
 
 Default 1785 baseline (msPct 8%, before karma/flatAP decisions):
 armor MS 629,835 → raw 703,826 → MS_tot 760,132; WP raw 241,367.
@@ -111,6 +132,8 @@ armor MS 629,835 → raw 703,826 → MS_tot 760,132; WP raw 241,367.
   +7% crit / +8.5% AddDmg — do not "fix" this without asking him).
 - karma WP% = **2.5%** → baseline wpPct = 0.085.
 - ranch included → baseline msPct = **0.09**.
-- ark-grid flat AP **2700** included → flatAP default 2700.
-- baseApPct default = **full level-9 damage gems + 9/7 stone** = 11 × 1.0% + 1.5% =
-  **0.125**, adjustable (per-gem: lv7 0.6% / lv8 0.8% / lv9 1.0% / lv10 1.2%).
+- ark-grid core default = **ancient ATTACK core at 17+ points** → flatAP 3600,
+  flatWP 0.
+- baseApPct default = **full level-9 damage gems + a stone worth its 1.5%** =
+  11 × 1.0% + 1.5% = **0.125**, adjustable (per-gem: lv6 0.45% / lv7 0.6% /
+  lv8 0.8% / lv9 1.0% / lv10 1.2%).

@@ -21,8 +21,8 @@ import gear_data as GEAR          # noqa: E402
 
 # Bump VERSION whenever a change here can move a stored number: the Worker stamps
 # MODEL_SIG + "@" + VERSION on every record and re-scores anything that no longer
-# matches. See bracelet.js for what 0.2.0 changed.
-VERSION = "0.2.0"
+# matches. See bracelet.js for what each version changed.
+VERSION = "0.3.0"
 MODEL_SIG = "bracelet-v1"
 
 ADD_DMG_ASTROGEM_LV60 = 0.0484
@@ -30,6 +30,14 @@ ADD_DMG_ASTROGEM_LV60 = 0.0484
 # (Shizu, 2026-08-11). Matches Arsonistic's sheet (0.25/699). Earlier drafts used 35/699 in error; corrected 0.25/699.
 TRAIT_CRIT_PP_PER_POINT = 25 / 699.0
 # Fixed order, so JS and Python sum the same floats in the same sequence.
+# The three combat traits that pay. Fixed order, so JS and Python sum the same
+# floats in the same sequence.
+#
+# DOMINATION, ENDURANCE AND EXPERTISE ARE WORTH ZERO (Shizu, 2026-08-14) - a
+# ruling, not an omission. All six roll on the same 35% category and the same
+# weighted band, so the other three appear on the Tier List at 0 rather than
+# being hidden; that is what tells a reader the line they rolled is dead. Do not
+# add them here.
 TRAIT_KEYS = ["crit", "spec", "swift"]
 # Shizu's ruling: Master is +7% additional damage only.
 MASTER_ADD_DAMAGE = 0.07
@@ -43,7 +51,10 @@ DEFAULT_PROFILE = {
     "msPct": 0.09,
     "wpPct": 0.085,
     "baseApPct": 0.125,
-    "flatAP": 2700,
+    # Ark-grid ATTACK core, Ancient, at 17+ points. The core's thresholds ADD:
+    # 900 at 10 points plus 2,700 at 17. A Relic one totals 2,700 and a weapon
+    # core pays flatWP instead — see data/gear-data.js.
+    "flatAP": 3600,
     # Flat WEAPON power (weapon ark-grid core, accessory "Weapon Power +480").
     # It is weapon power, so attack_power() puts it INSIDE the square root with
     # weaponPowerRaw and lets the wpPct bucket amplify it. Default 0.
@@ -52,9 +63,14 @@ DEFAULT_PROFILE = {
     "skills": [{"share": 1, "critRate": 0.90, "critDamage": 2.8}],
     "master": False,
 
-    # Points of damage per 100 trait points, for Spec and Swiftness. Crit has
-    # no weight: it converts exactly (see trait_damage).
-    "traitWeights": {"spec": 0.025, "swift": 0.025},
+    # Points of damage per 100 trait points, for Spec and Swiftness. The DEFAULT
+    # is crit's own worth, so on the shipped settings all three combat traits are
+    # priced alike (Shizu, 2026-08-14): a 110-point crit line is 2.6670 points of
+    # damage on this profile, i.e. 0.024245 a point.
+    #
+    # A CONSTANT, not a formula. Crit is faintly non-linear, so no one weight
+    # tracks it everywhere; this one is anchored at 110, subrank.js's yardstick.
+    "traitWeights": {"spec": 0.024245, "swift": 0.024245},
 
     "addDamage": {
         "weaponQuality": 0.30,
@@ -88,8 +104,45 @@ DEFAULT_PROFILE = {
     "cooldownPenaltyWeight": 0.7,
     "atkMoveSpeedDamagePerPct": 0.1,  # 10% attack speed = 1% damage (Shizu)
 
-    "allyApBuffDamagePerPct": 0.45,
-    "allyDamageBuffDamagePerPct": 0.30,
+    # ---- SUPPORT ROLE ----------------------------------------------------
+    # A support is scored by what its buffs add to ONE damage dealer, above a
+    # support wearing nothing. Three channels, each scaled by its own uptime:
+    # the ally attack-power buff (the only channel the support's own gear
+    # reaches, since the buff is a share of its base attack power), brand, and
+    # the identity bracket — Serenade, Major Chord and the T-skill all raise the
+    # dealer's ADDITIONAL damage, so they share one bracket and are diluted by
+    # the dealer's own base additional. Q = 100 . ln(ap . brand . identity).
+    # See bracelet.js and docs/research/support-model.md.
+    #
+    # The party DEBUFF halves of families 16-19 are NOT here. They land on every
+    # dealer whoever carries them, so they take the same crit and defence path
+    # the DPS side uses.
+    "support": {
+        # The damage dealer being buffed.
+        "dpsWP": 260918,        # 241,367 weapon x (1 + 6% earrings + 2.1% karma)
+        "dpsMS": 767170,        # 703,826 raw x (1 + 8% skins + 1% stronghold)
+        "dpsAtkPct": 0.2948,    # accessories, attack core, node 60, gems, stone, Adrenaline
+        "dpsFlatAtk": 3600,     # ancient attack core
+        "baseAdd": 0.3585,      # the dealer's own additional damage, which dilutes identity
+
+        # The support's own buff bases, in percent, at level-9 gems.
+        "brandPower": 45.00,
+        "allyAtkEnh": 68.55,
+        "allyDmg": 38.26,       # identity bracket: ark grid + gems
+        "allyDmgT": 9.26,       # the T-skill's own bracket
+        "spec": 1016,           # spec BEFORE the bracelet's own combat-trait line
+        "classCoeff": 0.0005005722461,   # Bard: spec -> identity-buff efficiency
+
+        # Uptimes, in percent.
+        "upBrand": 100,
+        "upAp": 95,
+        "upSeren": 70,
+        "upChord": 70,
+        "upTskill": 40,
+
+        # Share of its own base attack power a support hands to each ally.
+        "apBuffShare": 0.22,
+    },
     "partyShieldHealValuePerPct": 0.10,
 }
 
@@ -107,11 +160,20 @@ def _deep_copy(o):
 
 
 def normalize_profile(p):
+    # Keep this merge list identical to bracelet.js's: the moment they differ,
+    # the same profile scores two numbers. verify pins it on both sides.
     out = _deep_copy(DEFAULT_PROFILE)
     if not p:
         return out
     for k, v in p.items():
-        if k in ("addDamage", "traitWeights") and v:
+        # `v is not None`, not a plain truth test: an EMPTY override is truthy in
+        # JS and falsy here, so `and v` sent {"traitWeights": {}} down the replace
+        # branch and wiped the defaults the JS keeps.
+        # NESTED BLOCKS MERGE, they do not replace - see the JS twin. For
+        # "support" the difference is fatal rather than cosmetic: replacing the
+        # whole block with {"spec": 1200} leaves support_contribution reading a
+        # missing allyDmg and every support score raises KeyError.
+        if k in ("addDamage", "traitWeights", "support") and v is not None:
             for a, av in v.items():
                 out[k][a] = av
         elif v is not None:
@@ -234,10 +296,70 @@ def party_mult(profile, self_gain, ally_gain):
     # already brings them a second copy is worth exactly nothing.
     if profile.get("supportHasEffects"):
         return 1
-    n = profile["allyDpsCount"]
+    # A SUPPORT is scored on ONE dealer, which is the unit support_gain() already
+    # works in. Multiplying by allyDpsCount here priced the party-DEBUFF half of
+    # families 16-19 across two dealers while the ally-buff rider on the SAME
+    # line was priced across one. Party size belongs on the gold axis.
     if profile["role"] == "support":
-        return 1 + n * ally_gain
-    return 1 + self_gain + n * ally_gain
+        return 1 + ally_gain
+    return 1 + self_gain + profile["allyDpsCount"] * ally_gain
+
+
+# ----------------------------------------------------------------------
+# The support channel
+# ----------------------------------------------------------------------
+
+def support_base_atk(profile, d_ms_raw=0, d_wp_raw=0):
+    """A support's own base attack power — what its ally buff is a share of.
+
+    Flat ATTACK power is deliberately absent: the buff reads the base figure,
+    not the total, so the percentage bucket rides the square-root term and stops
+    there. Flat WEAPON power IS counted, because it sits inside the root and so
+    moves the base.
+    """
+    ms = (profile["mainStatRaw"] + d_ms_raw) * (1 + profile["msPct"])
+    wp = (profile["weaponPowerRaw"] + profile.get("flatWP", 0) + d_wp_raw) * (1 + profile["wpPct"])
+    return math.sqrt(ms * wp / 6.0) * (1 + profile["baseApPct"])
+
+
+def support_contribution(profile, lines=None, d_ms_raw=0, d_wp_raw=0):
+    """What a support's buffs multiply ONE damage dealer's damage by.
+
+    Measured against a dealer standing alone. `lines` carries the extra buff
+    percentages a bracelet adds, as FRACTIONS: allyAtkEnh, allyDmg, brand.
+    d_ms_raw / d_wp_raw are flat main stat / weapon power the bracelet adds to
+    the support itself.
+    """
+    sp = profile["support"]
+    lines = lines or {}
+    ally_dmg = sp["allyDmg"] / 100.0 + (lines.get("allyDmg") or 0)
+    ally_dmg_t = sp["allyDmgT"] / 100.0 + (lines.get("allyDmg") or 0)
+    atk_enh = sp["allyAtkEnh"] / 100.0 + (lines.get("allyAtkEnh") or 0)
+    brand_power = sp["brandPower"] / 100.0 + (lines.get("brand") or 0)
+    # The bracelet's own Specialization line lands here, as extra spec.
+    spec_eff = (sp["spec"] + (lines.get("spec") or 0)) * sp["classCoeff"]
+
+    sup_atk = support_base_atk(profile, d_ms_raw, d_wp_raw)
+    dps_atk = math.sqrt(sp["dpsWP"] * sp["dpsMS"] / 6.0)
+    mults = 1 + sp["dpsAtkPct"]
+    ap_mult = (((dps_atk + sup_atk * sp["apBuffShare"] * (1 + atk_enh)) * mults + sp["dpsFlatAtk"]) /
+               (dps_atk * mults + sp["dpsFlatAtk"]))
+
+    ap = 1 + (sp["upAp"] / 100.0) * (ap_mult - 1)
+    brand = 1 + (sp["upBrand"] / 100.0) * (0.1 * (1 + brand_power))
+    seren = 0.15 * (1 + ally_dmg) * (1 + spec_eff)
+    chord = 0.02 * (1 + ally_dmg) * (1 + spec_eff)
+    tsk = 0.10 * (1 + ally_dmg_t)
+    identity = 1 + ((sp["upSeren"] / 100.0) * seren + (sp["upChord"] / 100.0) * chord +
+                    (sp["upTskill"] / 100.0) * tsk) / (1 + sp["baseAdd"])
+
+    return ap * brand * identity
+
+
+def support_gain(profile, lines=None, d_ms_raw=0, d_wp_raw=0):
+    """One support line's multiplier: the contribution with it, over without."""
+    return support_contribution(profile, lines, d_ms_raw, d_wp_raw) / \
+        support_contribution(profile, None, 0, 0)
 
 
 def component_multiplier(kind, x, profile, comp=None):
@@ -246,9 +368,17 @@ def component_multiplier(kind, x, profile, comp=None):
     if kind == "none":
         return 1
     if kind == "weaponPower":
-        return attack_power(profile, 0, x) / attack_power(profile, 0, 0) if dps else 1
+        # Not dead weight on a support: weapon power raises its own base attack,
+        # and the ally attack-power buff is a share of that. A small channel — a
+        # legendary Ancient weapon-power line is worth less than half a blue
+        # ally-damage line — but not zero.
+        if not dps:
+            return support_gain(profile, None, 0, x)
+        return attack_power(profile, 0, x) / attack_power(profile, 0, 0)
     if kind == "mainStat":
-        return attack_power(profile, x, 0) / attack_power(profile, 0, 0) if dps else 1
+        if not dps:
+            return support_gain(profile, None, x, 0)
+        return attack_power(profile, x, 0) / attack_power(profile, 0, 0)
     if kind == "critRate":
         return crit_factor(profile, x / 100.0, 0) / crit_factor(profile, 0, 0) if dps else 1
     if kind == "critDamage":
@@ -309,10 +439,13 @@ def component_multiplier(kind, x, profile, comp=None):
         g = profile["shieldUptime"] * x / 100.0
         return party_mult(profile, g, g)
 
+    # "Ally Atk. Power Enhancement +B%" scales the buff a support hands out and
+    # does NOTHING on a damage dealer — the whole argument for the support
+    # carrying families 16-19 rather than a dealer.
     if kind == "allyApBuff":
-        return 1 if dps else 1 + x * profile["allyApBuffDamagePerPct"] / 100.0
+        return 1 if dps else support_gain(profile, {"allyAtkEnh": x / 100.0}, 0, 0)
     if kind == "allyDamageBuff":
-        return 1 if dps else 1 + x * profile["allyDamageBuffDamagePerPct"] / 100.0
+        return 1 if dps else support_gain(profile, {"allyDmg": x / 100.0}, 0, 0)
     if kind == "partyShieldHeal":
         return 1 if dps else 1 + x * profile["partyShieldHealValuePerPct"] / 100.0
     return 1
@@ -432,9 +565,18 @@ def trait_damage(traits, profile):
     """Score of EVERY combat-trait line the bracelet carries.
 
     traits = {"crit", "spec", "swift"} in trait points; inactive trait = 0.
-    Crit converts exactly (25 pp of crit rate per 699 points) and runs through
-    the per-skill crit model, additive with every other crit source and capped
-    at 100%. Spec and Swiftness use the class's own weight.
+
+    A DPS scores Crit by the exact conversion — 25 pp of crit rate per 699
+    points, fed through the per-skill crit model additively with every other
+    crit source and capped at 100% — and Spec and Swiftness by the class's own
+    weight, in points of damage per 100 trait points. The default weight is
+    crit's own worth at 110 points, so out of the box all three score alike.
+
+    A support ignores the weights. Spec pays through the identity bracket, which
+    is where the whole of its party value lives, and Swiftness is priced THE
+    SAME (Shizu) — in game it shortens the buff cycle, lifting uptimes this
+    model takes as fixed inputs. Crit, Domination, Endurance and Expertise move
+    only the support's own damage, which nobody counts, so they score 0.
 
     THE RULE (see bracelet.js for the long version): combat-trait lines score
     here, effect lines score in set_damage(). A trait that rolled into a GRANTED
@@ -454,20 +596,26 @@ def trait_damage(traits, profile):
     def _alias(o, key):
         if o.get(key) is not None:
             return o[key]
-        if key == "swift" and o.get("swiftness") is not None:
+        # Membership, not `is not None`: bracelet.js tests the alias branches for
+        # undefined alone, so a null spelling has to fall through the same way.
+        if key == "swift" and "swiftness" in o:
             return o["swiftness"]
-        if key == "swiftness" and o.get("swift") is not None:
+        if key == "swiftness" and "swift" in o:
             return o["swift"]
         return 0
 
+    support = profile.get("role") == "support"
     s = 0.0
     for k in TRAIT_KEYS:
         v = _alias(traits, k) or 0
         if not v:
             continue
+        if support:
+            if k in ("spec", "swift"):
+                s += to_d(support_gain(profile, {"spec": v}, 0, 0))
+            continue
         if k == "crit":
-            if profile.get("role") == "support":
-                continue
+            # Crit is the one trait that converts exactly rather than by taste.
             dcr = v * TRAIT_CRIT_PP_PER_POINT / 100.0
             s += to_d(crit_factor(profile, dcr, 0) / crit_factor(profile, 0, 0))
         else:
@@ -488,14 +636,18 @@ def _band_letter(share):
     return "F"
 
 
-def family_grades(grade="ancient"):
+def family_grades(grade="ancient", role=None):
     """An F-to-S letter for every family a granted slot can hold.
 
     Rated on the family's AVERAGE roll (tiers weighted 6:3:1) against the best
-    family's, and always computed from the CANONICAL DEFAULT profile so the
-    labels do not shuffle when the user moves a slider.
+    family's, and computed from the CANONICAL DEFAULT profile so the labels do
+    not shuffle when the user moves a slider.
+
+    ROLE is the exception, because it is not a build setting - it decides which
+    lines score at all. A support reading "S - Crit Rate" off a line worth
+    exactly 0.000 to them is not a stable label, it is a wrong one.
     """
-    P = normalize_profile({})
+    P = normalize_profile({"role": "support"} if role == "support" else {})
     out = {"grade": grade, "bestAvg": 0.0, "basic": {}, "trait": {}, "special": {}}
     tiers = ["low", "mid", "high"]
 

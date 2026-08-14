@@ -7,6 +7,8 @@ profile, leaderboard, repull, caching, queueing, and everything around them.
 Companion docs — read before changing anything here:
 - `docs/research/official-probabilities.md` — roll data, authoritative.
 - `docs/research/damage-model-spec.md`, `baseline-derivation.md` — Shizu's model rulings.
+- `docs/research/support-model.md` — the support half of the model, its constants, and the
+  cross-check against loa-gpd.
 - `docs/research/mechanics-bible-leaderboard.md` — payload decode + API facts.
 - `docs/design/ui-overhaul.md` — the input UI as built.
 
@@ -87,14 +89,22 @@ Companion docs — read before changing anything here:
     honing: {…}, advancedHoning: {…},          // six pieces; advanced is reported, not used
     neckAddDmg, earring1Wp, earring2Wp,        // accessory percentage lines
     gemLevel, gemLevels: [], gemCounts: [],    // modal level, every level, counts per level
-    stone97, master,
+    stone97, master,         // stone97 = the stone's two engraving levels total 5+
     karmaWp,                 // % weapon power = karma.enlightenment ÷ 10
-    apPct,                   // % attack power = battlePoint.parts[type 1].attackPowerMultiplier
+    apPct,                   // % BASE attack power, BUILT from the gems and the stone —
+                             // never read off the page. raw.apPctCheck carries the page's
+                             // own attackPowerMultiplier beside it, raw.apPctGap the
+                             // difference when there is one (14 of 117, all unread gems)
     accessoryMainStat,       // the five accessories' base main stat, summed
     accessoryFlatAP,         // their "Attack Power +80/195/390" rolls, summed
     accessoryFlatWP,         // their "Weapon Power +195/480/960" rolls, summed
-    raw: {…}                 // the unsnapped readings, the karma triple, the ark-grid
-                             // cores, and what the gems alone make of apPct
+    arkCore: {grade, points},// the best core on the board: grade from the id's last digit
+                             // (5 relic, 6 ancient), points from its four gems. What a
+                             // core GRANTS is nowhere on the page, so attack-or-weapon
+                             // is the deck's setting and the table in data/gear-data.js
+                             // turns the three into flat attack or weapon power
+    raw: {…}                 // the unsnapped readings, the karma triple, every ark-grid
+                             // core with its grade and points, and the apPct check
   },
   source: "bible"|"seed"|"import",
   parseVersion: N,         // bump when the decoder changes; lets a rescore find stale rows
@@ -338,7 +348,7 @@ loadout header alone is what makes a pulled character feel like *your* character
 | **Weakest 3**, worst first, click to scroll + flash the card | **Weakest lines** — the rerollable ones ranked by what they cost you, click to focus that slot |
 | **Rank badges + grade bands** (F−…S+, `SUBRANK_ORDINAL`) | We already grade families F→S; extend the same ladder to a whole-bracelet rank so a character gets one letter |
 | **Raid vs Chaos preset toggle** | **There IS a 1:1 analogue after all**: lostark.bible keeps a raid loadout and a chaos loadout (and sometimes an estimated-raid one), each with its own bracelet, and 9 of 30 seeded characters wear different ones. The import panel shows them as pills; the board ranks the highest. **Compare mode** — your current bracelet vs a candidate you're pricing — is still the other axis. See below |
-| **DPS / Support axis toggle**, auto-detected from the build | Deferred with support scoring; keep the toggle's slot in the layout so it can appear later without a redesign |
+| **DPS / Support axis toggle**, auto-detected from the build | **Built** (2026-08-14). The toggle sits with Grade, not in the deck, because it reshapes every number on every tab and the deck opens collapsed. Support scores what your buffs add to one damage dealer — see `docs/research/support-model.md`. Still to settle: whether the party debuff halves count one dealer or three (§8 of that doc), and whether the gold axis gets a party multiplier |
 | **`gpd` auto-set from combat power**, with wording that downgrades from "auto-set" to "suggests" once you touch it | Same trick for every imported profile value (§3.2) |
 | **Method `<details>` per tab**, verdict → arithmetic → what's left out, admitting inconsistencies in place | Already built; extend as features land |
 | **Flash-on-focus** (`void el.offsetWidth` to restart the animation) | Same, for slot cards |
@@ -540,6 +550,44 @@ must either honour it or say "already queued, position N".
 Ship 1–4 before 5–6 if time is short: a board that fills and a calculator that imports
 are the whole product; the drain machinery only matters once more than a handful of
 people use it.
+
+---
+
+## 5.5 What has to pass before anything ships
+
+```bash
+npm run check
+```
+
+Four things, in order, and all four have caught a real regression:
+
+| | what it proves |
+|---|---|
+| `verify.js` | the JS core agrees with first principles — 1,690 checks |
+| `verify.py` | the Python mirror agrees with the JS, value for value |
+| `tools/test-worker.mjs` | the Worker's decoder and every seeded character still score what the seed says |
+| `tools/check-cache-versions.mjs` | **every changed script got its `?v=` bumped in index.html** |
+
+The last one is the newest and the least obvious. Every script tag carries a
+`?v=N` cache-buster, and a browser that already has the page keeps serving the old
+file until that number moves. Ship a change to `model/bracelet.js` without bumping
+it and a returning user runs the NEW `subrank.js` against the OLD model: no error,
+no console warning, just wrong numbers. It had already happened twice before the
+check existed — two of the three commits before it are manual "bump cache-busters"
+fixups.
+
+**When a change moves a line's damage**, three more things have to follow or they
+drift silently:
+
+1. Bump `VERSION` in `model/bracelet.js`, so the Worker re-scores its stored
+   records instead of serving old ones forever.
+2. `node tools/rescore-seed.mjs --write` — the seed's scores are the board, and a
+   model change is exactly when they should move. (Its sibling
+   `reprofile-seed.mjs` refuses to let a score move; that one is for parser
+   changes.)
+3. `node tools/rank-match.mjs` and paste the support ladder it prints into
+   `subrank.js`. The support cuts are derived from the DPS band rarities and have
+   to be recomputed whenever either distribution moves.
 
 ---
 

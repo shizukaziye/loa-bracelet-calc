@@ -1063,6 +1063,21 @@
       "</div>";
   }
 
+  /**
+   * worthNote() is a FIGURE, not a sentence — "94% of the outcomes clear your
+   * 0.00% baseline" — so it is written to sit in a chip on its own and starts
+   * lowercase. Dropped straight after a full stop it reads as a broken join:
+   * "...worth 2.25M gold. very nearly all of the outcomes...". This closes it off
+   * as its own sentence. The "Nothing it can roll beats..." case already ends in a
+   * full stop and passes through untouched.
+   */
+  function sentenceTail(note) {
+    if (!note) return "";
+    var t = String(note);
+    if (/[.!?]$/.test(t)) return t;
+    return t.charAt(0).toUpperCase() + t.slice(1) + ".";
+  }
+
   function bodyHtml() {
     var api = solverApi();
     if (!api) {
@@ -1093,7 +1108,7 @@
       return '<div class="av-empty"><b>The bracelet has not been opened yet.</b><br>' +
         "An unrolled " + esc(S.grade) + " bracelet with " + S.slots + " granted slots and " + S.rollsLeft +
         " rolls lands at <b>" + fx(pct(res.expectedFinal), 2) + "%</b> expected, and is worth <b>" +
-        (wu ? gold(wu.gold) : "—") + "</b> gold. " + esc(worthNote(wu)) +
+        (wu ? gold(wu.gold) : "—") + "</b> gold — " + esc(sentenceTail(worthNote(wu))) +
         " Type its granted lines into the Calculator's Bracelet panel and this tab will name the lines to lock.</div>" +
         '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Where an unrolled one can land</h2>' +
         quantileStrip(res.finalScore.quantiles, res.currentScore) +

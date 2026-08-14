@@ -75,4 +75,54 @@ and 375px, both verify batteries green, then push to GitHub Pages and confirm li
   the consequence visible, which is the better way to settle it.
 - **Seed data ships.** He confirmed scraping is permitted with the token, and told
   molenzwiebel about the project. The board carries the self-reported disclosure.
-- **Support scoring stays a stub.** DPS-only, as speced.
+- ~~**Support scoring stays a stub.** DPS-only, as speced.~~ **SUPERSEDED 2026-08-14.**
+  Supports are real now — the house ap / brand / identity model, a role toggle in the
+  deck and on the Tier List, and a rank ladder cut at the DPS ladder's own rarities.
+  See `docs/research/support-model.md`.
+
+- **Rule 6 above is now enforced, not remembered.** `npm run check` runs the two
+  parity batteries, the worker battery, and `tools/check-cache-versions.mjs`, which
+  fails the moment a changed script still carries its old `?v=`. That rule had already
+  been missed twice — two of the three commits before the tool exists are manual
+  "bump cache-busters" fixups — and the failure mode is silent wrong numbers rather
+  than an error, because the browser happily runs a new `subrank.js` against an old
+  `model/bracelet.js`.
+
+## Open for Shizu — 2026-08-14
+
+**1. The rank breakpoints.** `docs/research/score-distribution.md` has the exact
+distribution on both axes, every 5 points and one point at a time through the top.
+The damage dealer's ladder turns out to be a clean geometric rarity ladder already;
+the only defect is the bottom, where F, F+ and F- hold 3.5% between them. Moving F to
+20 and F+ to 25 fixes that and costs nothing else. Not done — his call. If it is
+taken, rerun `tools/rank-match.mjs` and paste the support ladder it prints, because
+the support cuts are derived from the DPS rarities.
+
+**2. Supports on the leaderboard. LIVE, not hypothetical.** The seed carries no
+supports, which is what I first checked and reported — but the live KV snapshot has
+62 characters against the seed's 59, and two of them are Bards: **Limerent** and
+**Na**, both NA. Both are ranked as damage dealers right now. The board scores
+everyone on `normalizeProfile({})`, which is role "dps". It does not break loudly, which is
+the problem. A near-perfect support bracelet (families 17, 19 and 30 at Legendary,
+110/110 traits) reads:
+
+| scored as | score | band | damage |
+|---|---|---|---|
+| a damage dealer, which is what the board does | 80.2 | A | 16.40% |
+| a support | 106.3 | S+ | 6.85% |
+
+The 16.40% is the tell: it counts the party-debuff halves of families 17 and 19 as
+damage the support itself deals, which a support does not do. Fixing it needs two
+decisions — map class to role (Bard, Paladin, Artist are the three), and then either
+rank supports on their own board or interleave them on the support ladder so a
+letter still means one thing. Neither is a call to make while he sleeps.
+
+**3. A support's gold.** The damage side is right; the gold side still prices a
+support like a solo damage dealer. A support's 1% lands on every dealer in the party,
+so gold per damage should divide by party size — the astrogem calculator already does
+this with `SUPPORT_GPD_MULTIPLIER`. Left alone because it triples every support Worth
+figure, which is a product decision rather than a bug fix. Named in the Method tab so
+nobody reads the number as finished.
+
+**4. The Worker still needs a redeploy.** The model went to 0.3.0 and stored records
+will not re-score until it ships. The seed on disk is already rescored (59/59).

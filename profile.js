@@ -14,6 +14,11 @@
  *                         set(), or mutate and call save() (nothing is notified then).
  *   profile()          -> the model's view of that state: Bracelet.normalizeProfile(...).
  *                         The ONE profile every tab scores on — there is no second.
+ *   role()             -> "dps" or "support". The Role pills sit beside Grade, and the
+ *                         switch reshapes the deck: a support loses the Support-effects
+ *                         switch (it brings the debuffs itself) and the two trait-weight
+ *                         sliders (its buffs price Spec and Swiftness), and gains the
+ *                         Advanced fold's support inputs.
  *   set(patch)         -> merge (one level deep for the nested blocks), persist, notify
  *   mount(hostEl)      -> put the control deck inside hostEl and render it
  *   onChange(cb)       -> unsubscribe fn; cb(detail) after every change the deck makes
@@ -119,20 +124,55 @@
       // is there. Default null: a fresh page is eleven level-9 gems, exactly as
       // it always was, and the slider alone still works for anyone typing.
       kit: { neck: 2.6, ear1: 3, ear2: 3, gems: 9, gemSplit: null, stone: true, master: false },
-      // Where the damage lands, how the cooldown line is judged, and what the
-      // class pays for a Spec / Swiftness trait line (points per 100 points).
-      fight: { back: 100, front: 100, nonDir: 100, cdWeight: 70, demon: false, supportEffects: true, wSpec: 2.5, wSwift: 2.5 },
+      // Who you are in the party, where the damage lands, how the cooldown line
+      // is judged, and what the class pays for a Spec / Swiftness trait line
+      // (points per 100 points).
+      //
+      // `role` is "dps" or "support". A DPS is scored on its own damage; a
+      // support on what its buffs add to one damage dealer. Default "dps".
+      //
+      // wSpec / wSwift default to 2.4245% per 100 points, which is what a crit
+      // point is worth on the shipped profile — so all three combat traits price
+      // alike until somebody says otherwise. It is a constant, not a formula
+      // (see traitWeights in the model), and the sliders still move.
+      fight: { role: "dps", back: 100, front: 100, nonDir: 100, cdWeight: 70, demon: false,
+        supportEffects: true, wSpec: 2.4245, wSwift: 2.4245 },
+      // The support channel's own inputs, in the panel's units: percentages are
+      // percent here and the build site divides the ones the model wants as
+      // fractions. Every field mirrors DEFAULT_PROFILE.support in the model, so
+      // an untouched deck on role "support" scores exactly the model's default.
+      // Only the Advanced panel shows them, and only while the role is support.
+      support: {
+        // The damage dealer being buffed.
+        dpsWP: 260918, dpsMS: 767170, dpsAtkPct: 29.48, dpsFlatAtk: 3600, baseAdd: 35.85,
+        // Your own buff bases, at level-9 gems.
+        brandPower: 45, allyAtkEnh: 68.55, allyDmg: 38.26, allyDmgT: 9.26,
+        spec: 1016, classCoeff: 0.0005005722461,
+        // Uptimes.
+        upBrand: 100, upAp: 95, upSeren: 70, upChord: 70, upTskill: 40,
+        // Share of your own base attack power each ally gets. The model wants a
+        // fraction; 22 here is its 0.22.
+        apBuffShare: 22
+      },
       // The bracelet's two FIXED combat traits. A real bracelet carries exactly
       // two, but the panel no longer polices it: a third can be switched on and
       // the score keeps counting it, with a warning that the state is illegal
       // in game (Shizu, 2026-08-11 — the silent auto-off was worse).
       traits: { crit: { on: true, v: 120 }, spec: { on: true, v: 120 }, swift: { on: false, v: 120 } },
       adv: {
-        msPct: 9, karmaWp: 2.5, baseApOverride: false, baseApPct: 12.5, flatAP: 2700,
-        // Flat WEAPON power — a weapon ark-grid core instead of an attack one,
-        // plus any "Weapon Power +195/480/960" accessory roll. Default 0: the
-        // reference build runs attack cores and rolled none, so this field
-        // changes nothing until somebody sets it.
+        msPct: 9, karmaWp: 2.5, baseApOverride: false, baseApPct: 12.5,
+        // The ark-grid core, as the three things that decide what it gives:
+        // which core, its grade, and the points its four gems total. The two
+        // flats below are the accessory rolls ALONE; the core's share is added
+        // on top of them (see flatAPOf / flatWPOf), so importing a character —
+        // whose accessory rolls are exact and whose core type is not on the page
+        // — never quietly wipes the core out.
+        coreType: "attack", coreGrade: "ancient", corePoints: 17,
+        flatAP: 0,
+        // Flat WEAPON power from the ACCESSORIES alone — the
+        // "Weapon Power +195/480/960" rolls. Default 0: the reference build
+        // rolled none. The core's share, if the core row says "weapon", is added
+        // on top.
         flatWP: 0,
         accessoryMainStat: 71429, rosterBonus: 2085,
         addWeapon: 30, addPet: 1, addAstrogem: 4.84,
@@ -163,13 +203,16 @@
 
   // The nested blocks are merged key by key, so a stored blob written before a
   // field existed still gets that field's default.
-  var NESTED = { adv: 1, gear: 1, ov: 1, econ: 1, kit: 1, fight: 1, traits: 1 };
+  var NESTED = { adv: 1, gear: 1, ov: 1, econ: 1, kit: 1, fight: 1, traits: 1, support: 1 };
 
-  // Per-gem base attack power by gem level; eleven of them plus a 9/7 stone.
-  var GEM_AP = { 6: 0.4, 7: 0.6, 8: 0.8, 9: 1.0, 10: 1.2 };
+  // Per-gem base attack power by gem level; eleven of them plus the stone. These
+  // two are the ONLY sources of base attack power %.
+  var GEM_AP = { 6: 0.45, 7: 0.6, 8: 0.8, 9: 1.0, 10: 1.2 };
   // The split's column order, and how many gems a character carries.
   var GEM_LEVELS = [6, 7, 8, 9, 10];
   var GEM_COUNT = 11;
+  // A stone pays 1.5% once its two engraving levels total five — 9/7, 10/6, 9/9
+  // and better. 9/6, 8/7 and 7/7 pay nothing.
   var STONE_AP = 1.5;
   // Slider order, Shizu's: armour first, the weapon last because it is the one
   // piece that moves weapon power.
@@ -226,6 +269,28 @@
         d[k] = got[k];
       }
     }
+    // A v2 blob written before the ark-grid core got its own row folded the core
+    // INTO adv.flatAP — 2,700 for the reference build, plus whatever the
+    // accessories rolled. adv.flatAP is now the accessories alone and the core is
+    // added on top, so restoring such a blob unchanged would count the core
+    // twice. The core fields are the marker: absent means old, and the old total
+    // has the default core's 2,700 taken back out of it.
+    //
+    // 2,700 IS STILL THE RIGHT NUMBER, even though the default ancient attack
+    // core now gives 3,600 (its point thresholds ADD: 900 at ten points plus
+    // 2,700 at seventeen). What comes out has to be what the old build FOLDED
+    // IN, and that was 2,700 — the figure the tool shipped when those saves were
+    // written. Raising it to 3,600 would take 900 of flat attack power off a
+    // character who never had it.
+    if (got.adv && got.adv.coreType === undefined) {
+      d.adv.flatAP = Math.max(0, num(d.adv.flatAP, 0) - 2700);
+    }
+    // THE TRAIT WEIGHTS ARE NOT MIGRATED. A v2 blob carries 2.5% per 100 points,
+    // the old default; a fresh one starts at 2.4245%, which is what a crit point
+    // is worth on the shipped profile. Both are ordinary positions on a slider
+    // the panel has always called the user's own call, and the gap moves a
+    // 120-point line by 0.09 points of damage. Rewriting a stored number for that
+    // would take a setting away and buy nothing, so an old save keeps its 2.5.
     assignInto(S, d);
   }
 
@@ -273,10 +338,16 @@
   // they label the family rather than the current build and never shuffle mid-edit.
   // They live here because fitRows has to rewrite rows saved before the collapse
   // existed, and because the Tier List reads the same letters the picker shows.
+  // Keyed by grade AND ROLE. The role is not a build setting — it decides which
+  // families score at all — so a support must not be shown the damage dealer's
+  // letters. A crit-rate line reads "S" to a dealer and is worth exactly 0.000 to
+  // a support; one cache key for both served the wrong one.
   var famGradeCache = {};
   function famGrades(grade) {
-    if (!famGradeCache[grade]) famGradeCache[grade] = B.familyGrades(grade);
-    return famGradeCache[grade];
+    var role = S.fight && S.fight.role === "support" ? "support" : "dps";
+    var key = grade + "|" + role;
+    if (!famGradeCache[key]) famGradeCache[key] = B.familyGrades(grade, role);
+    return famGradeCache[key];
   }
 
   /** The letter the picker shows for a stored family value. */
@@ -361,6 +432,20 @@
     }
     return out.join(" · ");
   }
+  /** Flat power the ark-grid core grants, from the deck's three core fields. */
+  function coreFlat(kind) {
+    var G = window.BraceletGearData;
+    // The fallback is the DEFAULT core: ancient, attack, 17 points. Its
+    // thresholds add — 900 at ten points plus 2,700 at seventeen — so 3,600.
+    if (!G || !G.arkCoreFlat) return kind === "attack" && S.adv.coreType === "attack" ? 3600 : 0;
+    if (S.adv.coreType !== kind) return 0;
+    return G.arkCoreFlat(kind, S.adv.coreGrade, num(S.adv.corePoints, 0));
+  }
+  /** Flat ATTACK power: the accessories' rolls plus an attack core. */
+  function flatAPOf() { return num(S.adv.flatAP, 0) + coreFlat("attack"); }
+  /** Flat WEAPON power: the accessories' rolls plus a weapon core. */
+  function flatWPOf() { return num(S.adv.flatWP, 0) + coreFlat("weapon"); }
+
   /** Attack-power % bucket = the eleven gems + the ability stone. */
   function baseApPctOf() {
     if (S.adv.baseApOverride) return num(S.adv.baseApPct, 0);
@@ -377,7 +462,16 @@
     }
     return out;
   }
-  /** Weights are typed as % damage per 100 trait points; the model wants points. */
+  /** Is the character being scored a support? */
+  function isSupport() { return S.fight.role === "support"; }
+
+  /**
+   * Weights are typed as % damage per 100 trait points; the model wants points.
+   *
+   * A NUMBER, always. The model reads a missing or null weight as zero, which
+   * says the class gets nothing at all from the trait — a claim no default should
+   * make quietly. The shipped 2.4245 is a crit point's own worth.
+   */
   function traitWeights() {
     return { spec: num(S.fight.wSpec, 0) / 100, swift: num(S.fight.wSwift, 0) / 100 };
   }
@@ -410,13 +504,13 @@
     return B.deriveBaseline({
       pieceLevels: pieceLevels(),
       msPct: a.msPct / 100, wpPct: wpPctOf() / 100, baseApPct: baseApPctOf() / 100,
-      flatAP: a.flatAP, flatWP: num(a.flatWP, 0),
+      flatAP: flatAPOf(), flatWP: flatWPOf(),
       accessoryMainStat: a.accessoryMainStat, rosterBonus: a.rosterBonus
     });
   }
 
   function buildProfile() {
-    var a = S.adv, base = baseStats(), sk = [], i;
+    var a = S.adv, sp = S.support, base = baseStats(), sk = [], i;
     for (i = 0; i < S.skills.length; i++) {
       var s = S.skills[i];
       sk.push({ share: num(s.share, 0) / 100, critRate: num(s.cr, 0) / 100, critDamage: num(s.cd, 0) / 100 });
@@ -426,12 +520,12 @@
     // crit numbers), and a missing one turns a whole family's score into NaN or,
     // worse, silently into zero.
     return B.normalizeProfile({
-      role: "dps",
+      role: isSupport() ? "support" : "dps",
       ilvl: base.ilvl || 0,
       mainStatRaw: base.mainStatRaw,
       weaponPowerRaw: base.weaponPowerRaw,
       msPct: a.msPct / 100, wpPct: wpPctOf() / 100, baseApPct: baseApPctOf() / 100,
-      flatAP: a.flatAP, flatWP: num(a.flatWP, 0),
+      flatAP: flatAPOf(), flatWP: flatWPOf(),
       skills: sk,
       master: !!S.kit.master,
       traitWeights: traitWeights(),
@@ -448,7 +542,14 @@
       // is cheaper than a bug: `fight.supportEffects` means "count the four party
       // lines", while the model's `supportHasEffects` means "the party's support
       // already brings them, so a copy on your bracelet is worth nothing".
-      supportHasEffects: !S.fight.supportEffects,
+      //
+      // ON A SUPPORT THE SWITCH HAS NO ANSWER, so it is forced off. It asks
+      // whether somebody ELSE brings the party debuffs; as the support, you are
+      // that somebody, and reading a stored "off" would zero families 16-19 —
+      // the four best lines a support can carry. The stored value is left alone
+      // so switching back to DPS restores the user's own choice, and renderFight
+      // drops the button and says why rather than leaving a dead control.
+      supportHasEffects: isSupport() ? false : !S.fight.supportEffects,
       demonBase: a.demonBase / 100,
       shieldUptime: a.shieldUptime / 100,
       allyDpsCount: a.allyCount,
@@ -463,7 +564,35 @@
       // families 1 and 20's speed component for the LIVE profile while the ghost
       // markers (canonical default) still counted it — the rows looked wrong and
       // the tick moved. The deck's own slider is per TEN percent, so divide by 10.
-      atkMoveSpeedDamagePerPct: (a.atkSpeedPer10 == null ? 1 : a.atkSpeedPer10) / 10
+      atkMoveSpeedDamagePerPct: (a.atkSpeedPer10 == null ? 1 : a.atkSpeedPer10) / 10,
+      // THE SUPPORT CHANNEL. Sent whatever the role is, so the object the model
+      // gets always has one shape. normalizeProfile replaces this block WHOLE
+      // rather than merging it key by key, so every field has to be here.
+      //
+      // The buff bases and the five uptimes are percent on both sides and pass
+      // straight through. The three the model wants as fractions are divided
+      // here, the same way msPct and demonBase are. The two the dealer's base
+      // attack power is built from are floored at 1: a typed 0 divides by zero
+      // and turns every support score into NaN.
+      support: {
+        dpsWP: Math.max(1, num(sp.dpsWP, 260918)),
+        dpsMS: Math.max(1, num(sp.dpsMS, 767170)),
+        dpsAtkPct: num(sp.dpsAtkPct, 0) / 100,
+        dpsFlatAtk: num(sp.dpsFlatAtk, 0),
+        baseAdd: num(sp.baseAdd, 0) / 100,
+        brandPower: num(sp.brandPower, 0),
+        allyAtkEnh: num(sp.allyAtkEnh, 0),
+        allyDmg: num(sp.allyDmg, 0),
+        allyDmgT: num(sp.allyDmgT, 0),
+        spec: num(sp.spec, 0),
+        classCoeff: num(sp.classCoeff, 0),
+        upBrand: num(sp.upBrand, 0),
+        upAp: num(sp.upAp, 0),
+        upSeren: num(sp.upSeren, 0),
+        upChord: num(sp.upChord, 0),
+        upTskill: num(sp.upTskill, 0),
+        apBuffShare: num(sp.apBuffShare, 0) / 100
+      }
     });
   }
 
@@ -542,7 +671,7 @@
     h += '<button type="button" class="mbtn"' + (can ? "" : ' aria-disabled="true"') +
       ' data-bcimport="1" data-gloss="' + (can
         ? "Overwrite the left column with what " + who + "'s character page says: the six honing levels, the " +
-          "necklace's additional damage, both earrings' weapon power, the gem level, the 9/7 stone and Master. " +
+          "necklace's additional damage, both earrings' weapon power, the gem level, the ability stone and Master. " +
           "Each value lands marked and editable, and editing one drops its mark. The bracelet is not touched."
         : "Nothing to import: this record carries no gear from " + who +
           "'s character page. Re-pull them and the button comes back.") +
@@ -775,8 +904,8 @@
         value: !!pr.stone97,
         note: nodes.length
           ? "the ability stone's engraving nodes are " + nodes.join("/") +
-            (pr.stone97 ? " — 9/7 or better" : " — short of 9/7")
-          : (pr.stone97 ? "the ability stone is 9/7 or better" : "the ability stone is short of 9/7")
+            (pr.stone97 ? " — its engraving levels total 5 or more" : " — its engraving levels fall short of 5")
+          : (pr.stone97 ? "the ability stone's engraving levels total 5 or more" : "the ability stone's engraving levels fall short of 5")
       };
     }
     if (pr.master != null) {
@@ -804,43 +933,29 @@
     }
 
     // ---- the attack-power bucket ----
-    // The page prints its own multiplier on the square-root term, and that IS the
-    // model's field — baseApPct, exactly. On four fifths of the corpus it is the
-    // eleven gems plus 1.5 for the ability stone, which is what the deck builds
-    // out of the controls above; on the rest it reads higher, by 0.35 to 2.05,
-    // from sources the page does not name.
+    // BASE attack power % — the multiplier inside the square root — has two
+    // sources and no others: the eleven damage gems and the ability stone. Both
+    // are read above, so the gem controls drive this and the override goes OFF.
     //
-    // So the override is turned on ONLY when the two disagree. When they agree it
-    // would be a switch that changes no number while quietly making the gem split
-    // above it decorative — and a control that does nothing is worse than one
-    // that is not there.
+    // The page prints its own multiplier on the same term, and it is carried
+    // through as a check rather than used. The two agree to the last decimal on
+    // 103 of the corpus's 117 loadouts; the other 14 are pages whose gems the
+    // site could not read either, where it prints the stone alone and we fall
+    // back to eleven level nines. The note names the gap when there is one.
     if (pr.apPct != null) {
-      var fromGems = raw.apPctFromGems;
-      var apGap = (fromGems == null) ? null : num(pr.apPct, 0) - num(fromGems, 0);
-      // The switch is ALWAYS written, on or off. Leaving it alone when the two
-      // agree would strand the last character's override on this one, which is
-      // how importing Astoryu (page 14.7, gems 13.2) used to hold the bucket at
-      // 14.7 through the next character whose gems said 12.4.
-      if (apGap == null || Math.abs(apGap) > 1e-9) {
-        vals["adv.baseApOverride"] = {
-          value: true,
-          note: "the page's attack power multiplier is used, because the gems and the stone do not account for all of it"
-        };
-        vals["adv.baseApPct"] = {
-          value: num(pr.apPct, 12.5),
-          note: "the page reads " + fx(num(pr.apPct, 0), 2) + "%" +
-            (fromGems != null
-              ? "; the gems and the ability stone account for " + fx(num(fromGems, 0), 2) +
-                "%, so " + fx(apGap, 2) + "% comes from somewhere the page does not name"
-              : "")
-        };
-      } else {
-        vals["adv.baseApOverride"] = {
-          value: false,
-          note: "the page reads " + fx(num(pr.apPct, 0), 2) + "% attack power, which is exactly what the " +
-            "gems and the ability stone come to — so the gem controls drive it and no override is needed"
-        };
-      }
+      var pageAp = raw.apPctCheck;
+      var apGap = raw.apPctGap;
+      vals["adv.baseApOverride"] = { value: false, note: "the gems and the ability stone drive the bucket" };
+      vals["adv.baseApPct"] = {
+        value: num(pr.apPct, 12.5),
+        note: (raw.gemsAssumed
+            ? "the page does not carry readable gems, so " + raw.gemsAssumed + " is assumed: "
+            : "the gems and the ability stone come to ") + fx(num(pr.apPct, 0), 2) + "%" +
+          (pageAp == null ? ""
+            : apGap == null
+              ? ", which is exactly what the page reads"
+              : "; the page reads " + fx(num(pageAp, 0), 2) + "%")
+      };
     }
 
     // ---- the five accessories' main stat ----
@@ -854,46 +969,37 @@
       };
     }
 
-    // ---- the two flats ----
-    // The accessories' own rolls are exact. What the ARK-GRID CORES give is not on
-    // the page at all: it names the cores and totals their points and stops there.
-    // So the model's standing figure for the cores is left standing under the
-    // accessory reading rather than being replaced by a zero, and the note says
-    // which half is which, because the sum is part derived and part assumed.
+    // ---- the two flats, and the core ----
+    // The accessories' rolls are exact and go in as read. The CORE is half read
+    // and half not: the page carries every core's grade and point total but never
+    // says which effect a core has, so the grade and the points are taken and the
+    // deck's own attack-or-weapon setting is left alone.
     if (pr.accessoryFlatAP != null) {
-      var cores = raw.arkGridCores ? raw.arkGridCores.length : 0;
       vals["adv.flatAP"] = {
-        value: Math.round(arkGridFlatAP() + num(pr.accessoryFlatAP, 0)),
-        note: "the accessories roll " + nfInt(pr.accessoryFlatAP) + " flat attack power; the page does not say what " +
-          (cores ? "the " + cores + " ark-grid cores" : "the ark-grid cores") +
-          " give, so the calculator's " + nfInt(arkGridFlatAP()) + " for those still stands on top"
+        value: Math.round(num(pr.accessoryFlatAP, 0)),
+        note: num(pr.accessoryFlatAP, 0) > 0
+          ? "the accessories roll " + nfInt(pr.accessoryFlatAP) + " flat attack power"
+          : "no accessory rolls flat attack power"
       };
     }
     if (pr.accessoryFlatWP != null) {
       vals["adv.flatWP"] = {
         value: Math.round(num(pr.accessoryFlatWP, 0)),
-        note: (num(pr.accessoryFlatWP, 0) > 0
+        note: num(pr.accessoryFlatWP, 0) > 0
           ? "the accessories roll " + nfInt(pr.accessoryFlatWP) + " flat weapon power"
-          : "no accessory rolls flat weapon power") +
-          "; a weapon ark-grid core would add more, and the page does not carry that"
+          : "no accessory rolls flat weapon power"
       };
+    }
+    if (pr.arkCore) {
+      var nCores = raw.arkGridCores ? raw.arkGridCores.length : 0;
+      var coreNote = "the best of " + (nCores || "the") + " ark-grid cores is " + pr.arkCore.grade +
+        " at " + pr.arkCore.points + " points; the page never says which effect a core carries, " +
+        "so attack-or-weapon stays as you set it";
+      vals["adv.coreGrade"] = { value: pr.arkCore.grade, note: coreNote };
+      vals["adv.corePoints"] = { value: pr.arkCore.points, note: coreNote };
     }
 
     return vals;
-  }
-
-  /**
-   * What the ark-grid CORES are assumed to give in flat attack power.
-   *
-   * It is the model's own default rather than a second constant: the deck opens
-   * on it, and an import that cannot read the cores leaves it where it is. Every
-   * character in the corpus runs six cores, so the assumption is as good for them
-   * as for the reference build — but it IS an assumption, and the import note
-   * says so rather than passing it off as a reading.
-   */
-  function arkGridFlatAP() {
-    var G = window.BraceletGearData;
-    return (G && G.DEFAULTS && G.DEFAULTS.flatAP != null) ? G.DEFAULTS.flatAP : 2700;
   }
 
   /** A thousands-separated integer, for the import notes. */
@@ -1085,8 +1191,12 @@
    * results priced against nothing (Shizu, 2026-08-12). The two *AutoKey fields
    * survive with them, so a reset cannot make the next change re-seed over a
    * hand-typed rate either.
+   *
+   * `fight` carries the ROLE, so "Reset to Default" puts a support back to DPS
+   * along with everything else on the left and the right. `support` is the whole
+   * support channel's inputs and resets with it.
    */
-  var CHARACTER_BLOCKS = ["gear", "ov", "kit", "fight", "adv"];
+  var CHARACTER_BLOCKS = ["gear", "ov", "kit", "fight", "adv", "support"];
 
   function resetCharacter() {
     var d = defaults(), i, k;
@@ -1540,6 +1650,14 @@
    */
   function renderTop() {
     var h = '<div class="bc-toprow">';
+    // ROLE SITS WITH GRADE, not in the deck's Fight column, because it reshapes
+    // every number on every tab and the deck opens collapsed. A setting nobody
+    // can find is a setting nobody uses.
+    h += segmented("fight.role", "Role", ["dps", "support"],
+      function (v) { return v === "dps" ? "DPS" : "Support"; },
+      "Who you are in the party. DPS scores what a line adds to your own damage. " +
+      "Support scores what your buffs add to one damage dealer — the ally attack-power buff, brand and the " +
+      "identity bracket — and your own damage is not counted at all.");
     h += segmented("grade", "Grade", ["ancient", "relic"],
       function (v) { return v === "ancient" ? "Ancient" : "Relic"; },
       "Ancient bracelets roll 2 or 3 granted slots and higher line values; Relic rolls 1 or 2.");
@@ -1637,8 +1755,8 @@
           : "All eleven damage gems at this level. Per gem: lv6 0.4% · lv7 0.6% · lv8 0.8% · lv9 1.0% · lv10 1.2% attack power. Real characters run mixed sets; press Split levels to enter one." });
     h += renderGemSplit();
     h += '<div class="barrow">' +
-      toggle("kit.stone", "9/7 stone",
-        "A 9/7 ability stone is +1.5% attack power on top of the eleven gems. Turn it off for a 9/6 or worse.") +
+      toggle("kit.stone", "Stone 1.5%",
+        "An ability stone gives +1.5% attack power on top of the eleven gems once its two engraving levels total five — 9/7, 10/6, 9/9 and better. Turn it off for a 9/6, 8/7, 7/7 or worse.") +
       toggle("kit.master",
         "Master", "The Master ark-grid node. Shizu's ruling: it counts as +7% additional damage and nothing else, which overrides the sheet reading that also credits crit rate.") +
       "</div>";
@@ -1718,21 +1836,49 @@
       { gloss: "How much of your damage comes from skills with no positional requirement — what the Hitmaster lines pay for. Awakening does not count." });
     h += slider("fight.cdWeight", "CD penalty wt", 0, 100, 1, "pct",
       { gloss: "Family 15 buys damage with +2% cooldown. At 100% you are judged on burst, where the extra cooldown never bites; at 0% on sustained, where the damage is divided by 1.02. 70% is the shipped assumption." });
-    h += '<div class="barrow">' +
-      toggle("fight.supportEffects", "Support effects",
-        "On: you are the one bringing the party debuffs, so the four party lines (defense shred, crit-resist shred, crit-damage-resist shred, shielded-target damage) score in full. Off: your support already applies them — they apply once per party, so a copy on your bracelet is worth nothing.") +
-      toggle("fight.demon", "Demon boss",
-        "On: the fight is a Demon or Archdemon boss, so demon-damage lines score in full — still diluted by the demon damage you already carry from cards and pets. Off: they score nothing.") +
-      "</div>";
+    h += '<div class="barrow">';
+    // The Support effects switch asks whether somebody ELSE brings the party
+    // debuffs. On a support there is no such somebody, and the "off" answer would
+    // zero families 16-19 — the four best lines a support can carry. So the
+    // button goes, the stored setting stays for the switch back to DPS, and the
+    // line under it says what the model is doing (buildProfile forces the flag).
+    if (!isSupport()) {
+      h += toggle("fight.supportEffects", "Support effects",
+        "On: you are the one bringing the party debuffs, so the four party lines (defense shred, crit-resist shred, crit-damage-resist shred, shielded-target damage) score in full. Off: your support already applies them — they apply once per party, so a copy on your bracelet is worth nothing.");
+    }
+    h += toggle("fight.demon", "Demon boss",
+      "On: the fight is a Demon or Archdemon boss, so demon-damage lines score in full — still diluted by the demon damage you already carry from cards and pets. Off: they score nothing.");
+    h += "</div>";
+    if (isSupport()) {
+      h += '<div class="note" data-gloss="Families 16, 17, 18 and 19 apply once per party. On a damage dealer a switch here asks whether the party support already brings them, because a second copy would be worth nothing. You are that support, so your copies are the ones that count and the switch is off.">' +
+        "You bring the party debuffs, so the four party lines score in full.</div>";
+    }
     $("bc-fight").innerHTML = h;
   }
 
+  /**
+   * The two trait weights — Spec and Swiftness — as the sliders they have always
+   * been. Both ship at a crit point's own worth, so an untouched panel prices all
+   * three combat traits alike and a class that genuinely values one more can say
+   * so by dragging.
+   *
+   * On a SUPPORT neither weight is read at all: the model prices Spec through
+   * the identity bracket and Swiftness the same. The sliders go, and a line says
+   * why rather than leaving two controls that move nothing.
+   */
   function renderTraitWeights() {
+    var box = $("bc-traitw");
+    if (!box) return;
+    if (isSupport()) {
+      box.innerHTML = '<div class="note" data-gloss="Specialization raises Serenade and Major Chord by spec times the class coefficient, which is where all of its party value sits. Swiftness is priced the same, because it shortens the buff cycle and lifts the uptimes the model takes as fixed. Crit, Domination, Endurance and Expertise move your own damage, which nobody counts. The numbers behind this are under Advanced.">' +
+        "Your buffs price Spec and Swiftness. There is no weight to choose.</div>";
+      return;
+    }
     var h = "";
     h += slider("fight.wSpec", "Spec weight", 0, 4, 0.1, "pct1",
-      { gloss: "What 100 points of Specialization is worth to your class, in % damage. There is no class table behind this — it is your call. A 120-point Spec line then scores value × weight ÷ 100." });
+      { gloss: "What 100 points of Specialization is worth to your class, in % damage. It ships at what a crit point is worth, 2.42%, so all three combat traits start out priced alike — there is no class table behind anything above or below that, it is your call. A 120-point Spec line then scores value × weight ÷ 100." });
     h += slider("fight.wSwift", "Swift weight", 0, 4, 0.1, "pct1",
-      { gloss: "What 100 points of Swiftness is worth to your class, in % damage. Crit needs no weight: it converts exactly, at 25 points of crit rate per 699 trait points, and is worth whatever that is to your skills." });
+      { gloss: "What 100 points of Swiftness is worth to your class, in % damage. Same shipped 2.42% as Spec. Crit needs no weight: it converts exactly, at 25 points of crit rate per 699 trait points, and is worth whatever that is to your skills." });
     $("bc-traitw").innerHTML = h;
   }
 
@@ -1911,8 +2057,24 @@
     h += fldChk("adv.baseApOverride", "Override attack power % (ignore the gem slider)",
       "By default the attack-power bucket is eleven gems at their level plus the ability stone. Tick this to type it instead.");
     h += fldNum("adv.baseApPct", "Attack power %", "0.1", "It cancels out of most ratios but shifts the balance between the square-root term and flat attack power.");
-    h += fldNum("adv.flatAP", "Flat attack power", "1", "Ark-grid attack cores plus any “Attack Power +80/195/390” rolls on your accessories. Flat attack power is what stops a weapon-power line from being a pure square-root ratio.");
-    h += fldNum("adv.flatWP", "Flat weapon power", "1", "Flat WEAPON power — an ark-grid WEAPON core instead of an attack one, plus any “Weapon Power +195/480/960” rolls on your accessories. It is weapon power, not attack power: it joins your raw weapon power inside the square root and the weapon-power bucket amplifies it, so it is worth less per point than the same number of flat attack power. Default 0.");
+    h += fldNum("adv.flatAP", "Flat attack power · accessories", "1", "The “Attack Power +80/195/390” rolls on your accessories, summed. The ark-grid core is set below and added on top. Flat attack power is what stops a weapon-power line from being a pure square-root ratio.");
+    h += fldNum("adv.flatWP", "Flat weapon power · accessories", "1", "The “Weapon Power +195/480/960” rolls on your accessories, summed. The ark-grid core is set below and added on top. This is weapon power, not attack power: it joins your raw weapon power inside the square root and the weapon-power bucket amplifies it, so a point of it is worth less than a point of flat attack power.");
+    h += "</div>";
+
+    h += '<div class="subh">Ark-grid core</div><div class="ig">';
+    h += segmented("adv.coreType", "Core", ["attack", "weapon", "none"], function (v) {
+      return v === "attack" ? "Attack" : v === "weapon" ? "Weapon" : "None";
+    }, "Which core you run. An attack core gives flat ATTACK power, a weapon core flat WEAPON power. Your character page carries every core’s grade and points but never says which effect it has, so importing a character fills the two rows below and leaves this one to you.");
+    h += segmented("adv.coreGrade", "Core grade", ["ancient", "relic"], function (v) {
+      return v === "ancient" ? "Ancient" : "Relic";
+    }, "Relic or ancient. It only changes the 17-point step: an attack core totals 2,700 relic against 3,600 ancient, a weapon core 3,900 against 5,200.");
+    h += segmented("adv.corePoints", "Core points", [17, 10, 0], function (v) {
+      return v ? v + "P" : "Under 10";
+    }, "What your four core gems total. A core pays nothing under 10 points, its 10-point step at 10, and both steps at 17 because they add — an attack core gives 900 then 2,700 relic or 3,600 ancient, a weapon core 1,300 then 3,900 or 5,200.");
+    h += '<div class="note" id="bc-coreflat"></div>';
+    h += "</div>";
+
+    h += '<div class="subh">Main stat sources</div><div class="ig">';
     h += fldNum("adv.accessoryMainStat", "Accessory main stat", "1", "Neck 17,857 + two earrings 13,889 + two rings 12,897, all at the top of their range with no flat-stat rolls.");
     h += fldNum("adv.rosterBonus", "Roster bonus", "1", "Main stat from roster level.");
     h += "</div>";
@@ -1937,6 +2099,12 @@
     h += "</div>";
     h += '<div class="note">The conditional weapon-power families (20, 21 and 22) are no longer knobs: they are scored at max stacks and full uptime.</div>';
 
+    // ---- the support channel, shown only to a support ----
+    // Seventeen numbers, so they are grouped: what you give, how long you give
+    // it for, and who you give it to. On a damage dealer the model never reads
+    // any of them, so the whole block stays out of the way.
+    if (isSupport()) h += supportAdvancedHtml();
+
     h += '<div class="subh">Fixed lines (come with the drop, never rerolled)</div>';
     h += '<div class="bc-sub">Optional, and separate from the two combat traits above. They score their own damage and they lock their family and category slot out of every future roll, so they change what an empty bracelet is worth.</div>';
     h += '<div id="bc-fixedrows"></div>';
@@ -1945,7 +2113,73 @@
     box.innerHTML = h;
     var apField = $(fldId("adv.baseApPct"));
     if (apField && !S.adv.baseApOverride) { apField.value = fx(baseApPctOf(), 2); apField.disabled = true; }
+    // What the three core rows come to, spelled out, so the number the model
+    // uses is on the page rather than inferred from a table in a tooltip.
+    var coreNote = $("bc-coreflat");
+    if (coreNote) {
+      var ap = coreFlat("attack"), wp = coreFlat("weapon");
+      coreNote.textContent = (ap || wp)
+        ? "This core gives " + nfInt(ap || wp) + " flat " + (ap ? "attack" : "weapon") +
+          " power, on top of the " + nfInt(ap ? num(S.adv.flatAP, 0) : num(S.adv.flatWP, 0)) +
+          " your accessories roll."
+        : "No core power: " + (S.adv.coreType === "none" ? "no core selected." : "a core under 10 points pays nothing.");
+    }
     fireAdvanced();
+  }
+
+  /**
+   * The support channel's inputs, as three groups of the Advanced fold.
+   *
+   * Every tooltip states what the model does with the number, taken from the
+   * model's own formula: Q = 100 · ln(ap · brand · identity), each channel
+   * scaled by its uptime, the identity bracket diluted by the dealer's own
+   * additional damage. Nothing here is invented.
+   */
+  function supportAdvancedHtml() {
+    var h = '<div class="subh">Support — what you give</div><div class="ig">';
+    h += fldNum("support.brandPower", "Brand power %", "0.01",
+      "Your brand power, at level-9 gems. Brand is 10% damage scaled by it, so 45% brand power makes the channel 14.5%.");
+    h += fldNum("support.allyAtkEnh", "Ally atk power buff %", "0.01",
+      "Your Ally Attack Power Enhancement. Each ally gets a share of your own base attack power, times 1 plus this — the only channel your own gear reaches.");
+    h += fldNum("support.allyDmg", "Ally damage buff %", "0.01",
+      "Your ally damage buff effect, from the ark grid and gems. It scales Serenade (15%) and Major Chord (2%).");
+    h += fldNum("support.allyDmgT", "T-skill ally damage %", "0.01",
+      "The T-skill's own bracket. The T-skill gives 10% additional damage, scaled by this and by nothing else.");
+    h += fldNum("support.spec", "Specialization", "1",
+      "Your Specialization before the bracelet's own combat-trait line. Spec times the coefficient below raises Serenade and Major Chord, which is where all of its party value sits.");
+    h += fldNum("support.classCoeff", "Spec coefficient", null,
+      "What one point of Specialization adds to the identity buffs. 0.0005005722461 is the Bard's.");
+    h += fldNum("support.apBuffShare", "Ally atk power share %", "0.1",
+      "The share of your own base attack power each ally gets, before the enhancement above. The house model uses 22%.");
+    h += "</div>";
+
+    h += '<div class="subh">Support — uptimes</div><div class="ig">';
+    h += fldNum("support.upBrand", "Brand %", "1",
+      "How much of the fight your brand is on the boss. It scales the whole brand channel.");
+    h += fldNum("support.upAp", "Atk power buff %", "1",
+      "How much of the fight your ally attack-power buff is up. It scales the whole attack-power channel.");
+    h += fldNum("support.upSeren", "Serenade %", "1",
+      "How much of the fight Serenade is up. Serenade, Major Chord and the T-skill share the identity bracket, each weighted by its own uptime.");
+    h += fldNum("support.upChord", "Major Chord %", "1",
+      "How much of the fight Major Chord is up. Same bracket as Serenade.");
+    h += fldNum("support.upTskill", "T-skill %", "1",
+      "How much of the fight the T-skill is up. Same bracket again.");
+    h += "</div>";
+
+    h += '<div class="subh">Support — the dealer you buff</div><div class="ig">';
+    h += fldNum("support.dpsWP", "Dealer weapon power", "1",
+      "The damage dealer's weapon power, after their own percentage bucket. Their base attack power is the square root of weapon power times main stat over six, and your buff is measured against it.");
+    h += fldNum("support.dpsMS", "Dealer main stat", "1",
+      "The damage dealer's main stat, after their own percentage bucket. It sits in the same square root as their weapon power.");
+    h += fldNum("support.dpsAtkPct", "Dealer attack power %", "0.01",
+      "The damage dealer's attack-power percentage: accessories, attack core, node 60, gems, stone and Adrenaline. It multiplies the attack power your buff hands over as well as their own.");
+    h += fldNum("support.dpsFlatAtk", "Dealer flat attack power", "1",
+      "The damage dealer's flat attack power, from an ancient attack core. It sits outside the percentage bucket, so it dilutes what your buff is worth.");
+    h += fldNum("support.baseAdd", "Dealer additional damage %", "0.01",
+      "The damage dealer's own additional damage. Serenade, Major Chord and the T-skill all raise additional damage, so the whole identity bracket is divided by 1 plus this.");
+    h += "</div>";
+    h += '<div class="note">Your buffs are scored against one damage dealer. Your own damage is not counted.</div>';
+    return h;
   }
 
   /**
@@ -2060,7 +2294,10 @@
     if (id) { var el = $(id); if (el && el.focus) el.focus(); }
   }
 
-  var SHAPE_FIELDS = { grade: 1, slots: 1, useOverride: 1 };
+  // The role is a shape field: it changes which controls exist (the Support
+  // effects switch, the trait weights, the whole Advanced support block) as well
+  // as every number, so the whole deck is rebuilt and every tab is told.
+  var SHAPE_FIELDS = { grade: 1, slots: 1, useOverride: 1, "fight.role": 1 };
 
   /**
    * `settled` is false while a range is still under the mouse. It matters for
@@ -2500,6 +2737,8 @@
     traitBand: traitBand,
     traitValues: traitValues,
     traitWeights: traitWeights,
+    /** "dps" or "support" — who the deck is scoring. */
+    role: function () { return isSupport() ? "support" : "dps"; },
     traitOnCount: traitOnCount,
     TRAIT_KEYS: TRAIT_KEYS,
     TRAIT_LABELS: TRAIT_LABELS,

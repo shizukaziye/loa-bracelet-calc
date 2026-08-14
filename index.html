@@ -82,10 +82,10 @@
 // they exist: a missing file fails its <script> and the loader skips it, so each
 // pane simply keeps the placeholder until the file lands.
 var LAZY_TABS = {
-  advisor: ['advisor-capture.js?v=1', 'advisor.js?v=5', 'advisor-glue.js?v=1'],
-  tierlist: ['tierlist.js?v=18'],
+  advisor: ['advisor-capture.js?v=1', 'advisor.js?v=6', 'advisor-glue.js?v=1'],
+  tierlist: ['tierlist.js?v=19'],
   leaderboard: ['leaderboard.js?v=8'],
-  method: ['method.js?v=5'],
+  method: ['method.js?v=6'],
   feedback: ['feedback.js?v=2']
 };
 var lazyLoaded = {};
@@ -127,17 +127,17 @@ function selectTab(name){
      profile.js hands it. -->
 <!-- ?v= cache-buster: bump on each deploy so browsers load fresh JS without a hard-refresh -->
 <script src="data/bracelet-data.js?v=2"></script>
-<script src="data/gear-data.js?v=3"></script>
-<script src="model/bracelet.js?v=6"></script>
+<script src="data/gear-data.js?v=4"></script>
+<script src="model/bracelet.js?v=8"></script>
 <script src="tip.js?v=1"></script>
 <script src="favorites.js?v=1"></script>
 <!-- The shared character lookup + ★ strip. EAGER, though it mounts lazily: the
      Advisor and the Tier List both mount it, and neither should have to know
      whether the other has already loaded it. -->
 <script src="char-picker.js?v=3"></script>
-<script src="profile.js?v=12"></script>
-<script src="subrank.js?v=2"></script>
-<script src="app.js?v=28"></script>
+<script src="profile.js?v=14"></script>
+<script src="subrank.js?v=5"></script>
+<script src="app.js?v=29"></script>
 <!-- lostark.bible import. AFTER app.js: bible-import.js mounts into the Bracelet
      panel app.js has just built, and hands what it decodes to
      window.BraceletApp.applyImport. Both degrade to nothing if the site is down. -->

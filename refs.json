@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generated": "2026-08-13T00:12:48.527Z",
+    "generated": "2026-08-14T11:54:23.894Z",
     "modelSig": "bracelet-v1",
     "floatTolerance": 1e-8,
     "note": "Captured references for the bracelet core. Regenerate with `node tools/gen-refs.js`. Scoring is % damage in log space (D = 100*ln(multiplier)); the solver's V is the expected final score under optimal play with free rerolls."
@@ -97,9 +97,9 @@
     "addDamagePoolMaster": 0.4544,
     "critFactor": 2.62,
     "allyCritFactor": 2.62,
-    "attackPower": 208562.202342212,
+    "attackPower": 209462.202342212,
     "attackPowerNoFlat": 205862.202342212,
-    "attackPowerFlatWP": 212365.131616177,
+    "attackPowerFlatWP": 213265.131616177,
     "defShredGain2_1": 1.01061142,
     "basicExpectedRelic": 8909.25,
     "basicExpectedAncient": 12109.25,
@@ -517,55 +517,55 @@
       "grade": "relic",
       "family": 20,
       "tier": "low",
-      "damage": 1.810132608
+      "damage": 1.8049566
     },
     {
       "grade": "relic",
       "family": 20,
       "tier": "mid",
-      "damage": 2.001326102
+      "damage": 1.995339215
     },
     {
       "grade": "relic",
       "family": 20,
       "tier": "high",
-      "damage": 2.19178659
+      "damage": 2.184993467
     },
     {
       "grade": "relic",
       "family": 21,
       "tier": "low",
-      "damage": 1.638444702
+      "damage": 1.631442092
     },
     {
       "grade": "relic",
       "family": 21,
       "tier": "mid",
-      "damage": 1.858071758
+      "damage": 1.850136501
     },
     {
       "grade": "relic",
       "family": 21,
       "tier": "high",
-      "damage": 2.077022691
+      "damage": 2.068159069
     },
     {
       "grade": "relic",
       "family": 22,
       "tier": "low",
-      "damage": 1.942622854
+      "damage": 1.934318638
     },
     {
       "grade": "relic",
       "family": 22,
       "tier": "mid",
-      "damage": 2.182297346
+      "damage": 2.172975194
     },
     {
       "grade": "relic",
       "family": 22,
       "tier": "high",
-      "damage": 2.421253914
+      "damage": 2.410918376
     },
     {
       "grade": "relic",
@@ -751,33 +751,33 @@
       "grade": "relic",
       "family": 33,
       "tier": "low",
-      "damage": 1.271752489
+      "damage": 1.26632258
     },
     {
       "grade": "relic",
       "family": 33,
       "tier": "mid",
-      "damage": 1.450802555
+      "damage": 1.444613676
     },
     {
       "grade": "relic",
       "family": 33,
       "tier": "high",
-      "damage": 1.629209616
+      "damage": 1.622265836
     },
     {
       "grade": "relic",
       "cat": "basic",
       "family": "mainStat",
       "value": null,
-      "damage": 0.620826389
+      "damage": 0.618167101
     },
     {
       "grade": "relic",
       "cat": "basic",
       "family": "mainStat",
       "value": 13888,
-      "damage": 0.964412495
+      "damage": 0.960288519
     },
     {
       "grade": "relic",
@@ -1139,55 +1139,55 @@
       "grade": "ancient",
       "family": 20,
       "tier": "low",
-      "damage": 2.001326102
+      "damage": 1.995339215
     },
     {
       "grade": "ancient",
       "family": 20,
       "tier": "mid",
-      "damage": 2.19178659
+      "damage": 2.184993467
     },
     {
       "grade": "ancient",
       "family": 20,
       "tier": "high",
-      "damage": 2.38151968
+      "damage": 2.373924919
     },
     {
       "grade": "ancient",
       "family": 21,
       "tier": "low",
-      "damage": 1.858071758
+      "damage": 1.850136501
     },
     {
       "grade": "ancient",
       "family": 21,
       "tier": "mid",
-      "damage": 2.077022691
+      "damage": 2.068159069
     },
     {
       "grade": "ancient",
       "family": 21,
       "tier": "high",
-      "damage": 2.295302165
+      "damage": 2.285514423
     },
     {
       "grade": "ancient",
       "family": 22,
       "tier": "low",
-      "damage": 2.182297346
+      "damage": 2.172975194
     },
     {
       "grade": "ancient",
       "family": 22,
       "tier": "mid",
-      "damage": 2.421253914
+      "damage": 2.410918376
     },
     {
       "grade": "ancient",
       "family": 22,
       "tier": "high",
-      "damage": 2.659497364
+      "damage": 2.648152951
     },
     {
       "grade": "ancient",
@@ -1373,33 +1373,33 @@
       "grade": "ancient",
       "family": 33,
       "tier": "low",
-      "damage": 1.450802555
+      "damage": 1.444613676
     },
     {
       "grade": "ancient",
       "family": 33,
       "tier": "mid",
-      "damage": 1.629209616
+      "damage": 1.622265836
     },
     {
       "grade": "ancient",
       "family": 33,
       "tier": "high",
-      "damage": 1.80697828
+      "damage": 1.799283635
     },
     {
       "grade": "ancient",
       "cat": "basic",
       "family": "mainStat",
       "value": null,
-      "damage": 0.841932702
+      "damage": 0.838330276
     },
     {
       "grade": "ancient",
       "cat": "basic",
       "family": "mainStat",
       "value": 13888,
-      "damage": 0.964412495
+      "damage": 0.960288519
     },
     {
       "grade": "ancient",
@@ -1513,7 +1513,7 @@
       "grade": "ancient",
       "family": 29,
       "tier": "high",
-      "damage": 2.664193095
+      "damage": 0.995803868
     },
     {
       "label": "solo (no allies)",
@@ -1534,7 +1534,7 @@
         "spec": 120
       },
       "profile": {},
-      "damage": 5.905961107
+      "damage": 5.815361107
     },
     {
       "label": "relic band top: crit 100 + spec 100",
@@ -1543,7 +1543,7 @@
         "spec": 100
       },
       "profile": {},
-      "damage": 4.927460768
+      "damage": 4.851960768
     },
     {
       "label": "band floor: crit 61 + swift 61",
@@ -1552,7 +1552,7 @@
         "swift": 61
       },
       "profile": {},
-      "damage": 3.012747652
+      "damage": 2.966692652
     },
     {
       "label": "spec + swift only",
@@ -1561,7 +1561,7 @@
         "swift": 96
       },
       "profile": {},
-      "damage": 5.4
+      "damage": 5.23692
     },
     {
       "label": "crit only",
@@ -1636,12 +1636,12 @@
       }
     ],
     "goldPer1Pct": 30000,
-    "traitDamage": 5.905961107,
+    "traitDamage": 5.815361107,
     "plainCurrent": 0,
-    "plainFinal": 1.992291407,
-    "traitCurrent": 5.905961107,
-    "traitFinal": 7.898252514,
-    "traitValueGold": 246954.582202484,
+    "plainFinal": 1.98933675,
+    "traitCurrent": 5.815361107,
+    "traitFinal": 7.804697857,
+    "traitValueGold": 243918.393781368,
     "states": 2745
   },
   "familyGrades": [
@@ -1650,8 +1650,8 @@
       "bestAvg": 3.571678781,
       "entries": {
         "basic:mainStat": {
-          "avg": 0.620826389,
-          "share": 0.173819211,
+          "avg": 0.618167101,
+          "share": 0.173074663,
           "letter": "D"
         },
         "basic:vitality": {
@@ -1785,18 +1785,18 @@
           "letter": "S"
         },
         "special:20": {
-          "avg": 1.905656054,
-          "share": 0.533546316,
+          "avg": 1.900075071,
+          "share": 0.53198375,
           "letter": "B"
         },
         "special:21": {
-          "avg": 1.748190618,
-          "share": 0.489459082,
+          "avg": 1.740722113,
+          "share": 0.487368047,
           "letter": "C"
         },
         "special:22": {
-          "avg": 2.062388308,
-          "share": 0.577428272,
+          "avg": 2.053575579,
+          "share": 0.574960881,
           "letter": "B"
         },
         "special:23": {
@@ -1850,8 +1850,8 @@
           "letter": "B"
         },
         "special:33": {
-          "avg": 1.361213222,
-          "share": 0.381113002,
+          "avg": 1.355404234,
+          "share": 0.379486599,
           "letter": "C"
         }
       }
@@ -1861,8 +1861,8 @@
       "bestAvg": 4.050153507,
       "entries": {
         "basic:mainStat": {
-          "avg": 0.841932702,
-          "share": 0.207876739,
+          "avg": 0.838330276,
+          "share": 0.206987284,
           "letter": "D"
         },
         "basic:vitality": {
@@ -1996,18 +1996,18 @@
           "letter": "S"
         },
         "special:20": {
-          "avg": 2.096483606,
-          "share": 0.517630653,
+          "avg": 2.090094061,
+          "share": 0.516053048,
           "letter": "B"
         },
         "special:21": {
-          "avg": 1.967480079,
-          "share": 0.485779138,
+          "avg": 1.959081064,
+          "share": 0.483705386,
           "letter": "C"
         },
         "special:22": {
-          "avg": 2.301704318,
-          "share": 0.568300514,
+          "avg": 2.291875924,
+          "share": 0.565873842,
           "letter": "B"
         },
         "special:23": {
@@ -2061,8 +2061,8 @@
           "letter": "B"
         },
         "special:33": {
-          "avg": 1.539942246,
-          "share": 0.380218242,
+          "avg": 1.53337632,
+          "share": 0.378597087,
           "letter": "C"
         }
       }
@@ -2845,26 +2845,26 @@
       "granted": [],
       "unrolled": true,
       "currentScore": 0,
-      "expectedFinal": 3.926954018,
-      "distMean": 3.926954018,
-      "valueGold": 120606.406096395,
+      "expectedFinal": 3.923580012,
+      "distMean": 3.923580012,
+      "valueGold": 120501.745945059,
       "pImprove": 0.999939185,
       "quantiles": {
-        "p10": 1.233797736,
-        "p25": 2.917340931,
-        "p50": 3.779281259,
-        "p75": 5.067531135,
-        "p90": 6.225815676
+        "p10": 1.230650991,
+        "p25": 2.907220941,
+        "p50": 3.775757801,
+        "p75": 5.062408508,
+        "p90": 6.222634705
       },
       "evByRollsLeft": [
-        1.109718552,
-        1.802008157,
-        2.318952058,
-        2.741774962,
-        3.101634146,
-        3.413417896,
-        3.686295192,
-        3.926954018
+        1.107602483,
+        1.79908772,
+        2.315687129,
+        2.738353273,
+        3.098150078,
+        3.409931882,
+        3.68284958,
+        3.923580012
       ],
       "bestLockMask": null,
       "maskEVTop": [],
@@ -2880,26 +2880,26 @@
       "granted": [],
       "unrolled": true,
       "currentScore": 0,
-      "expectedFinal": 5.825569529,
-      "distMean": 5.825569529,
-      "valueGold": 180642.049819108,
+      "expectedFinal": 5.821050525,
+      "distMean": 5.821050525,
+      "valueGold": 180498.988972421,
       "pImprove": 0.999999889,
       "quantiles": {
-        "p10": 3.22061538,
-        "p25": 4.337425515,
-        "p50": 5.789403727,
-        "p75": 7.236620827,
-        "p90": 8.563235057
+        "p10": 3.212123854,
+        "p25": 4.330472818,
+        "p50": 5.785880268,
+        "p75": 7.233365739,
+        "p90": 8.558946795
       },
       "evByRollsLeft": [
-        1.716407296,
-        2.714814484,
-        3.474657672,
-        4.099925819,
-        4.629067366,
-        5.083731308,
-        5.478840305,
-        5.825569529
+        1.713450855,
+        2.710986077,
+        3.470448898,
+        4.095512629,
+        4.624545918,
+        5.07916205,
+        5.474274872,
+        5.821050525
       ],
       "bestLockMask": null,
       "maskEVTop": [],
@@ -2915,26 +2915,26 @@
       "granted": [],
       "unrolled": true,
       "currentScore": 0,
-      "expectedFinal": 3.242469842,
-      "distMean": 3.242469842,
-      "valueGold": 99208.306092678,
+      "expectedFinal": 3.239647435,
+      "distMean": 3.239647435,
+      "valueGold": 99121.086876479,
       "pImprove": 0.999939185,
       "quantiles": {
-        "p10": 0.912662067,
-        "p25": 2.32834921,
-        "p50": 3.095879267,
+        "p10": 0.910461505,
+        "p25": 2.325958905,
+        "p50": 3.09637368,
         "p75": 4.239754658,
-        "p90": 5.227265559
+        "p90": 5.224114488
       },
       "evByRollsLeft": [
-        0.883783353,
-        1.452651378,
-        1.884206869,
-        2.239430746,
-        2.542722622,
-        2.806289345,
-        3.037682952,
-        3.242469842
+        0.882172299,
+        1.450391546,
+        1.881644723,
+        2.236713058,
+        2.539921165,
+        2.803450319,
+        3.034841022,
+        3.239647435
       ],
       "bestLockMask": null,
       "maskEVTop": [],
@@ -2965,31 +2965,31 @@
         }
       ],
       "unrolled": false,
-      "currentScore": 6.31333768,
-      "expectedFinal": 6.949899989,
-      "distMean": 6.949899989,
-      "valueGold": 216080.627075489,
+      "currentScore": 6.309251025,
+      "expectedFinal": 6.94663216,
+      "distMean": 6.94663216,
+      "valueGold": 215976.00229239,
       "pImprove": 0.429758489,
       "quantiles": {
-        "p10": 6.31333768,
-        "p25": 6.31333768,
-        "p50": 6.31333768,
-        "p75": 7.539991787,
+        "p10": 6.309251025,
+        "p25": 6.309251025,
+        "p50": 6.309251025,
+        "p75": 7.530669635,
         "p90": 8.491499754
       },
       "evByRollsLeft": [
-        6.31333768,
-        6.486392341,
-        6.649671684,
-        6.803942327,
-        6.949899989
+        6.309251025,
+        6.482542165,
+        6.646035108,
+        6.80049909,
+        6.94663216
       ],
       "bestLockMask": {
         "lockedKeys": [
           "special:23:low",
           "special:32:high"
         ],
-        "ev": 6.949899989
+        "ev": 6.94663216
       },
       "maskEVTop": [
         {
@@ -2997,20 +2997,20 @@
             "special:23:low",
             "special:32:high"
           ],
-          "ev": 6.949899989
+          "ev": 6.94663216
         },
         {
           "lockedKeys": [
             "special:32:high"
           ],
-          "ev": 6.946278107
+          "ev": 6.942907964
         },
         {
           "lockedKeys": [
             "basic:mainStat:b6",
             "special:32:high"
           ],
-          "ev": 6.907643201
+          "ev": 6.904101943
         }
       ],
       "states": 59998,
@@ -3139,7 +3139,7 @@
       ],
       "rollsLeft": 2,
       "verdict": "replace",
-      "vKeep": 5.506950192,
+      "vKeep": 5.506807209,
       "vNew": 8.208792152,
       "scoreKeep": 5.357694441,
       "scoreNew": 8.189177234
@@ -3170,8 +3170,8 @@
       ],
       "rollsLeft": 2,
       "verdict": "keep",
-      "vKeep": 5.506950192,
-      "vNew": 1.802008157,
+      "vKeep": 5.506807209,
+      "vNew": 1.79908772,
       "scoreKeep": 5.357694441,
       "scoreNew": 0
     },

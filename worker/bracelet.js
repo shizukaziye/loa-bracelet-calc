@@ -967,21 +967,35 @@ function braceletInLoadout(loadoutSrc) {
  *               are summed over the five accessories, and the two are reported
  *               apart because the model treats them apart: flat attack power
  *               sits outside the square root, flat weapon power inside it.
- *               NOT READ, because the page does not carry it: what the ark-grid
- *               CORES contribute. `arkGridCores[]` gives each core's id and the
- *               points its gems total, and `battlePoint` type 29 gives each a
- *               combat-power figure — but nowhere does the page say how much
- *               attack or weapon power a core is granting. raw.arkGridCores
- *               reports the cores we can see so a reader knows what is missing.
+ *               These are the ACCESSORIES' share alone — see ARK CORE.
  *
- *   ATTACK      battlePoint.parts[type=1].attackPowerMultiplier — the character's
- *   POWER %     whole AP% bucket, as a percentage, and the model's `baseApPct`
- *               exactly. On 78 of the 100 corpus loadouts with eleven readable
- *               gems it equals the eleven gems plus 1.5 for a 9/7-or-better
- *               ability stone, which is how the deck builds the number itself;
- *               on the other 22 the page reads HIGHER, by 0.35 to 2.05, from
- *               sources the page does not itemise. So the page's own figure is
- *               what ships, with the gem-and-stone sum reported beside it.
+ *   ARK CORE    grade and points, never the effect. `arkGridCores[]` carries each
+ *               core's id and its four gems' `corePoints`; the id's last digit is
+ *               the grade (5 relic, 6 ancient — the only two that ever appear,
+ *               and 28 of the corpus's 106 distinct cores appear as both), and
+ *               the point sum is what the core's 10 / 17 thresholds key off. What
+ *               a core GRANTS is nowhere on the page: no name, no tooltip, no
+ *               effect block, and the icon is per slot rather than per core. So
+ *               `arkCore` ships {grade, points} for the best core on the board
+ *               and the deck sets whether it is an attack core or a weapon core,
+ *               which is what turns the pair into flat power. Confirmed the hard
+ *               way: reconstruct the page's own weapon-power total from the Serca
+ *               table, the earrings, karma and the accessory rolls and the
+ *               residual is exactly zero on 65 loadouts — no core weapon power is
+ *               in that figure at all.
+ *
+ *   ATTACK      BUILT, not read: the eleven damage gems plus the ability stone,
+ *   POWER %     which are the model's `baseApPct` and its only two sources. Gems
+ *               come off their own effect ({type:2, id:150}) — 45/60/80/100/120
+ *               is lv6…lv10 at 0.45/0.6/0.8/1.0/1.2% — and the stone pays 1.5%
+ *               when its two engraving levels total five or more (see
+ *               stoneApPct). A page whose gems cannot be read at all falls back
+ *               to eleven level nines rather than to zero.
+ *
+ *               The page's own `attackPowerMultiplier` is carried through as
+ *               `raw.apPctCheck` and agrees to the last decimal on 103 of the 117
+ *               corpus loadouts. The other 14 are exactly the pages whose gems
+ *               the site could not read either, where it prints the stone alone.
  *
  *   KARMA WP    karma.enlightenment ÷ 10, as a percentage. Derived, not assumed:
  *               take the page's own weapon-power total, divide out the weapon's
@@ -1037,8 +1051,51 @@ const ACC_FLAT_AP = 124;          // "Attack Power +80/195/390", flat
 const ACC_FLAT_WP = 151;          // "Weapon Power +195/480/960", flat
 // A damage gem's attack-power percentage, per level. The same ladder the deck
 // holds; it is here so the parser can say what the gems account for.
-const GEM_AP_PCT = { 6: 0.4, 7: 0.6, 8: 0.8, 9: 1.0, 10: 1.2 };
-const STONE_AP_PCT = 1.5;         // a 9/7-or-better ability stone
+const GEM_AP_PCT = { 6: 0.45, 7: 0.6, 8: 0.8, 9: 1.0, 10: 1.2 };
+const STONE_AP_PCT = 1.5;         // a stone whose two engraving levels total 5+
+// A stone's eleven-node track -> the engraving level it grants. The thresholds
+// are the game's; the pair below is what the corpus confirms.
+const STONE_NODE_LEVEL = [[10, 4], [9, 3], [7, 2], [4, 1]];
+// Below level 6 there is no gem worth reading, so a character whose gems cannot
+// be read at all is scored on the deck's own fallback: eleven level nines.
+const GEM_FALLBACK_COUNT = 11;
+const GEM_FALLBACK_LEVEL = 9;
+
+/** A core id's last digit is its grade: 5 relic, 6 ancient. */
+function coreGrade(id) {
+  if (id == null) return null;
+  const d = id % 10;
+  return d === 5 ? "relic" : d === 6 ? "ancient" : null;
+}
+
+/** A stone engraving's node count -> its level. */
+function stoneNodeLevel(nodes) {
+  for (let i = 0; i < STONE_NODE_LEVEL.length; i++) {
+    if (nodes >= STONE_NODE_LEVEL[i][0]) return STONE_NODE_LEVEL[i][1];
+  }
+  return 0;
+}
+
+/**
+ * Base attack power % from an ability stone: 1.5 when its two engraving levels
+ * total five or more, nothing otherwise.
+ *
+ * The rule is read off the corpus, not assumed. Take the page's own
+ * `attackPowerMultiplier`, subtract what the gems account for, and the remainder
+ * is exactly 1.5 or exactly 0 on all 117 loadouts. Sorting those by node pair:
+ *
+ *   1.5 -> 10/6, 10/7, 10/8, 9/7, 9/8, 9/9
+ *   0   -> 9/6, 8/7, 7/7
+ *
+ * 9/7 pays and 9/6 does not, so the sixth node cannot count for as much as the
+ * seventh; 10/6 pays and 8/7 does not, so the tenth must count for more than the
+ * ninth. The node ladder above (4 -> Lv1, 7 -> Lv2, 9 -> Lv3, 10 -> Lv4) with a
+ * level total of 5 is the only reading that fits every one of the nine pairs.
+ */
+function stoneApPct(nodes) {
+  if (!nodes || nodes.length < 2) return null;
+  return stoneNodeLevel(nodes[0]) + stoneNodeLevel(nodes[1]) >= 5 ? STONE_AP_PCT : 0;
+}
 // Karma's weapon-power percentage is enlightenment tenths. See the header.
 const KARMA_WP_PER_ENLIGHTENMENT = 0.1;
 
@@ -1273,7 +1330,11 @@ function parseCharacterProfile(html, loadoutSrc) {
       nodes.sort(function (a, b) { return b - a; });
       if (nodes.length >= 2) {
         out.raw.stoneNodes = nodes;
-        out.stone97 = nodes[0] >= 9 && nodes[1] >= 7;
+        // The stone's attack-power percentage is a level-total rule, not a
+        // node-count one: see stoneApPct. `stone97` keeps the deck's older
+        // meaning — "does this stone pay the 1.5%" — because that is the only
+        // question the deck's toggle asks.
+        out.stone97 = stoneApPct(nodes) > 0;
       } else out.missing.push("stone");
     } else out.missing.push("stone");
   } else out.missing.push("stone");
@@ -1338,10 +1399,17 @@ function parseCharacterProfile(html, loadoutSrc) {
   } else out.missing.push("karma");
 
   // ---- the ark grid ---------------------------------------------------------
-  // Counted, never converted. The page names each core and totals the points its
-  // gems carry, but says NOTHING about the attack or weapon power the core then
-  // grants — so this reports what is there and the deck keeps its own figure for
-  // the cores. Reading a number that is not on the page would be an invention.
+  // Each core's id, GRADE and point total. Grade is the id's last digit: only 5
+  // and 6 ever appear there, 28 of the corpus's 106 distinct cores appear with
+  // both, and the same digit means relic and ancient everywhere else on the page
+  // (`engrave_grade05`). Points are the four gems' `corePoints`, summed, which is
+  // the 10 / 17 threshold the core's own effect keys off.
+  //
+  // What the core GRANTS is not on the page — no name, no tooltip, no effect
+  // block, and the icon is per slot rather than per core. So the grade and the
+  // points ship, the deck sets whether it is an attack core or a weapon core,
+  // and the table in gear-data turns the three into flat power. Guessing the
+  // type from the id would be an invention.
   const coresSrc = field(src, "arkGridCores");
   if (coresSrc && coresSrc[0] === "[") {
     const els = splitTop(coresSrc), ids = [];
@@ -1353,9 +1421,21 @@ function parseCharacterProfile(html, loadoutSrc) {
         const gs = splitTop(gems);
         for (let j = 0; j < gs.length; j++) pts += numOrNull(field(gs[j], "corePoints")) || 0;
       }
-      ids.push({ id: id, points: pts });
+      ids.push({ id: id, points: pts, grade: coreGrade(id) });
     }
-    if (ids.length) out.raw.arkGridCores = ids;
+    if (ids.length) {
+      out.raw.arkGridCores = ids;
+      // The best core on the board, by grade first and points second: what the
+      // deck offers when it fills its own core row on import.
+      let best = null;
+      for (let i = 0; i < ids.length; i++) {
+        const c = ids[i];
+        if (c.grade == null) continue;
+        if (!best || (c.grade === "ancient" && best.grade === "relic") ||
+            (c.grade === best.grade && c.points > best.points)) best = c;
+      }
+      if (best) out.arkCore = { grade: best.grade, points: best.points };
+    }
   }
 
   // ---- Master ---------------------------------------------------------------
@@ -1387,15 +1467,11 @@ function parseCharacterProfile(html, loadoutSrc) {
         // mistake them for the deck's raw override pair.
         if (ms != null) out.raw.mainStatTotal = ms;
         if (wp != null) out.raw.weaponPowerTotal = wp;
-        // ATTACK POWER %, and it IS the deck's field: the page's own multiplier
-        // on the square-root term, in percent. baseAttackPower divided by
-        // sqrt(mainStat × weaponPower / 6) reproduces 1 + apm/100 on every
-        // corpus page, which is the model's formula exactly.
-        // The page carries float noise on this one (13.200000000000001), so it
-        // is rounded to the ten-thousandth of a percent — far finer than any
-        // real value, and it stops the deck printing sixteen digits.
+        // The page's own multiplier on the square-root term, in percent. Kept
+        // as a CHECK on what the gems and the stone come to, never as the value
+        // itself — see the apPct block below for why.
         const apm = numOrNull(field(els[i], "attackPowerMultiplier"));
-        if (apm != null) { out.apPct = Math.round(apm * 1e4) / 1e4; out.raw.attackPowerMultiplier = apm; }
+        if (apm != null) out.raw.attackPowerMultiplier = Math.round(apm * 1e4) / 1e4;
         const bap = numOrNull(field(els[i], "baseAttackPower"));
         if (bap != null) out.raw.baseAttackPower = bap;
         break;
@@ -1403,14 +1479,41 @@ function parseCharacterProfile(html, loadoutSrc) {
     }
   }
 
-  // What the gems and the stone account for, beside what the page reported. Not
-  // a correction to apPct — a second opinion, so a reader can see the gap. The
-  // deck prints both in the field's tooltip.
-  if (out.gemLevels && out.gemLevels.length) {
-    let gemPct = 0;
-    for (let i = 0; i < out.gemLevels.length; i++) gemPct += GEM_AP_PCT[out.gemLevels[i]] || 0;
-    const stonePct = out.stone97 ? STONE_AP_PCT : 0;
-    out.raw.apPctFromGems = Math.round((gemPct + stonePct) * 1000) / 1000;
+  // ---- BASE attack power % --------------------------------------------------
+  // The deck's `baseApPct` is the multiplier INSIDE the square root, and it has
+  // two sources and no others: the eleven damage gems and the ability stone. It
+  // is built from those here rather than read off `attackPowerMultiplier`,
+  // because the page's field is the page's own arithmetic and this one is ours.
+  //
+  // The two agree. On all 117 corpus loadouts the page's multiplier equals the
+  // gem ladder plus stoneApPct to the last decimal, which is what licenses the
+  // ladder above; `apPctCheck` carries the page's figure through so a reader can
+  // see the two side by side, and `apPctGap` is flagged the moment they part.
+  //
+  // Gems below level 6 grant no attack power and are not read. A character whose
+  // gems cannot be read at all falls back to eleven level nines rather than to
+  // zero — a missing reading is not an empty gem page.
+  {
+    let gemPct = 0, gemsRead = 0;
+    if (out.gemLevels) {
+      for (let i = 0; i < out.gemLevels.length; i++) {
+        gemPct += GEM_AP_PCT[out.gemLevels[i]] || 0;
+        gemsRead++;
+      }
+    }
+    if (!gemsRead) {
+      gemPct = GEM_FALLBACK_COUNT * GEM_AP_PCT[GEM_FALLBACK_LEVEL];
+      out.raw.gemsAssumed = GEM_FALLBACK_COUNT + " × lv" + GEM_FALLBACK_LEVEL;
+    }
+    const stonePct = out.raw.stoneNodes ? stoneApPct(out.raw.stoneNodes) : null;
+    if (stonePct == null) out.missing.push("stoneApPct");
+    out.apPct = Math.round((gemPct + (stonePct || 0)) * 1e4) / 1e4;
+    out.raw.apPctFromGems = out.apPct;
+    if (out.raw.attackPowerMultiplier != null) {
+      out.raw.apPctCheck = out.raw.attackPowerMultiplier;
+      const gap = Math.round((out.apPct - out.raw.attackPowerMultiplier) * 1e4) / 1e4;
+      if (Math.abs(gap) > 0.001) out.raw.apPctGap = gap;
+    }
   }
 
   if (!out.missing.length) delete out.missing;

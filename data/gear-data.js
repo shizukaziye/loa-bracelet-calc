@@ -58,7 +58,7 @@
     // Per-gem tiers: lv7 0.6% · lv8 0.8% · lv9 1.0% · lv10 1.2%.
     // Cancels out of every line ratio when flatAP = 0.
     baseApPct: 0.125,
-    flatAP: 2700,       // ark-grid cores
+    flatAP: 3600,       // Ancient attack core at 17+ points: 900 + 2700
     // Flat WEAPON power. Zero on the reference build: it runs attack cores and
     // its accessories carry no "Weapon Power +195/480/960" roll. It is weapon
     // power, so the model adds it to the weapon's raw figure inside the square
@@ -66,7 +66,54 @@
     flatWP: 0
   };
 
-  var API = { SERCA: SERCA, PIECES: PIECES, ILVL0: ILVL0, ILVL_STEP: ILVL_STEP, DEFAULTS: DEFAULTS };
+
+  // ---- ARK-GRID CORES ------------------------------------------------------
+  // A core's thresholds ADD — they do not replace. The 10-point line stays paid
+  // when the 17-point line lands, so a core at 17+ points carries both:
+  //
+  //   attack core   10pt +900    17pt +1800 relic / +2700 ancient
+  //                 -> TOTAL     2700 relic / 3600 ancient, flat ATTACK power
+  //   weapon core   10pt +1300   17pt +2600 relic / +3900 ancient
+  //                 -> TOTAL     3900 relic / 5200 ancient, flat WEAPON power
+  //
+  // Confirmed from the game's own data rather than assumed: the Ancient Chaos
+  // Star Attack core's 17-point line reads "Atk. Power +1.65% and +2700" ON TOP
+  // OF the 10-point line's "+900", and bebkok's sheet sums every threshold
+  // explicitly (SUM(EZ3:EZ24) = 3900 for the Relic weapon core). See
+  // loa-gpd/docs/research/reference-character.md §1.
+  //
+  // Points above 17 pay only a percentage (+0.16% each at 18/19/20), so the flat
+  // stops at the 17-point step and this table needs no rung above it. That
+  // percentage joins the whole-term attack-power bucket, which cancels out of
+  // every bracelet-line ratio and is deliberately not modelled.
+  //
+  // A build runs an attack core or a weapon core, not both.
+  // Flat attack power lands beside the square root; flat weapon power lands
+  // inside it, where the weapon-power bucket then amplifies it. That is why the
+  // weapon core's bigger number is not straightforwardly better.
+  //
+  // The character page carries each core's id, grade and point total, but says
+  // NOTHING about which effect a core has, so the type is the deck's to set.
+  var ARK_CORE = {
+    thresholds: [17, 10],
+    attack: { relic: { 10: 900, 17: 2700 }, ancient: { 10: 900, 17: 3600 } },
+    weapon: { relic: { 10: 1300, 17: 3900 }, ancient: { 10: 1300, 17: 5200 } }
+  };
+
+  /** Flat power from one core: type "attack"|"weapon"|"none", points 0…20. */
+  function arkCoreFlat(type, grade, points) {
+    var t = ARK_CORE[type];
+    if (!t) return 0;
+    var band = t[grade === "relic" ? "relic" : "ancient"];
+    for (var i = 0; i < ARK_CORE.thresholds.length; i++) {
+      var th = ARK_CORE.thresholds[i];
+      if (points >= th) return band[th];
+    }
+    return 0;
+  }
+
+  var API = { SERCA: SERCA, PIECES: PIECES, ILVL0: ILVL0, ILVL_STEP: ILVL_STEP, DEFAULTS: DEFAULTS,
+              ARK_CORE: ARK_CORE, arkCoreFlat: arkCoreFlat };
 
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   else root.BraceletGearData = API;

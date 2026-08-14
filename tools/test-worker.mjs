@@ -312,12 +312,24 @@ ok("the whole karma triple is reported, so a reader can check the tenths",
   pf.raw.karma.leap === 21, JSON.stringify(pf.raw.karma));
 ok("no karma block leaves karmaWp absent rather than guessed",
   parseCharacterProfile(PROFILE_HTML.replace(KARMA + ",", "")).karmaWp === undefined);
-ok("attack power % is the page's own multiplier, float noise rounded off",
-  pf.apPct === 14.7, String(pf.apPct));
-ok("the page's unrounded multiplier is kept in raw",
-  pf.raw.attackPowerMultiplier === 14.700000000000001, String(pf.raw.attackPowerMultiplier));
-ok("the gems-and-stone second opinion is reported beside it (10×1.2 + 1.0 + 1.5 stone)",
-  pf.raw.apPctFromGems === 14.5, String(pf.raw.apPctFromGems));
+ok("base attack power % is BUILT from the gems and the stone (10×1.2 + 1.0 + 1.5)",
+  pf.apPct === 14.5, String(pf.apPct));
+ok("the page's own multiplier is kept as a check, never as the value",
+  pf.raw.apPctCheck === 14.7 && pf.raw.attackPowerMultiplier === 14.7,
+  String(pf.raw.apPctCheck));
+ok("a gap between the two is named rather than swallowed",
+  pf.raw.apPctGap === -0.2, String(pf.raw.apPctGap));
+ok("gems that cannot be read fall back to eleven level nines, not to zero", (() => {
+  const nog = parseCharacterProfile(PROFILE_HTML.replace(/,\{type:2,id:150,value:\d+\}/g, ""));
+  return nog.apPct === 12.5 && nog.raw.gemsAssumed === "11 × lv9";
+})());
+ok("a stone pays 1.5% on level total five: 9/7 yes, 9/6 no, 10/6 yes",
+  parseCharacterProfile(PROFILE_HTML).stone97 === true &&
+  parseCharacterProfile(PROFILE_HTML.replace("nodes:7}", "nodes:6}")).stone97 === false &&
+  parseCharacterProfile(PROFILE_HTML.replace("nodes:9}", "nodes:10}").replace("nodes:7}", "nodes:6}")).stone97 === true);
+ok("an ark core's grade is its id's last digit, and its points are its gems'",
+  pf.arkCore && (pf.arkCore.grade === "relic" || pf.arkCore.grade === "ancient") &&
+  typeof pf.arkCore.points === "number", JSON.stringify(pf.arkCore));
 ok("the gem spread ships as counts per level, ten at 10 and one at 9",
   pf.gemCounts && pf.gemCounts.join(",") === "0,0,0,1,10", JSON.stringify(pf.gemCounts));
 ok("the counts sum to the gems that were read",

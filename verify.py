@@ -119,23 +119,23 @@ check("analytic.addDamagePool", r9(B.add_damage_pool(P)), r9(0.30 + 0.01 + 0.048
 check("analytic.master", r9(B.add_damage_pool(B.normalize_profile({"master": True})) - B.add_damage_pool(P)), 0.07)
 check("analytic.critFactor", r9(B.crit_factor(P, 0, 0)), r9(1 + 0.9 * (2.8 - 1)))
 check("analytic.attackPower", r9(B.attack_power(P, 0, 0)),
-      r9(math.sqrt(703826 * 1.09 * 241367 * 1.085 / 6) * 1.125 + 2700))
+      r9(math.sqrt(703826 * 1.09 * 241367 * 1.085 / 6) * 1.125 + 3600))
 check("analytic.defShred", r9(B.def_shred_gain(P, 2.1)), r9(2 / (2 - 0.021)))
 
 # WHERE FLAT WEAPON POWER GOES - the same three-way pin as verify.js.
 _p_flat_wp = B.normalize_profile({"flatWP": 9000})
 check("analytic.flatWP.attackPower", r9(B.attack_power(_p_flat_wp, 0, 0)),
-      r9(math.sqrt(703826 * 1.09 * (241367 + 9000) * 1.085 / 6) * 1.125 + 2700))
+      r9(math.sqrt(703826 * 1.09 * (241367 + 9000) * 1.085 / 6) * 1.125 + 3600))
 check("analytic.flatWP.isRawWeaponPower", r9(B.attack_power(_p_flat_wp, 0, 0)),
       r9(B.attack_power(B.normalize_profile({"weaponPowerRaw": 241367 + 9000}), 0, 0)))
 check("analytic.flatWP.isABraceletWeaponPowerLine", r9(B.attack_power(_p_flat_wp, 0, 0)),
       r9(B.attack_power(P, 0, 9000)))
 check_true("analytic.flatWP is not flatAP",
            abs(B.attack_power(_p_flat_wp, 0, 0)
-               - B.attack_power(B.normalize_profile({"flatAP": 2700 + 9000}), 0, 0)) > 1)
+               - B.attack_power(B.normalize_profile({"flatAP": 3600 + 9000}), 0, 0)) > 1)
 check_true("analytic.flatWP is worth less per point than flatAP",
            B.attack_power(_p_flat_wp, 0, 0)
-           < B.attack_power(B.normalize_profile({"flatAP": 2700 + 9000}), 0, 0))
+           < B.attack_power(B.normalize_profile({"flatAP": 3600 + 9000}), 0, 0))
 check("analytic.flatWP.defaultIsZero", P["flatWP"], 0, exact=True)
 
 # ================= 3. listed probabilities =================
@@ -185,8 +185,8 @@ check("analytic.f32.ancient.high", r9(_d(32, "high")), r9(_D((1 + 0.9 * (2.9 - 1
 check("analytic.f31.ancient.high", r9(_d(31, "high")), r9(_D((1 + 0.95 * 1.8) / (1 + 0.9 * 1.8))))
 check("analytic.f12.ancient.high", r9(_d(12, "high")), r9(_D((1 + 0.9 * (2.9 * 1.015 - 1)) / (1 + 0.9 * 1.8))))
 
-_ap0 = math.sqrt(703826 * 1.09 * 241367 * 1.085 / 6) * 1.125 + 2700
-_ap1 = math.sqrt(703826 * 1.09 * 250367 * 1.085 / 6) * 1.125 + 2700
+_ap0 = math.sqrt(703826 * 1.09 * 241367 * 1.085 / 6) * 1.125 + 3600
+_ap1 = math.sqrt(703826 * 1.09 * 250367 * 1.085 / 6) * 1.125 + 3600
 check("analytic.f33.ancient.high", r9(_d(33, "high")), r9(_D(_ap1 / _ap0)))
 _p_no_flat = B.normalize_profile({"flatAP": 0})
 check("analytic.f33.noFlatAP",
@@ -194,7 +194,7 @@ check("analytic.f33.noFlatAP",
       r9(_D(math.sqrt(250367 / 241367))))
 check_true("analytic.flatAP dampens WP lines",
            _d(33, "high") < B.line_damage({"cat": "special", "family": 33, "tier": "high"}, "ancient", _p_no_flat))
-_ap_ms = math.sqrt((703826 + 13888) * 1.09 * 241367 * 1.085 / 6) * 1.125 + 2700
+_ap_ms = math.sqrt((703826 + 13888) * 1.09 * 241367 * 1.085 / 6) * 1.125 + 3600
 check("analytic.mainStat.13888",
       r9(B.line_damage({"cat": "basic", "family": "mainStat", "value": 13888}, "ancient", P)), r9(_D(_ap_ms / _ap0)))
 check("analytic.f15.ancient.high", r9(_d(15, "high")), r9(_D(0.7 * 1.055 + 0.3 * 1.055 / 1.02)))
@@ -202,7 +202,7 @@ check("analytic.f13.ancient.high", r9(_d(13, "high")), r9(_D(1.03 * (1 + 0.10 * 
 
 
 def _ap_wp(dw):
-    return math.sqrt(703826 * 1.09 * (241367 + dw) * 1.085 / 6) * 1.125 + 2700
+    return math.sqrt(703826 * 1.09 * (241367 + dw) * 1.085 / 6) * 1.125 + 3600
 
 
 # family 20 stacks 6x(+1% atk/move speed) alongside the weapon power, and log
@@ -254,8 +254,48 @@ _dcr = 120 * 25 / 699.0 / 100.0
 check("analytic.trait.crit120", r9(B.trait_damage({"crit": 120}, P)),
       r9(_D((1 + (0.9 + _dcr) * 1.8) / (1 + 0.9 * 1.8))))
 check("analytic.trait.critPP", r9(120 * B.TRAIT_CRIT_PP_PER_POINT), 4.291845494)
-check("analytic.trait.spec120", r9(B.trait_damage({"spec": 120}, P)), 3)
-check("analytic.trait.swift96", r9(B.trait_damage({"swift": 96}, P)), 2.4)
+# Spec / Swiftness: flat points per 100 trait points, no log-space curve. The
+# shipped weight is crit's own worth per point, so on default settings all three
+# combat traits price alike.
+check("analytic.trait.spec120", r9(B.trait_damage({"spec": 120}, P)), 2.9094)
+check("analytic.trait.swift96", r9(B.trait_damage({"swift": 96}, P)), 2.32752)
+# It is ANCHORED AT 110 — subrank.js's own yardstick — and there it tracks crit to
+# four decimal places.
+check("analytic.trait.anchor110.spec", r9(B.trait_damage({"spec": 110}, P)), 2.66695)
+check("analytic.trait.anchor110.crit", r9(B.trait_damage({"crit": 110}, P)), 2.666997141)
+check_true("analytic.trait.anchorHolds",
+           abs(B.trait_damage({"spec": 110}, P) - B.trait_damage({"crit": 110}, P)) < 0.001)
+
+
+# Away from the anchor the two drift apart, and that is the design, not a slip:
+# crit is faintly non-linear — 0.0244 a point at 61, 0.0242 at 120, because a
+# character nearer the cap gains less from each point — so no one constant can
+# track it everywhere. At the bottom of the Ancient band the gap is about 0.6%.
+def _trait_gap_at(n):
+    c = B.trait_damage({"crit": n}, P)
+    return abs(c - B.trait_damage({"spec": n}, P)) / c
+
+
+check_true("analytic.trait.critIsNonLinear",
+           B.trait_damage({"crit": 61}, P) / 61 > B.trait_damage({"crit": 120}, P) / 120)
+check_true("analytic.trait.driftAt61", 0.005 < _trait_gap_at(61) < 0.007)
+check_true("analytic.trait.anchorIsTightest",
+           _trait_gap_at(110) < _trait_gap_at(61) and _trait_gap_at(110) < _trait_gap_at(120))
+# A user-set weight overrides outright — the slider still means what it says.
+check("analytic.trait.numericWeightSpec",
+      r9(B.trait_damage({"spec": 100}, B.normalize_profile({"traitWeights": {"spec": 0.025}}))), 2.5)
+check("analytic.trait.numericWeightSwift",
+      r9(B.trait_damage({"swift": 96}, B.normalize_profile({"traitWeights": {"swift": 0.025}}))), 2.4)
+# Zero scores nothing, and so does an explicit null: _alias skips both.
+check("analytic.trait.zeroWeight",
+      r9(B.trait_damage({"spec": 120}, B.normalize_profile({"traitWeights": {"spec": 0}}))), 0)
+check("analytic.trait.nullWeightScoresZero",
+      r9(B.trait_damage({"spec": 120}, B.normalize_profile({"traitWeights": {"spec": None}}))), 0)
+# An EMPTY override merges nothing and leaves the defaults standing. This is the
+# JS/Python seam: {} is truthy in JS and falsy here, so normalize_profile has to
+# reach for `is not None` rather than a plain truth test.
+check("analytic.trait.emptyOverrideKeepsDefaults",
+      r9(B.trait_damage({"spec": 120}, B.normalize_profile({"traitWeights": {}}))), 2.9094)
 check("analytic.trait.additive", r9(B.trait_damage({"crit": 120, "spec": 120}, P)),
       r9(B.trait_damage({"crit": 120}, P) + B.trait_damage({"spec": 120}, P)))
 check("analytic.trait.critCapped",
@@ -305,6 +345,155 @@ for _wr in _with["finalScore"]["cdf"]:
         _w_exp += _wr["p"] * _w_over
 check_true("analytic.traitSolve.valueGold",
            abs(_with["valueGold"] - _w_exp * _t["goldPer1Pct"]) < 1e-6)
+
+# ================= 4d. the support channel =================
+# A support scores nothing for its own damage. What it scores is what its buffs
+# add to ONE damage dealer: ap . brand . identity, each channel scaled by its own
+# uptime. The whole model is re-derived here from docs/research/support-model.md
+# so the numbers are checked against the write-up rather than against themselves.
+_S = B.normalize_profile({"role": "support"})
+
+
+def _sup_contribution(lines=None, d_ms=0, d_wp=0):
+    """`lines` are the extra buff FRACTIONS a bracelet adds; d_ms / d_wp are flat
+    main stat / weapon power it adds to the support itself."""
+    lines = lines or {}
+    ally_dmg = 38.26 / 100 + (lines.get("allyDmg") or 0)
+    ally_dmg_t = 9.26 / 100 + (lines.get("allyDmg") or 0)
+    atk_enh = 68.55 / 100 + (lines.get("allyAtkEnh") or 0)
+    brand_pow = 45.00 / 100 + (lines.get("brand") or 0)
+    spec_eff = (1016 + (lines.get("spec") or 0)) * 0.0005005722461
+    # The support's own base attack power: no flat attack term, because the buff
+    # reads the base figure and not the total.
+    sup_atk = math.sqrt(((703826 + d_ms) * 1.09) * ((241367 + d_wp) * 1.085) / 6) * 1.125
+    dps_atk = math.sqrt(260918 * 767170 / 6)
+    mults = 1 + 0.2948
+    ap_mult = ((dps_atk + sup_atk * 0.22 * (1 + atk_enh)) * mults + 3600) / (dps_atk * mults + 3600)
+    ap = 1 + 0.95 * (ap_mult - 1)
+    brand = 1 + 1.00 * (0.1 * (1 + brand_pow))
+    # Serenade, Major Chord and the T-skill all raise the dealer's ADDITIONAL
+    # damage, so they share one bracket and the dealer's own base dilutes them.
+    identity = 1 + (0.70 * (0.15 * (1 + ally_dmg) * (1 + spec_eff)) +
+                    0.70 * (0.02 * (1 + ally_dmg) * (1 + spec_eff)) +
+                    0.40 * (0.10 * (1 + ally_dmg_t))) / (1 + 0.3585)
+    return ap * brand * identity
+
+
+def _sup_gain(lines=None, d_ms=0, d_wp=0):
+    return _sup_contribution(lines, d_ms, d_wp) / _sup_contribution(None, 0, 0)
+
+
+def _fam_d(fid, tier, prof=None):
+    return B.line_damage({"cat": "special", "family": fid, "tier": tier}, "ancient", prof or _S)
+
+
+# What a naked support is already worth to one dealer. Every other number in this
+# block is a ratio against it, so pin it outright — twice: the model's own figure,
+# and the re-derivation above landing on the same one.
+check("analytic.support.contribution", r9(B.support_contribution(_S, None, 0, 0)), 1.935042758)
+check("analytic.support.contributionRederived", r9(_sup_contribution(None, 0, 0)), 1.935042758)
+# A gain is that contribution with the line over the contribution without.
+check("analytic.support.gainIsARatio", r9(B.support_gain(_S, {"allyDmg": 0.09}, 0, 0)),
+      r9(B.support_contribution(_S, {"allyDmg": 0.09}, 0, 0) / B.support_contribution(_S, None, 0, 0)))
+# The base the ally buff is a share of drops the flat ATTACK term, because the
+# buff reads the base figure rather than the total. That one subtraction is the
+# whole difference from attack_power().
+check("analytic.support.baseAtkDropsFlatAP", r9(B.support_base_atk(_S, 0, 0)), r9(B.attack_power(_S, 0, 0) - 3600))
+
+# Families 29 and 30 are the two ally-buff riders, and on a support they are the
+# point of the item: 29 scales the attack-power buff, 30 the damage buff.
+check("analytic.support.f29.high", r9(_fam_d(29, "high")), r9(_D(_sup_gain({"allyAtkEnh": 0.06}))))
+check("analytic.support.f30.high", r9(_fam_d(30, "high")), r9(_D(_sup_gain({"allyDmg": 0.09}))))
+check_true("analytic.support.f29.pays", _fam_d(29, "high") > 0)
+check_true("analytic.support.f30.pays", _fam_d(30, "high") > 0)
+# A legendary ally-DAMAGE line beats a legendary ally-AP line: 9% into the identity
+# bracket outruns 6% into a buff that is only a share of the support's own attack
+# power.
+check_true("analytic.support.f30BeatsF29", _fam_d(30, "high") > _fam_d(29, "high"))
+
+# Personal damage scores nothing on a support — crit, back attack and the
+# additional-damage pool all move only the support's own hits, which nobody counts.
+# These are the lines a DPS pays most for, so they are the ones a role mix-up would
+# show up in first.
+check("analytic.support.critRate", r9(_fam_d(31, "high")), 0)
+check("analytic.support.critPlusOnCrit", r9(_fam_d(11, "high")), 0)
+check("analytic.support.backAttack", r9(_fam_d(25, "high")), 0)
+check("analytic.support.addDamage", r9(_fam_d(24, "high")), 0)
+
+# Weapon power and main stat are NOT dead weight on a support: both raise the base
+# its ally attack-power buff is a share of. Thin channels, but real ones.
+check("analytic.support.weaponPower", r9(_fam_d(33, "high")), r9(_D(_sup_gain(None, 0, 9000))))
+check("analytic.support.mainStat",
+      r9(B.line_damage({"cat": "basic", "family": "mainStat", "value": 13888}, "ancient", _S)),
+      r9(_D(_sup_gain(None, 13888, 0))))
+check_true("analytic.support.wpUnderBlueAllyDamage", _fam_d(33, "high") < _fam_d(30, "low"))
+
+# The three channels MULTIPLY, so a line that touches only one of them prices the
+# same whatever the other two are doing: the identity bracket cancels top and
+# bottom of the ratio. Move the support's spec by 184 points and family 29 must not
+# budge — while family 30, which lives in that bracket, must.
+_sup_over = dict(B.DEFAULT_PROFILE["support"])
+_sup_over["spec"] = 1200
+_more_spec = B.normalize_profile({"role": "support", "support": _sup_over})
+check("analytic.support.apChannelIgnoresSpec", r9(_fam_d(29, "high", _more_spec)), r9(_fam_d(29, "high")))
+check_true("analytic.support.identityChannelFollowsSpec", _fam_d(30, "high", _more_spec) > _fam_d(30, "high"))
+
+# Families 16-19 carry a party DEBUFF that lands on every dealer who has it. A
+# support is scored on ONE dealer — the unit its buff channels are already in — so
+# the score must not move with allyDpsCount. Price the debuff across the party and
+# the same line gets two different party sizes at once, since the ally-buff rider
+# beside it is priced across one.
+_big_party = B.normalize_profile({"role": "support", "allyDpsCount": 7})
+check("analytic.support.partyLineIgnoresPartySize", r9(_fam_d(16, "high", _big_party)), r9(_fam_d(16, "high")))
+check_true("analytic.support.partyLinePays", _fam_d(16, "high") > 0)
+# A DPS still counts itself plus its allies, so party size moves its score.
+check_true("analytic.support.dpsStillCountsAllies",
+           B.line_damage({"cat": "special", "family": 16, "tier": "high"}, "ancient",
+                         B.normalize_profile({"allyDpsCount": 7}))
+           > B.line_damage({"cat": "special", "family": 16, "tier": "high"}, "ancient", P))
+
+# Combat traits on a support are not a matter of taste, so traitWeights do not
+# apply. Spec pays through the identity bracket and Swiftness is priced THE SAME
+# (Shizu); crit, domination, endurance and expertise pay nothing.
+check("analytic.support.traitSpec", r9(B.trait_damage({"spec": 120}, _S)), r9(_D(_sup_gain({"spec": 120}))))
+check("analytic.support.traitSwiftEqualsSpec", r9(B.trait_damage({"swift": 120}, _S)),
+      r9(B.trait_damage({"spec": 120}, _S)))
+check("analytic.support.traitCrit", r9(B.trait_damage({"crit": 120}, _S)), 0)
+check("analytic.support.traitIgnoresWeights",
+      r9(B.trait_damage({"spec": 120},
+                        B.normalize_profile({"role": "support", "traitWeights": {"spec": 0.04}}))),
+      r9(B.trait_damage({"spec": 120}, _S)))
+
+# NESTED MERGE. normalize_profile merges addDamage, traitWeights and support key by
+# key, so a caller who sets one field of one of them means "this field, everything
+# else as it was". For `support` that is not cosmetic: a partial override that
+# REPLACED the block would leave support_contribution reading a missing allyDmg and
+# every support score would raise KeyError. That was the behaviour until
+# 2026-08-14; these checks guard the repair.
+_partial = B.normalize_profile({"support": {"spec": 1200}})
+check("analytic.support.partialOverrideTakesTheField", _partial["support"]["spec"], 1200, exact=True)
+check("analytic.support.partialOverrideKeepsTheRest",
+      len(_partial["support"]), len(B.DEFAULT_PROFILE["support"]), exact=True)
+check("analytic.support.partialOverrideStaysFinite",
+      1 if math.isfinite(B.line_damage({"cat": "special", "family": 30, "tier": "high"}, "ancient",
+                                       B.normalize_profile({"role": "support", "support": {"spec": 1200}}))) else 0,
+      1, exact=True)
+
+# THE FAMILY LETTER FOLLOWS THE ROLE - see the JS twin. Every other input is kept
+# out of the letters so they label the family rather than the build; the role
+# decides which families score at all, so it has to reach them.
+_gD = B.family_grades("ancient")
+_gS = B.family_grades("ancient", "support")
+check("analytic.grades.critRateIsSForADealer", _gD["special"][11]["letter"], "S", exact=True)
+check("analytic.grades.critRateIsFForASupport", _gS["special"][11]["letter"], "F", exact=True)
+check("analytic.grades.critRateScoresNothingForASupport",
+      B.line_damage({"cat": "special", "family": 11, "tier": "high"}, "ancient",
+                    B.normalize_profile({"role": "support"})), 0, exact=True)
+check("analytic.grades.critResistIsSForBoth",
+      1 if (_gD["special"][17]["letter"] == "S" and _gS["special"][17]["letter"] == "S") else 0,
+      1, exact=True)
+check("analytic.grades.omittingRoleMeansDealer",
+      1 if B.family_grades("ancient") == B.family_grades("ancient", "dps") else 0, 1, exact=True)
 
 # ================= 4c. family letter grades =================
 for c in refs["familyGrades"]:

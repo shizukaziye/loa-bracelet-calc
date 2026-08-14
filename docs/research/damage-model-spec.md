@@ -14,7 +14,10 @@
   must compare CONTINUATION values V(·, n−1), not immediate scores.
 - Interactive flow like cutting an astrogem: player rolls in game, enters the result,
   tool answers keep or replace, what to lock next, and the bracelet's current value.
-- **DPS only for now** (support scoring stays a stub).
+- **Both roles score** as of 2026-08-14. The support model is the house one, ported from
+  `loa-gpd/model/support.js` — see the Support section below and
+  `docs/research/support-model.md`. It replaced a stub whose flat per-percent constants ran
+  about double the truth.
 - Fresh bracelet = 4 rolls + 3 ticket rolls (default 7 attempts, user-adjustable).
 
 Every effect tier's damage % must be computed from character inputs, not hardcoded.
@@ -65,6 +68,45 @@ only source). Shizu's model (2026-08-11):
   party-wide flat damage +A% at **60% shield uptime** (default, adjustable). Self and
   both allies each gain 0.6·A%; score = selfGain% + 2 × allyGain%. Its +B% AP-buff
   rider is 0 for DPS like the others.
+
+## Support
+
+Full write-up, every constant and the cross-check against loa-gpd: `support-model.md`.
+The rulings:
+
+- A support is scored by what its buffs add to **one** damage dealer, above a support
+  wearing nothing. Its own damage is never counted.
+  `Q = 100·ln(ap · brand · identity)`, three channels each scaled by its own uptime.
+  - `ap` — the support hands each ally `0.22 × (1 + allyAtkEnh)` of its own **base** attack
+    power, which then rides the dealer's own attack-power percentage. The only channel the
+    support's own gear reaches, so weapon-power and main-stat lines are not dead weight.
+  - `brand` — 10% damage scaled by brand power. No T4 line feeds it, so it cancels out of
+    every bracelet score today.
+  - `identity` — Serenade, Major Chord and the T-skill all raise the dealer's **additional
+    damage**, so they share one bracket and are then divided by `(1 + baseAdd)`: the dealer's
+    own additional damage dilutes the buff.
+- The support's **flat attack power is deliberately excluded** from the buff base (the house
+  model reads the base figure, not the total). Flat **weapon** power is counted — it sits
+  inside the square root.
+- **The party debuff halves of families 16-19 are NOT in the support model.** They land on
+  every dealer whoever applies them, so they run through the same `allyCritFactor` /
+  `defShredGain` / shield-uptime path this spec already fixes for DPS. One code path, so the
+  two roles cannot disagree about what a shred line does. The ally AP rider is the only half
+  that differs by role — 0 for a DPS, real for a support — which is why those four families
+  belong on the support.
+- **Specialization** is scored by running the bracelet's trait points through the identity
+  bracket (`spec × classCoeff`), not by the class weights. **Swiftness is priced the same**
+  (Shizu): the model has no channel for it, but in game it shortens the buff cycle, which
+  would lift the uptimes this model takes as fixed inputs. Crit, Domination, Endurance and
+  Expertise score 0.
+- Everything that only moves the support's own damage scores **0**: crit, additional damage,
+  outgoing, positional, stagger, demon. A support bracelet carrying three fat DPS lines is a
+  blank bracelet.
+- **Open:** `partyMult()` counts `allyDpsCount` (default 2) dealers on the debuff halves
+  while the buff channels count one, so the two halves of families 16-19 are on different
+  scales — about 1.7× too much weight on the shred families. loa-gpd counts one dealer
+  throughout and multiplies by party size on the gold axis. Needs a ruling; see
+  `support-model.md` §8.
 
 ## Other buckets
 

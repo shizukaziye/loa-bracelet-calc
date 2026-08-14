@@ -75,6 +75,64 @@
     ["F+", 20], ["F", 10], ["F-", -Infinity]
   ];
 
+  /**
+   * The SUPPORT ladder, cut so that a letter means the same RARITY it means on
+   * the DPS one — a support A- is as rare as a damage dealer's A-.
+   *
+   * The two axes already share a score shape and both normalise to their own
+   * floor and anchor, but their distributions have different SHAPES. A support's
+   * value is packed into six families where a dealer's is spread over thirty, so
+   * the same cut lands at a different rarity on each and a shared ladder would
+   * make every support rank a quiet lie. The astrogem calculator hit this first
+   * and answered it the same way: match the rarities, not the numbers.
+   *
+   * Produced by tools/rank-match.mjs, which is exact rather than sampled — the
+   * model's own DP returns the whole distribution of finished line scores after
+   * seven attempts of optimal keep-or-replace, and that is convolved with the two
+   * combat traits drawn from Stove's weighted bands.
+   *
+   * ROUNDED, on Shizu's call (2026-08-14). The exact rarity-matched cuts are
+   * arbitrary decimals — 98.8, 83.2, 60.5 — so these are the nearest ladder built
+   * from round numbers with a constant gap inside each stretch: a 10-point step
+   * below S+, then 7.5 down the letter grades to B, then a flat 5 all the way to
+   * the bottom.
+   *
+   * The two ends are chosen rather than fitted, and both mean something:
+   *   S+ = 100  you reached the anchor, exactly as on the DPS ladder
+   *   F  = 0    the worst bracelet the game can hand you — both combat traits at
+   *             the bottom of the band and three lines worth nothing
+   *
+   * The rounding costs a mean rarity error of ×1.11, and every band holds real
+   * occupancy rather than sitting empty for the look of the thing. Reusing the DPS
+   * numbers outright would cost ×4.26 with B+ landing 8.5× too rare, which is why
+   * this is not simply the same ladder twice.
+   *
+   * Rerun tools/rank-match.mjs after any change that moves a line's damage, then
+   * tools/support-ladder-round.mjs to re-round against the new exact cuts.
+   *
+   * EVERY band is matched, S+ included: on the corrected distribution a fresh
+   * Ancient bracelet reaches 115 on the DPS axis and 118 on the support one, so
+   * there is real mass above 100 and no band needs guessing at.
+   *
+   * The first version of this table was WRONG, and the way it was wrong is worth
+   * recording. tools/rank-match.mjs called Bracelet.solve() with invented key
+   * names — `lines` and `traits` rather than `fixedLines`, `grantedLines`,
+   * `traitValues` and `slots`. Every one fell through to a default, so it solved
+   * TWO granted slots instead of three with the combat-trait category still live
+   * in the draw pool, which put a 35% chance of a dead line on every slot of
+   * every roll. The tell was that the DP's optimal play scored BELOW a crude
+   * threshold heuristic, which an optimal solver cannot do; tools/roll-sim.mjs
+   * exists to catch exactly that.
+   */
+  var SUPPORT_LADDER = [
+    ["S+", 100], ["S", 90], ["S-", 82.5],
+    ["A+", 75], ["A", 67.5], ["A-", 60],
+    ["B+", 52.5], ["B", 45], ["B-", 40],
+    ["C+", 35], ["C", 30], ["C-", 25],
+    ["D+", 20], ["D", 15], ["D-", 10],
+    ["F+", 5], ["F", 0], ["F-", -Infinity]
+  ];
+
   // ---- astrogem's rank palette, ported verbatim from model/astrogem.js -------
   //
   // Grade-tier colours (the owner's percentile palette): F/D grey, C green,
@@ -158,30 +216,43 @@
     return { bg: shade(base.bg, mod === "+" ? RANK_TILT : -RANK_TILT), fg: base.fg };
   }
 
-  var BANDS = LADDER.map(function (e, i) {
-    var c = colorOf(e[0]);
-    return {
-      key: e[0],
-      min: e[1],            // the percentage at which this band opens (-Infinity for F-)
-      bg: c.bg,
-      fg: c.fg,
-      hue: c.bg,            // the fill to use where there is no text on top (dots, bars)
-      i: i,                 // 0 = S+, 17 = F-
-      top: i === 0,
-      letter: e[0].charAt(0)
-    };
-  });
+  function buildBands(ladder) {
+    return ladder.map(function (e, i) {
+      var c = colorOf(e[0]);
+      return {
+        key: e[0],
+        min: e[1],          // the percentage at which this band opens (-Infinity for F-)
+        bg: c.bg,
+        fg: c.fg,
+        hue: c.bg,          // the fill to use where there is no text on top (dots, bars)
+        i: i,               // 0 = S+, 17 = F-
+        top: i === 0,
+        letter: e[0].charAt(0)
+      };
+    });
+  }
+
+  var BANDS = buildBands(LADDER);
+  var SUPPORT_BANDS = buildBands(SUPPORT_LADDER);
+
+  /** The ladder a role reads. Same colours and same letters, different cuts. */
+  function bandsFor(role) { return role === "support" ? SUPPORT_BANDS : BANDS; }
 
   var BY_KEY = {};
   for (var bi = 0; bi < BANDS.length; bi++) BY_KEY[BANDS[bi].key] = BANDS[bi];
 
   var BOTTOM = BANDS[BANDS.length - 1];        // F- — where a worthless line is pinned
 
-  /** of(pct) -> the band a percentage falls in. Not a number -> the bottom band. */
-  function of(pct) {
+  /**
+   * of(pct, role) -> the band a percentage falls in. Not a number -> the bottom
+   * band. `role` is optional and defaults to the damage dealer's ladder, so every
+   * existing caller keeps its old answer.
+   */
+  function of(pct, role) {
     if (typeof pct !== "number" || !isFinite(pct)) return BOTTOM;
-    for (var i = 0; i < BANDS.length; i++) if (pct >= BANDS[i].min) return BANDS[i];
-    return BOTTOM;
+    var b = bandsFor(role);
+    for (var i = 0; i < b.length; i++) if (pct >= b[i].min) return b[i];
+    return b[b.length - 1];
   }
 
   // ------------------------------------------------------------------
@@ -195,7 +266,17 @@
   // A Legendary roll or a 120 trait then pushes the score past 100, which is the
   // point — S+ should mean "better than a very good bracelet", not "perfect".
   var TRAIT_ANCHOR = { relic: 92, ancient: 110 };
-  var TRAIT_FLOOR = 40;      // below the lowest real roll on either grade, on purpose
+  // The LOWEST a combat trait rolls, per grade — Stove's own band ends. Score 0
+  // therefore means the worst bracelet the game can actually hand you: both
+  // traits at the bottom of the band and three lines worth nothing.
+  //
+  // It used to be a flat 40 on both grades, deliberately under the real minimum.
+  // That put score 0 on a bracelet that cannot exist, and it hurt Ancient most:
+  // an Ancient trait bottoms out at 61, not 40, so twenty-one points a line of
+  // guaranteed value were being counted as earned rather than given (Shizu,
+  // 2026-08-14). Raising the floor to the real band end lifts every Ancient
+  // score's zero point and compresses the scale onto what a player can change.
+  var TRAIT_FLOOR = { relic: 41, ancient: 61 };
 
   var canonCache = {};       // grade -> anchors on the canonical default profile
 
@@ -237,10 +318,23 @@
     }
     byFam.sort(function (a, b) { return b - a; });
     var cap = TRAIT_ANCHOR[grade] || TRAIT_ANCHOR.ancient;
+    var bottom = TRAIT_FLOOR[grade] || TRAIT_FLOOR.ancient;
+    // THE PAIR THE ROLE ACTUALLY RUNS. A damage dealer's yardstick bracelet
+    // carries Crit and Specialization; a support's carries Specialization and
+    // Swiftness, because crit does nothing for a support and scores zero. Using
+    // the dealer's pair on both put HALF the support's trait anchor at zero, so
+    // its floor and its ceiling were each a whole trait line short.
+    var p = profile || canonProfile();
+    var pair = p.role === "support" ? ["spec", "swift"] : ["crit", "spec"];
+    function traitPair(v) {
+      var t = {};
+      t[pair[0]] = v; t[pair[1]] = v;
+      return B.traitDamage(t, profile);
+    }
     return {
       best: d.length ? d[0] : 0,
-      perfect: byFam[0] + byFam[1] + byFam[2] + B.traitDamage({ crit: cap, spec: cap }, profile),
-      floor: B.traitDamage({ crit: TRAIT_FLOOR, spec: TRAIT_FLOOR }, profile)
+      perfect: byFam[0] + byFam[1] + byFam[2] + traitPair(cap),
+      floor: traitPair(bottom)
     };
   }
 
@@ -280,7 +374,7 @@
     // NOT clamped at 100: the anchor is beatable, and S+ is exactly "over it".
     return {
       score: s,
-      band: of(s),
+      band: of(s, p.role),
       // The rainbow's one gate. A flat 100 means three of the best distinct
       // families at their best roll with both traits capped — not "very good".
       // Named isPerfect, not perfect: `perfect` below is the ANCHOR, and one
@@ -298,6 +392,8 @@
     BY_KEY: BY_KEY,
     BOTTOM: BOTTOM,
     RAINBOW: RAINBOW,
+    SUPPORT_BANDS: SUPPORT_BANDS,
+    bandsFor: bandsFor,
     TRAIT_ANCHOR: TRAIT_ANCHOR,
     TRAIT_FLOOR: TRAIT_FLOOR,
     of: of,

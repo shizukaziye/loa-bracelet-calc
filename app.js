@@ -611,13 +611,24 @@
   var workerCtxKey = null;
   var busy = 0;
 
+  /**
+   * The solve cache's key. EVERY field the model reads has to be in here, or a
+   * setting the user changed serves a stale solve — role, the whole support
+   * block and supportHasEffects were all missing until 2026-08-14, so flipping
+   * to Support left the hero cards showing the damage dealer's answer.
+   *
+   * flatWP joins flatAP for the same reason: a weapon ark-grid core moves the
+   * square-root term and every weapon-power line with it.
+   */
   function profileSig(profile) {
     return JSON.stringify([
-      profile.mainStatRaw, profile.weaponPowerRaw, profile.msPct, profile.wpPct, profile.baseApPct, profile.flatAP,
+      profile.role, profile.support,
+      profile.mainStatRaw, profile.weaponPowerRaw, profile.msPct, profile.wpPct, profile.baseApPct,
+      profile.flatAP, profile.flatWP,
       profile.skills, profile.master, profile.addDamage, profile.backAttackShare, profile.frontAttackShare,
       profile.nonDirectionalShare, profile.staggeredShare, profile.demonShare, profile.demonBase,
-      profile.shieldUptime, profile.allyDpsCount, profile.enemyBaseDR, profile.cooldownPenaltyWeight,
-      profile.traitWeights
+      profile.shieldUptime, profile.allyDpsCount, profile.supportHasEffects, profile.enemyBaseDR,
+      profile.cooldownPenaltyWeight, profile.traitWeights
     ]);
   }
 
@@ -1354,46 +1365,49 @@
   }
 
   /**
-   * Spread `total` over the ACTIVE traits, keeping whatever ratio they are in.
-   * Equal values split evenly, which is the ordinary case; a player who has typed
-   * 120 crit and 90 spec keeps that shape as the total moves.
+   * The trait pair the slider is pricing: EVERY ACTIVE LINE AT THE SAME VALUE.
    *
-   * Then CLAMP each line to the grade's own band and push what will not fit onto
-   * the lines that still have room. A plain ratio split does not respect the cap
-   * — 116/95 scaled to 240 asks for Crit 132 on a band that stops at 120 — and a
-   * bracelet the game cannot produce must not be priced as if it could.
+   * The slider used to hold a total and spread it over the lines in whatever
+   * ratio they were already in, so it could price 120/60 as readily as 90/90.
+   * It no longer can, because a lopsided pair is never what you want to buy
+   * (Shizu, 2026-08-14). The gold-per-damage work fitted the auction house's own
+   * listings and found that at a FIXED TOTAL, lopsided costs more: 120/80 asks
+   * 25,118 where 100/100 asks 18,291. The balanced pair is the cheapest way to
+   * buy any given total, so an even pair is the only one worth pricing.
+   *
+   * The value is still clamped to the grade's band — a bracelet the game cannot
+   * produce must not be priced as if it could.
    */
   function traitsForTotal(total) {
-    var out = { crit: 0, spec: 0, swift: 0 }, keys = [], sum = 0, i, k, v, cur = {};
+    var out = { crit: 0, spec: 0, swift: 0 }, keys = [], i, k;
     for (i = 0; i < TRAIT_KEYS.length; i++) {
       k = TRAIT_KEYS[i];
-      if (!S.traits[k] || !S.traits[k].on) continue;
-      v = num(S.traits[k].v, 0);
-      keys.push(k); cur[k] = v; sum += v;
+      if (S.traits[k] && S.traits[k].on) keys.push(k);
     }
     if (!keys.length) return out;
-    var band = traitBand(), lo = band[0], hi = band[1], pass, got, room, left, r;
-    for (i = 0; i < keys.length; i++) {
-      k = keys[i];
-      out[k] = sum > 0 ? total * (cur[k] / sum) : total / keys.length;
-    }
-    // A handful of passes is plenty: the slider's own range is lo*n .. hi*n, so
-    // every reachable total has a legal split and this converges onto it.
-    for (pass = 0; pass < 5; pass++) {
-      got = 0;
-      for (i = 0; i < keys.length; i++) { k = keys[i]; out[k] = clamp(out[k], lo, hi); got += out[k]; }
-      left = total - got;
-      if (Math.abs(left) < 1e-9) break;
-      room = 0;
-      for (i = 0; i < keys.length; i++) { k = keys[i]; room += left > 0 ? (hi - out[k]) : (out[k] - lo); }
-      if (room <= 1e-9) break;
-      for (i = 0; i < keys.length; i++) {
-        k = keys[i];
-        r = left > 0 ? (hi - out[k]) : (out[k] - lo);
-        out[k] += left * (r / room);
-      }
+    var band = traitBand();
+    var each = clamp(total / keys.length, band[0], band[1]);
+    for (i = 0; i < keys.length; i++) out[keys[i]] = each;
+    return out;
+  }
+
+  /** The bracelet's OWN traits, lopsided or not — what the card shows before you touch the slider. */
+  function traitsAsWorn() {
+    var out = { crit: 0, spec: 0, swift: 0 }, i, k;
+    for (i = 0; i < TRAIT_KEYS.length; i++) {
+      k = TRAIT_KEYS[i];
+      if (S.traits[k] && S.traits[k].on) out[k] = num(S.traits[k].v, 0);
     }
     return out;
+  }
+
+  /**
+   * What to price. `worn` asks for the bracelet's own pair, lopsided or not —
+   * true only for the headline figure while the slider has not been touched.
+   * Every other caller passes a total and gets an even pair.
+   */
+  function traitsPriced(total, worn) {
+    return worn ? traitsAsWorn() : traitsForTotal(total);
   }
 
   /**
@@ -1409,20 +1423,23 @@
    * headline figures ran a difference of means. Both now go through worthOf,
    * which is where that arithmetic and its reasoning live.
    */
-  function unrolledWorthAt(total) {
+  function unrolledWorthAt(total, worn) {
     if (!freshSolve) return null;
     var prof = buildProfile();
-    var shift = B.traitDamage(traitsForTotal(total), prof) - num(freshSolve.traitDamage, 0);
+    var shift = B.traitDamage(traitsPriced(total, worn), prof) - num(freshSolve.traitDamage, 0);
     var w = worthOf(freshSolve, shift);          // the same truncated expectation every worth uses
     return w ? w.gold : null;
   }
 
-  /** Three rungs down from the cap, so the shape of the curve reads at a glance. */
+  /**
+   * Three even pairs down from the cap, twenty points a line apart, so the shape
+   * of the curve reads at a glance. Returned as PER-LINE values: 120, 100, 80.
+   */
   function traitRefPoints() {
-    var r = traitTotalRange(), out = [], v, i;
+    var band = traitBand(), out = [], v, i;
     for (i = 0; i < 3; i++) {
-      v = r.hi - i * 40;
-      if (v < r.lo) break;
+      v = band[1] - i * 20;
+      if (v < band[0]) break;
       out.push(v);
     }
     return out;
@@ -1430,11 +1447,11 @@
 
   function unrolledCardHtml() {
     var r = traitTotalRange(), t = traitTotalValue();
-    var w = unrolledWorthAt(t);
+    var w = unrolledWorthAt(t, traitTotalUI === null);
     var refs = traitRefPoints(), rh = "", i;
     for (i = 0; i < refs.length; i++) {
-      var rw = unrolledWorthAt(refs[i]);
-      rh += (i ? ' <span class="sep">·</span> ' : "") + '<b>' + refs[i] + "</b> " +
+      var rw = unrolledWorthAt(refs[i] * r.n);
+      rh += (i ? ' <span class="sep">·</span> ' : "") + '<b>' + traitPairLabel(refs[i]) + "</b> " +
         (rw == null ? "—" : gold(rw));
     }
     var band = traitBand();
@@ -1444,14 +1461,21 @@
       '<div class="v gold" id="bc-tt-val">' + (w == null ? "—" : gold(w)) + "</div>" +
       '<div class="s" id="bc-tt-say">' + unrolledSayHtml(t) + "</div>" +
       '<div class="bc-ttrow">' +
-      '<label for="bc-tt" data-gloss="The two fixed combat traits, added together. ' +
+      '<label for="bc-tt" data-gloss="The fixed combat traits, both at the same value. ' +
       (S.grade === "relic" ? "Relic" : "Ancient") + " lines run " + band[0] + "&ndash;" + band[1] +
-      " points each, so " + r.n + ' of them span ' + r.lo + "&ndash;" + r.hi +
-      '.">Combat traits, total</label>' +
-      '<input id="bc-tt" type="range" min="' + r.lo + '" max="' + r.hi + '" step="1" value="' + t + '">' +
-      '<span class="chip" id="bc-tt-chip">' + t + "</span></div>" +
-      '<div class="bc-ttrefs" id="bc-tt-refs" data-gloss="The same price at three lower trait totals, so the shape of the curve reads without dragging.">' + rh + "</div>" +
+      ' points each. Only even pairs are priced: at the same total a lopsided pair costs MORE on the auction house — 120/80 asks about 25,100 gold where 100/100 asks 18,300 — so the even pair is always the cheaper way to buy a given total.">Combat traits, each</label>' +
+      '<input id="bc-tt" type="range" min="' + band[0] + '" max="' + band[1] + '" step="1" value="' +
+      Math.round(t / r.n) + '">' +
+      '<span class="chip" id="bc-tt-chip">' + traitPairLabel(Math.round(t / r.n)) + "</span></div>" +
+      '<div class="bc-ttrefs" id="bc-tt-refs" data-gloss="The same price at three lower pairs, so the shape of the curve reads without dragging.">' + rh + "</div>" +
       "</div>";
+  }
+
+  /** "90 / 90" for the active line count, or just "90" if only one is on. */
+  function traitPairLabel(each) {
+    var r = traitTotalRange(), out = [], i;
+    for (i = 0; i < r.n; i++) out.push(each);
+    return out.join(" / ");
   }
 
   /**
@@ -1461,7 +1485,7 @@
    * is following the bracelet rather than the slider, that provenance.
    */
   function unrolledSayHtml(t) {
-    var tv = traitsForTotal(t), parts = [], i, k;
+    var tv = traitsPriced(t, traitTotalUI === null), parts = [], i, k;
     for (i = 0; i < TRAIT_KEYS.length; i++) {
       k = TRAIT_KEYS[i];
       if (tv[k] > 0) parts.push(TRAIT_LABELS[k] + " " + Math.round(tv[k]));
@@ -1472,8 +1496,8 @@
 
   /** Slider moved: repaint the three numbers, never the card under the cursor. */
   function paintTraitTotal() {
-    var t = traitTotalValue(), w = unrolledWorthAt(t);
-    var c = $("bc-tt-chip"); if (c) c.textContent = t;
+    var t = traitTotalValue(), w = unrolledWorthAt(t, traitTotalUI === null);
+    var c = $("bc-tt-chip"); if (c) c.textContent = traitPairLabel(Math.round(t / traitTotalRange().n));
     var v = $("bc-tt-val"); if (v) v.textContent = (w == null ? "—" : gold(w));
     var s = $("bc-tt-say"); if (s) s.innerHTML = unrolledSayHtml(t);
   }
@@ -1889,7 +1913,13 @@
       // The unrolled card's trait-total slider. It changes NOTHING in the state
       // and needs no solve — it reprices the distribution already in hand — so
       // it repaints three numbers and stops there.
-      if (id === "bc-tt") { traitTotalUI = num(e.target.value, traitTotalNow()); paintTraitTotal(); return; }
+      if (id === "bc-tt") {
+        // The control is PER LINE and the state is the total, so the two lines
+        // can never drift apart: an even pair is the only thing it can express.
+        traitTotalUI = num(e.target.value, 0) * traitTotalRange().n;
+        paintTraitTotal();
+        return;
+      }
       if ((tr = e.target.getAttribute && e.target.getAttribute("data-tr"))) {
         // Clamp what the MODEL sees to the official band, but leave the box
         // alone while it is being typed in.

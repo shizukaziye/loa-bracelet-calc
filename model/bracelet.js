@@ -59,10 +59,14 @@
  *   Vitality, combat traits and the defensive/utility families score 0 damage;
  *                  their in-game value is still reported (traitValue / value).
  *
- * Support role: personal-damage components score 0; the party lines and the
- * ally-buff riders score instead, through simple per-point conversions
- * (allyApBuffDamagePerPct etc.) — a deliberately crude first pass, flagged for
- * calibration.
+ * Support role: personal-damage components score 0. What pays instead is the
+ * ally attack-power and ally damage riders, through the house support model
+ * (ap / brand / identity — see supportContribution and
+ * docs/research/support-model.md), plus the party DEBUFF halves of families
+ * 16-19, which go through the same crit and defence functions the DPS side uses
+ * because they land on every dealer whoever carries them.
+ *
+ * A support is scored on ONE damage dealer. Party size belongs on the gold axis.
  *
  * ============================ THE SOLVER ==============================
  *
@@ -118,7 +122,16 @@
   // 0.2.0: inferGrade() now reads the line count and the trait/basic bands, and no
   // longer defaults to relic when the payload carries no special-value evidence.
   // That moved two of the fifty-nine seeded characters by about 1.2pp.
-  var VERSION = "0.2.0";
+  // 0.3.0: three changes, all of which move a stored score.
+  //   - Spec and Swiftness are priced at 0.024245 a point, crit's own worth at
+  //     110 on the default profile, so the three combat traits agree on shipped
+  //     settings. They were a flat 0.025.
+  //   - flatAP is 3,600, not 2,700: an ark-grid core's point thresholds ADD, so
+  //     the Ancient attack core pays 900 at 10 points and another 2,700 at 17.
+  //   - The support role is real. It was a stub with two flat per-percent
+  //     constants; it is now the house ap / brand / identity model.
+  // Every one of the fifty-nine seeded characters moved, by up to 0.22pp.
+  var VERSION = "0.3.0";
   var MODEL_SIG = "bracelet-v1";
 
   // ------------------------------------------------------------------
@@ -128,11 +141,18 @@
   // Additional-damage from a 60-level astrogem grid: 60 × 0.080667%/level, the
   // loseii astrogem coefficient (bebkok 0.08086, Arsonistic 0.08077 — same thing).
   var ADD_DMG_ASTROGEM_LV60 = 0.0484;
-  // T4 combat-trait conversion for Crit: 35 percentage points of crit rate per
-  // 699 trait points (Shizu, 2026-08-11). Matches Arsonistic's sheet (0.25/699). Earlier drafts used 35/699 in error; corrected
-  // 0.25/699; this is the number that ships.
+  // T4 combat-trait conversion for Crit: 25 percentage points of crit rate per
+  // 699 trait points (Shizu, 2026-08-11), so 100 points is 3.577pp. Matches
+  // Arsonistic's sheet. Earlier drafts used 35/699 in error.
   var TRAIT_CRIT_PP_PER_POINT = 25 / 699;
-  // Fixed order, so JS and Python sum the same floats in the same sequence.
+  // The three combat traits that pay. Fixed order, so JS and Python sum the same
+  // floats in the same sequence.
+  //
+  // DOMINATION, ENDURANCE AND EXPERTISE ARE WORTH ZERO (Shizu, 2026-08-14) — a
+  // ruling, not an omission. All six roll on the same 35% category and the same
+  // weighted band, so the other three appear on the Tier List at 0 rather than
+  // being hidden; that is what tells a reader the line they rolled is dead. Do
+  // not add them here.
   var TRAIT_KEYS = ["crit", "spec", "swift"];
   // Master node. Arsonistic's sheet reads it as +7% crit rate AND +8.5%
   // additional damage; Shizu's ruling (2026-08-11) is +7% additional damage
@@ -144,7 +164,7 @@
   // bit; only the UI rounds for display.
 
   var DEFAULT_PROFILE = {
-    role: "dps",                    // "dps" | "support" (support is a stub, DPS-only tool)
+    role: "dps",                    // "dps" | "support"
 
     // ---- attack power baseline (see deriveBaseline) ----
     // Raw = before the percentage buckets; the bracelet's flat lines are added
@@ -155,7 +175,10 @@
     msPct: 0.09,                    // 8% skins + 1% stronghold ranch
     wpPct: 0.085,                   // 6% earring WP lines + 2.5% karma
     baseApPct: 0.125,               // 11 × lv9 damage gems (1.0% ea) + 9/7 stone (1.5%)
-    flatAP: 2700,                   // ark-grid cores
+    // Ark-grid ATTACK core, Ancient, at 17+ points. The core's thresholds ADD:
+    // 900 at 10 points plus 2,700 at 17. A Relic one totals 2,700 and a weapon
+    // core pays flatWP instead — see data/gear-data.js.
+    flatAP: 3600,
     // Flat WEAPON power: an ark-grid WEAPON core instead of an attack one, plus
     // any "Weapon Power +195/480/960" accessory roll. Default 0 — the reference
     // build runs attack cores and no flat rolls — so it changes no score until
@@ -170,9 +193,20 @@
 
     // How much the class values the Spec and Swiftness combat traits, in SCORE
     // POINTS per 100 trait points: 0.025 = a 100-point line is worth 2.5 points
-    // of damage. Crit has NO weight — it converts exactly (see traitDamage).
-    // Key "swift" is the Swiftness trait (DATA calls it "swiftness").
-    traitWeights: { spec: 0.025, swift: 0.025 },
+    // of damage. Key "swift" is the Swiftness trait (DATA calls it "swiftness").
+    //
+    // The DEFAULT is crit's own worth, so on the shipped settings all three
+    // combat traits are priced alike (Shizu, 2026-08-14). Crit converts exactly —
+    // 100 points is 25/6.99 = 3.577pp of crit rate through the profile's own crit
+    // numbers — and on this profile a 110-point crit line is 2.6670 points of
+    // damage, i.e. 0.024245 a point. That number is what ships.
+    //
+    // It is a CONSTANT, not a formula. Crit is faintly non-linear (0.024389 a
+    // point at 61, 0.024216 at 120), so no single weight tracks it everywhere;
+    // this one is anchored at 110, the grade's own yardstick in subrank.js. The
+    // slider stays, because a class that genuinely values Spec above a crit point
+    // has to be able to say so.
+    traitWeights: { spec: 0.024245, swift: 0.024245 },
 
     // Additional-damage pool: additive inside itself, multiplies as (1 + pool).
     addDamage: {
@@ -226,9 +260,54 @@
     // specified; this constant stays per one percent.
     atkMoveSpeedDamagePerPct: 0.1,
 
-    // Support-role conversions — STUB, not calibrated. The tool ships DPS-only.
-    allyApBuffDamagePerPct: 0.45,
-    allyDamageBuffDamagePerPct: 0.30,
+    // ---- SUPPORT ROLE ----------------------------------------------------
+    // A support is scored by what its buffs add to ONE damage dealer, above a
+    // support wearing nothing. Three channels, each scaled by its own uptime:
+    //
+    //   ap        the ally attack-power buff. The support hands over
+    //             0.22 × (1 + allyAtkEnh) of its own base attack power, so this
+    //             is the only channel its own gear reaches.
+    //   brand     10% damage, scaled by brand power.
+    //   identity  Serenade, Major Chord and the T-skill all raise the dealer's
+    //             ADDITIONAL damage, so they share one bracket and are then
+    //             diluted by the dealer's own base additional.
+    //
+    //   Q = 100 · ln(ap · brand · identity)
+    //
+    // This is the house model, taken from the accessory calculator by way of
+    // loa-gpd/model/support.js — see docs/research/support-model.md. It replaces
+    // the flat per-percent constants this profile used to carry, which the
+    // loa-gpd write-up showed were roughly double the truth.
+    //
+    // The party DEBUFF halves of families 16-19 are NOT in here. They land on
+    // every dealer whoever carries them, so they go through the same crit and
+    // defence functions the DPS side uses and multiply into the same product.
+    support: {
+      // The damage dealer being buffed.
+      dpsWP: 260918,          // 241,367 weapon × (1 + 6% earrings + 2.1% karma)
+      dpsMS: 767170,          // 703,826 raw × (1 + 8% skins + 1% stronghold)
+      dpsAtkPct: 0.2948,      // accessories, attack core, node 60, gems, stone, Adrenaline
+      dpsFlatAtk: 3600,       // ancient attack core
+      baseAdd: 0.3585,        // the dealer's own additional damage, which dilutes identity
+
+      // The support's own buff bases, in percent, at level-9 gems.
+      brandPower: 45.00,
+      allyAtkEnh: 68.55,
+      allyDmg: 38.26,         // identity bracket: ark grid + gems
+      allyDmgT: 9.26,         // the T-skill's own bracket
+      spec: 1016,             // spec BEFORE the bracelet's own combat-trait line
+      classCoeff: 0.0005005722461,   // Bard: spec -> identity-buff efficiency
+
+      // Uptimes, in percent.
+      upBrand: 100,
+      upAp: 95,
+      upSeren: 70,
+      upChord: 70,
+      upTskill: 40,
+
+      // Share of its own base attack power a support hands to each ally.
+      apBuffShare: 0.22
+    },
     partyShieldHealValuePerPct: 0.10
   };
 
@@ -250,7 +329,12 @@
     if (!p) return out;
     for (var k in p) {
       if (!Object.prototype.hasOwnProperty.call(p, k)) continue;
-      if ((k === "addDamage" || k === "traitWeights") && p[k]) {
+      // NESTED BLOCKS MERGE, they do not replace. A caller that sets one field of
+      // one of these means "this field, everything else as it was" — and for
+      // `support` the difference is fatal rather than cosmetic: replacing the
+      // whole block with {spec: 1200} leaves supportContribution reading
+      // undefined for allyDmg and every support score comes out NaN.
+      if ((k === "addDamage" || k === "traitWeights" || k === "support") && p[k]) {
         for (var a in p[k]) if (Object.prototype.hasOwnProperty.call(p[k], a)) out[k][a] = p[k][a];
       } else if (p[k] !== undefined && p[k] !== null) {
         out[k] = deepCopy(p[k]);
@@ -384,9 +468,74 @@
     // nothing at all — not a smaller effect, nothing. supportHasEffects=true
     // says the support already brings them, so the line is worth zero.
     if (profile.supportHasEffects) return 1;
-    var n = profile.allyDpsCount;
-    if (profile.role === "support") return 1 + n * allyGain;   // a support's own damage is ignored
-    return 1 + selfGain + n * allyGain;
+    // A SUPPORT is scored on ONE dealer, because that is the unit its own buff
+    // channels are in: supportGain() measures what a single dealer gains. This
+    // used to multiply by allyDpsCount, so families 16-19 had their party-debuff
+    // half counted across two dealers while the ally attack-power rider on the
+    // SAME LINE was counted across one — the line was priced on two different
+    // party sizes at once, and it inflated those four families by about 1.65×
+    // against the clean buff lines. Party size belongs on the gold axis, where
+    // a support's 1% lands on every dealer; it does not belong here.
+    if (profile.role === "support") return 1 + allyGain;
+    return 1 + selfGain + profile.allyDpsCount * allyGain;
+  }
+
+  // ------------------------------------------------------------------
+  // The support channel
+  // ------------------------------------------------------------------
+
+  /**
+   * A support's own base attack power — the thing its ally attack-power buff is
+   * a share of. Note what is NOT here: flat attack power. The house model puts
+   * the support's percentage bucket on the square-root term and stops, because
+   * the buff reads the base figure rather than the total. Flat WEAPON power IS
+   * counted, because it sits inside the square root and so moves the base.
+   */
+  function supportBaseAtk(profile, dMsRaw, dWpRaw) {
+    var ms = (profile.mainStatRaw + (dMsRaw || 0)) * (1 + profile.msPct);
+    var wp = (profile.weaponPowerRaw + (profile.flatWP || 0) + (dWpRaw || 0)) * (1 + profile.wpPct);
+    return Math.sqrt(ms * wp / 6) * (1 + profile.baseApPct);
+  }
+
+  /**
+   * What a support's buffs multiply ONE damage dealer's damage by, above a
+   * dealer standing alone. `lines` carries the extra buff percentages a bracelet
+   * adds, as FRACTIONS: allyAtkEnh, allyDmg, brand. `dMsRaw` / `dWpRaw` are flat
+   * main stat / weapon power the bracelet adds to the support itself.
+   */
+  function supportContribution(profile, lines, dMsRaw, dWpRaw) {
+    var P = profile.support;
+    lines = lines || {};
+    var allyDmg = P.allyDmg / 100 + (lines.allyDmg || 0);
+    var allyDmgT = P.allyDmgT / 100 + (lines.allyDmg || 0);
+    var atkEnh = P.allyAtkEnh / 100 + (lines.allyAtkEnh || 0);
+    var brandPower = P.brandPower / 100 + (lines.brand || 0);
+    // The bracelet's own Specialization line lands here, as extra spec.
+    var specEff = (P.spec + (lines.spec || 0)) * P.classCoeff;
+
+    var supAtk = supportBaseAtk(profile, dMsRaw, dWpRaw);
+    var dpsAtk = Math.sqrt(P.dpsWP * P.dpsMS / 6);
+    var mults = 1 + P.dpsAtkPct;
+    var apMult =
+      ((dpsAtk + supAtk * P.apBuffShare * (1 + atkEnh)) * mults + P.dpsFlatAtk) /
+      (dpsAtk * mults + P.dpsFlatAtk);
+
+    var ap = 1 + (P.upAp / 100) * (apMult - 1);
+    var brand = 1 + (P.upBrand / 100) * (0.1 * (1 + brandPower));
+    var seren = 0.15 * (1 + allyDmg) * (1 + specEff);
+    var chord = 0.02 * (1 + allyDmg) * (1 + specEff);
+    var tsk = 0.10 * (1 + allyDmgT);
+    var identity = 1 +
+      ((P.upSeren / 100) * seren + (P.upChord / 100) * chord + (P.upTskill / 100) * tsk) /
+      (1 + P.baseAdd);
+
+    return ap * brand * identity;
+  }
+
+  /** One support line's multiplier: the contribution with it, over without. */
+  function supportGain(profile, lines, dMsRaw, dWpRaw) {
+    return supportContribution(profile, lines, dMsRaw, dWpRaw) /
+           supportContribution(profile, null, 0, 0);
   }
 
   // ------------------------------------------------------------------
@@ -406,11 +555,15 @@
       // Flat weapon power / main stat enter the RAW pool, so the percentage
       // buckets amplify them. With flatAP = 0 this is exactly the sqrt ratio.
       case "weaponPower":
-        if (!dps) return 1;
+        // On a support this is not dead weight: weapon power raises the support's
+        // own base attack, and the ally attack-power buff is a share of that. It
+        // is a small channel — a legendary Ancient weapon-power line scores 0.518
+        // against a blue ally-damage line's 0.795 — but it is not zero.
+        if (!dps) return supportGain(profile, null, 0, x);
         return attackPower(profile, 0, x) / attackPower(profile, 0, 0);
 
       case "mainStat":
-        if (!dps) return 1;
+        if (!dps) return supportGain(profile, null, x, 0);
         return attackPower(profile, x, 0) / attackPower(profile, 0, 0);
 
       case "critRate":
@@ -486,10 +639,13 @@
       }
 
       // ---- support-only riders ----
+      // "Ally Atk. Power Enhancement +B%" scales the buff a support hands out and
+      // does NOTHING on a damage dealer — which is the whole argument for the
+      // support carrying families 16-19 rather than a dealer.
       case "allyApBuff":
-        return dps ? 1 : 1 + x * profile.allyApBuffDamagePerPct / 100;
+        return dps ? 1 : supportGain(profile, { allyAtkEnh: x / 100 }, 0, 0);
       case "allyDamageBuff":
-        return dps ? 1 : 1 + x * profile.allyDamageBuffDamagePerPct / 100;
+        return dps ? 1 : supportGain(profile, { allyDmg: x / 100 }, 0, 0);
       case "partyShieldHeal":
         return dps ? 1 : 1 + x * profile.partyShieldHealValuePerPct / 100;
     }
@@ -687,12 +843,26 @@
       if (key === "swiftness" && o.swift !== undefined) return o.swift;
       return 0;
     }
+    var support = profile.role === "support";
     for (i = 0; i < TRAIT_KEYS.length; i++) {
       k = TRAIT_KEYS[i];
       v = alias(traits, k) || 0;
       if (!v) continue;
+      if (support) {
+        // A support's traits are not a matter of taste, so the weights above do
+        // not apply. SPECIALIZATION pays through the identity bracket: it raises
+        // Serenade and Major Chord by spec × classCoeff, which is where the whole
+        // of its party value lives. SWIFTNESS is priced THE SAME (Shizu) — it
+        // buys nothing this model can see directly, but in game it shortens the
+        // buff cycle, which lifts the uptimes the model takes as fixed inputs.
+        //
+        // Crit, Domination, Endurance and Expertise are zero: they move the
+        // support's own damage, which nobody counts.
+        if (k === "spec" || k === "swift") s += toD(supportGain(profile, { spec: v }, 0, 0));
+        continue;
+      }
       if (k === "crit") {
-        if (profile.role === "support") continue;      // crit is a DPS number
+        // Crit is the one trait that converts exactly rather than by taste.
         var dcr = v * TRAIT_CRIT_PP_PER_POINT / 100;
         s += toD(critFactor(profile, dcr, 0) / critFactor(profile, 0, 0));
       } else {
@@ -731,9 +901,14 @@
    *
    * -> { grade, bestAvg, basic:{fam:{avg,share,letter}}, trait:{…}, special:{id:{…}} }
    */
-  function familyGrades(grade) {
+  function familyGrades(grade, role) {
     grade = grade || "ancient";
-    var P = normalizeProfile({});
+    // The letters are read off the CANONICAL DEFAULT profile so they label the
+    // family rather than the current build and never shuffle mid-edit — but the
+    // ROLE is not a build setting, it decides which lines score at all. A support
+    // reading "S · Crit Rate" off a line worth exactly 0.000 to them is not a
+    // stable label, it is a wrong one.
+    var P = normalizeProfile(role === "support" ? { role: "support" } : {});
     var out = { grade: grade, bestAvg: 0, basic: {}, trait: {}, special: {} };
     var i, t, avg, tiers = ["low", "mid", "high"];
 
@@ -1038,8 +1213,27 @@
    *   rollsLeft: 7,                                   // or rolls:{normal,ticket}
    *   goldPer1Pct: <gold per 1% damage>,
    *   baselinePct: <the bracelet you'd otherwise use, default 0>,
+   *   traitValues: {crit,spec,swift},                 // the two fixed traits' numbers
    *   options: { basicMode, allowLockJunk, testPool, maxStates }
    * }
+   *
+   * EVERY KEY IS OPTIONAL AND NOTHING WARNS YOU, which has bitten once and will
+   * bite again. A misspelt key falls through to a default, and two of those
+   * defaults are load-bearing:
+   *
+   *   - `slots` defaults to grantedLines.length, then to TWO. Call this with a
+   *     three-slot bracelet under any other key name and you silently solve a
+   *     different bracelet.
+   *   - `fixedLines` is what CAPS THE CATEGORIES. Naming the two combat traits
+   *     there is the only thing that stops a granted slot drawing a third trait,
+   *     which the game will not do — the trait category caps at 2 and the
+   *     bracelet arrives with both places filled. Omit it and 35% of every draw
+   *     is a dead trait line, which drags the whole distribution down by about
+   *     eighteen score points and caps the reachable set well under the truth.
+   *
+   * The tell, if you suspect it: the DP's expectedFinal will come out BELOW a
+   * crude threshold heuristic. It cannot — the DP is optimal. tools/roll-sim.mjs
+   * is an independent simulator kept for exactly that comparison.
    *
    * -> {
    *   currentScore, expectedFinal, gain, valueGold,
@@ -1754,6 +1948,9 @@
     specialMultiplier: specialMultiplier,
     basicBandExpected: basicBandExpected,
     traitBandExpected: traitBandExpected,
+    supportBaseAtk: supportBaseAtk,
+    supportContribution: supportContribution,
+    supportGain: supportGain,
     traitDamage: traitDamage,
     familyGrades: familyGrades,
     FAMILY_GRADE_BANDS: FAMILY_GRADE_BANDS,

@@ -9,13 +9,19 @@
  * positional lines fall through the table.
  *
  * WHAT IT SHOWS
- *   By family (33 rows, default) — each special family at its odds-weighted
+ *   By family (40 rows, default) — each special family at its odds-weighted
  *     average roll (the three tiers land 6:3:1, so 0.6 low + 0.3 mid + 0.1 high).
  *     Same number Bracelet.familyGrades() computes for the Calculator's picker,
  *     so the two can never disagree about which family is better.
- *   By roll (99 rows) — every family x tier separately, coloured by rarity:
+ *   By roll (106 rows) — every family x tier separately, coloured by rarity:
  *     low = Rare blue, mid = Epic purple, high = Legendary gold. A Legendary junk
  *     line sitting far below a Rare crit line is the lesson the table teaches.
+ *   Both views also carry the seven lines that roll a CONTINUOUS value and so
+ *     have no tiers to split: main stat, and the six combat traits. They are
+ *     scored at the band-weighted expected roll and contribute one row either
+ *     way. Combat traits cannot reach a granted slot at all — the model assumes
+ *     the drop filled both trait places — so those rows are there to weigh a
+ *     trait against a special line, not to roll towards. See rank().
  *
  * BANDING: the shared eighteen-step subrank ladder in subrank.js, applied to
  * 100 x d / THE ANCHOR OF THIS VIEW — see rank() for what each view anchors on
@@ -40,10 +46,10 @@
  * under the end of every bar, always. And the anchors below are stable, because
  * nothing can move them.
  *
- * WHAT STILL TOGGLES: the view (by family / by roll), the bracelet grade, and the
- * two fight presets. All four are THIS TAB'S OWN state — plain module variables,
- * never persisted, never written into the shared profile. The presets patch the
- * default profile for the ranking and stop there.
+ * WHAT STILL TOGGLES: the view (by family / by roll), the role (DPS / Support),
+ * the bracelet grade, and the two fight presets. All five are THIS TAB'S OWN
+ * state — plain module variables, never persisted, never written into the shared
+ * profile. They patch the default profile for the ranking and stop there.
  *
  * NO NETWORK OF ITS OWN. This file opens no connection and reads no character.
  */
@@ -55,16 +61,18 @@
 
   var PANE_ID = "tab-tierlist";
 
-  // ---- this tab's own state. Four variables, none of them shared, none saved ----
+  // ---- this tab's own state. Five variables, none of them shared, none saved ----
   var gradeSel = "ancient";                      // the same grade profile.js starts on
+  var roleSel = "dps";                           // "dps" | "support", the model's own two roles
   // The deck's own names, not the model's: `supportEffects` means "count the four
   // party lines", the model's `supportHasEffects` means the opposite. Both start
   // where the deck starts, so an untouched table is normalizeProfile({}) exactly.
   var fight = { supportEffects: true, demon: false };
 
-  /** The default character, with only this tab's two presets patched in. */
+  /** The default character, with only this tab's own controls patched in. */
   function tlProfile() {
     return B.normalizeProfile({
+      role: roleSel,
       supportHasEffects: !fight.supportEffects,
       demonShare: fight.demon ? 1 : 0
     });
@@ -170,6 +178,12 @@
   var TIERS = ["low", "mid", "high"];
   var TIER_ODDS = { low: 0.6, mid: 0.3, high: 0.1 };
 
+  // What each view holds, counted rather than typed: 33 special families (times
+  // three tiers by roll), plus the seven lines that roll a continuous value and so
+  // contribute one row to either view — main stat and the six combat traits.
+  var N_FAMILY = DATA.SPECIALS.length + 1 + DATA.TRAITS.families.length;
+  var N_ROLL = DATA.SPECIALS.length * TIERS.length + 1 + DATA.TRAITS.families.length;
+
   // ------------------------------------------------------------------
   // official odds
   //
@@ -183,6 +197,11 @@
 
   var SPEC_SUM = DATA.GRANTED_LISTED_SUM;
   var SPEC_W = DATA.CATEGORY_WEIGHTS.special;
+  // The trait category's weight. A trait row carries NO odds field: on a bracelet
+  // whose two trait places are already filled the whole category is excluded from
+  // the granted pool, so quoting a per-roll chance for one would be a lie. The
+  // trait card shows its band table instead. See rank() and traitTipHTML().
+  var TRAIT_W = DATA.CATEGORY_WEIGHTS.trait;
 
   function tierOdds(fam, tier) { return SPEC_W * fam.granted[tier] / SPEC_SUM; }
   function famOdds(fam) { return tierOdds(fam, "low") + tierOdds(fam, "mid") + tierOdds(fam, "high"); }
@@ -324,10 +343,51 @@
       rows.push({
         key: "basic:mainStat", fam: { id: 0, key: "mainStat" }, tier: null,
         d: msD, tierD: [msD, msD, msD],
-        odds: 17.5, isBasic: true,
-        valsOverride: lo != null ? (lo.toLocaleString() + "–" + hi.toLocaleString()) : "",
+        odds: 17.5, isBasic: true, expected: msVal,
+        valsOverride: lo != null ? (nf(lo) + "–" + nf(hi)) : "",
         name: "Str / Dex / Int"
       });
+    })();
+
+    // COMBAT TRAITS. They used to be left out, on the grounds that a trait in a
+    // granted slot scores nothing. Half of that is true and half was a mistake:
+    //
+    //   TRUE — a trait cannot arrive in a granted slot at all. The model assumes
+    //   the drop filled both combat-trait places, so buildPool drops the whole
+    //   35-point category and no reroll can hand you one. These rows are for
+    //   comparison: read a trait line against a special line, do not roll for it.
+    //
+    //   THE MISTAKE — the trait a bracelet DOES carry is worth real damage, and
+    //   the table said it was worth none. A trait rolls 41-100 on a Relic and
+    //   61-120 on an Ancient, and not flat: Stove's ten six-wide bands run
+    //   10/16/16/16/10/10/10/4/4/4, so the top band is one roll in twenty-five and
+    //   the EXPECTED roll is 84 on an Ancient, 64 on a Relic. That is what these
+    //   rows are scored at — traitBandExpected() straight from the model, through
+    //   the model's own traitDamage(), never a number of this tab's own.
+    //
+    // Three of the six score nothing for a damage dealer (Domination, Endurance,
+    // Expertise) and four score nothing for a support; they are drawn anyway, in
+    // F-, because "this trait is worth nothing to you" is the answer a reader came
+    // for. Continuous value, so one row per view, like main stat.
+    (function () {
+      var tv = B.traitBandExpected(grade), bands = DATA.TRAITS.bands;
+      var lo = bands[0][grade][0], hi = bands[bands.length - 1][grade][1];
+      for (var i = 0; i < DATA.TRAITS.families.length; i++) {
+        var tf = DATA.TRAITS.families[i], t = {};
+        // The official key ("swiftness"), which traitDamage aliases to its own
+        // short one. Passing a trait it does not score returns 0, which is the
+        // right answer for Domination, Endurance and Expertise.
+        t[tf.key] = tv;
+        var td = B.traitDamage(t, prof);
+        rows.push({
+          // ids past every family id, so a tie sorts these last and in table order
+          key: "trait:" + tf.key, fam: { id: 100 + i, key: tf.key, label: tf.label }, tier: null,
+          d: td, tierD: [td, td, td],
+          isTrait: true, expected: tv,
+          valsOverride: nf(lo) + "–" + nf(hi),
+          name: tf.label + " +" + fx(tv, 0)
+        });
+      }
     })();
 
     rows.sort(function (a, b) { return b.d - a.d || a.fam.id - b.fam.id; });
@@ -349,13 +409,18 @@
     // family the top four read S. Nothing reaches S+ there, and cannot: S+ is
     // above the anchor, and nothing beats the row the scale is built on.
     //
-    // Main stat is skipped when picking the family anchor — it is a basic line
-    // riding along, not a special family — but it is still SCORED against it, so
-    // it may sit above 100 if it ever out-earns every family.
+    // Main stat and the combat traits are skipped when picking the family anchor —
+    // they are lines riding along, not special families — but they are still SCORED
+    // against it, so either may sit above 100 if it ever out-earns every family.
+    // That guard is what keeps "the best family average = 100" true after the trait
+    // rows arrived; without it a big enough trait would quietly become the yardstick
+    // and every family score would shift under a reader who changed nothing.
     var best = rows.length ? rows[0].d : 0;          // the top row, for the bars
     var anchor = 0;
     if (view === "family") {
-      for (i = 0; i < rows.length; i++) if (!rows[i].isBasic && rows[i].d > anchor) anchor = rows[i].d;
+      for (i = 0; i < rows.length; i++) {
+        if (!rows[i].isBasic && !rows[i].isTrait && rows[i].d > anchor) anchor = rows[i].d;
+      }
     } else {
       for (i = 0; i < DATA.SPECIALS.length; i++) {
         var mid = B.lineDamage({ cat: "special", family: DATA.SPECIALS[i].id, tier: "mid" }, grade, prof);
@@ -374,7 +439,10 @@
       r.band = bandFor(r.d, r.pct);
       r.dmg = B.damagePercent(r.d);
     }
-    return { rows: rows, best: best, anchor: anchor, bestRow: rows[0] || null };
+    // The profile rides along: the hover card re-scores a line at every band, and
+    // it has to do that on the profile the table was ranked on, not on a fresh
+    // read of the controls.
+    return { rows: rows, best: best, anchor: anchor, bestRow: rows[0] || null, prof: prof };
   }
 
   // ------------------------------------------------------------------
@@ -443,7 +511,8 @@
     axis += '<text x="' + (X1 - 2) + '" y="64" text-anchor="end" class="tlend">' +
       esc(bestRow.name) + (bestRow.tier ? " (" + bestRow.tier + ")" : "") + " · " + fx(bestRow.dmg, 2) + "%</text>";
     axis += '<text x="' + X0 + '" y="154" text-anchor="start" class="tlcap">% damage on ' +
-      (grade === "relic" ? "a Relic" : "an Ancient") + " bracelet, on the default character →</text>";
+      (grade === "relic" ? "a Relic" : "an Ancient") + " bracelet, on the default " +
+      (roleSel === "support" ? "support" : "damage dealer") + " →</text>";
     axis += '<text x="' + X1 + '" y="154" text-anchor="end" class="tlcap">dashed cuts are the letter-group edges (% of the best line); each group holds three subranks</text>';
 
     return '<svg viewBox="0 0 1000 162" role="img" aria-label="Every effect on a damage-percent axis with the tier thresholds drawn to scale">' +
@@ -482,7 +551,11 @@
         : '<span class="tl-gl" style="color:' + r.band.bg +
       '" title="this row\'s subrank">' + r.band.key + "</span>") +
       '<span class="tl-nm">' + rar + esc(r.name) +
-      (r.tier ? ' <em style="color:' + RARITY[r.tier].hue + '">' + RARITY[r.tier].name + "</em>" : "") + "</span>" +
+      // The small caps after the name: the rarity for a tiered roll, and for the
+      // continuous lines the fact that the number beside them is an EXPECTED roll
+      // and not a roll anyone is promised.
+      (r.tier ? ' <em style="color:' + RARITY[r.tier].hue + '">' + RARITY[r.tier].name + "</em>"
+        : r.expected !== undefined ? ' <em style="color:var(--dim)">expected roll</em>' : "") + "</span>" +
       '<span class="tl-vals">' + esc(vals) + "</span>" +
       '<span class="tl-bar"><i style="width:' + fx(Math.max(0, Math.min(100, r.barPct)), 2) + '%;background:' + barHue + '"></i></span>' +
       '<span class="tl-score">' + fx(r.pct, 1) + "</span>" +
@@ -549,11 +622,116 @@
   }
   function hidePop() { var el = $("bctl-pop"); if (el) el.style.display = "none"; }
 
-  function tipHTML(entry, res) {
-    var r = entry.row, grade = entry.grade, fam = r.fam;
+  /** The card's head — name, band pill, rank. The same on every kind of row. */
+  function tipHead(r, res) {
     var pill = '<span class="tp-pill" style="background:' + r.band.bg + ';color:' + r.band.fg + '">' + r.band.key + "</span>";
-    var h = '<div class="tp-head">' + esc(r.name) + " " + pill +
+    return '<div class="tp-head">' + esc(r.name) + " " + pill +
       '<span class="tp-rank">#' + pad2(r.rank) + " of " + res.rows.length + "</span></div>";
+  }
+
+  /**
+   * "What it is worth" — the score, the damage and the subrank, with the
+   * arithmetic behind each. `extra` is any row-specific figure to put first: the
+   * family average for a family row, the expected roll for a continuous one.
+   */
+  function tipWorth(r, extra) {
+    var mult = Math.exp(r.d / 100);
+    var kv = extra || "";
+    kv += '<span class="tp-k">score</span><span class="tp-v">' + fx(r.d, 3) +
+      ' <span class="tp-dim">= 100 &#215; ln(' + fx(mult, 6) + ")</span></span>";
+    kv += '<span class="tp-k">damage</span><span class="tp-v">' + fx(r.dmg, 3) +
+      '% <span class="tp-dim">= (e<sup>' + fx(r.d, 3) + "/100</sup> &#8722; 1) &#215; 100</span></span>";
+    kv += '<span class="tp-k">subrank</span><span class="tp-v">' + fx(r.pct, 1) + "% of the anchor" +
+      (r.d <= 0 ? ' <span class="tp-dim">&#183; does no damage, so F-</span>'
+        : ' <span class="tp-dim">&#183; ' + fx(r.pct - r.band.min, 1) + "pp above the " + r.band.key + " cut at " +
+          r.band.min + "%</span>") + "</span>";
+    return '<div class="tp-sec"><div class="tp-sec-h">What it is worth</div><div class="tp-grid">' + kv + "</div></div>";
+  }
+
+  /**
+   * Stove's ten value bands, drawn as a table. THE BANDS ARE NOT EQUAL —
+   * 10/16/16/16/10/10/10/4/4/4 — and that is the whole reason a combat trait is
+   * scored at 84 rather than at the 120 a player quotes: the top band is one roll
+   * in twenty-five. Both continuous lines share this table, because both roll on
+   * the same ten weights.
+   *
+   * rangeOf(band) -> the [lo, hi] pair for this grade; dmgOf(value) -> what that
+   * value is worth, in log space, to the profile the table was ranked on.
+   */
+  function bandTableHTML(bands, rangeOf, dmgOf, expectedD, expectedText) {
+    var h = '<table class="tp-tbl"><thead><tr><th>Roll</th><th class="tp-num">Chance</th>' +
+      '<th class="tp-num">% dmg</th></tr></thead><tbody>', i, rg;
+    for (i = 0; i < bands.length; i++) {
+      rg = rangeOf(bands[i]);
+      h += "<tr><td>" + nf(rg[0]) + "&#8211;" + nf(rg[1]) + "</td>" +
+        '<td class="tp-num">' + bands[i].prob + "%</td>" +
+        '<td class="tp-num">' + fx(B.damagePercent(dmgOf((rg[0] + rg[1]) / 2)), 2) + "%</td></tr>";
+    }
+    return h + '</tbody><tfoot><tr><td colspan="2">' + esc(expectedText) + "</td>" +
+      '<td class="tp-num">' + fx(B.damagePercent(expectedD), 2) + "%</td></tr></tfoot></table>";
+  }
+
+  /** A combat trait: the band table, and why the row cannot be rolled for. */
+  function traitTipHTML(entry, res) {
+    var r = entry.row, grade = entry.grade, prof = res.prof;
+    var bands = DATA.TRAITS.bands;
+    var lo = bands[0][grade][0], hi = bands[bands.length - 1][grade][1];
+    var art = grade === "relic" ? "A Relic" : "An Ancient";
+    var h = tipHead(r, res);
+    h += '<div class="tp-full">Combat trait. ' + art + " bracelet rolls " + nf(lo) + "&#8211;" + nf(hi) +
+      ", in ten bands of six.</div>";
+    h += bandTableHTML(bands,
+      function (b) { return b[grade]; },
+      function (v) { var t = {}; t[r.fam.key] = v; return B.traitDamage(t, prof); },
+      r.d, "expected roll " + fx(r.expected, 0) + " — the ten bands, weighted");
+    h += tipWorth(r, '<span class="tp-k">expected roll</span><span class="tp-v">' + fx(r.expected, 2) +
+      ' <span class="tp-dim">&#183; a flat ' + nf(lo) + "&#8211;" + nf(hi) + " would read " +
+      fx((lo + hi) / 2, 1) + "</span></span>");
+    h += '<div class="tp-sec"><div class="tp-sec-h">Where it comes from</div><div class="tp-grid">' +
+      '<span class="tp-k">the drop</span><span class="tp-v">both places, always' +
+      ' <span class="tp-dim">&#183; a bracelet carries two traits, never the same one twice</span></span>' +
+      '<span class="tp-k">a reroll</span><span class="tp-v">never' +
+      ' <span class="tp-dim">&#183; this calculator takes both trait places as filled at the drop, so the whole ' +
+      TRAIT_W + "-point trait category drops out of the granted pool. Read this row against a special line; " +
+      "you cannot roll towards it.</span></span></div></div>";
+    return h;
+  }
+
+  /** Main stat: the same band table, and the odds of a granted slot landing it. */
+  function basicTipHTML(entry, res) {
+    var r = entry.row, grade = entry.grade, prof = res.prof;
+    var bands = DATA.BASIC.bands;
+    var lo = bands[0][grade].mainStat[0], hi = bands[bands.length - 1][grade].mainStat[1];
+    var art = grade === "relic" ? "A Relic" : "An Ancient";
+    var h = tipHead(r, res);
+    h += '<div class="tp-full">Basic effect, Str / Dex / Int. ' + art + " bracelet rolls " +
+      nf(lo) + "&#8211;" + nf(hi) + ", in ten bands.</div>";
+    h += bandTableHTML(bands,
+      function (b) { return b[grade].mainStat; },
+      function (v) { return B.lineDamage({ cat: "basic", family: "mainStat", value: v }, grade, prof); },
+      r.d, "expected roll " + nf(r.expected) + " — the ten bands, weighted");
+    h += tipWorth(r, '<span class="tp-k">expected roll</span><span class="tp-v">' + nf(r.expected) +
+      ' <span class="tp-dim">&#183; a flat ' + nf(lo) + "&#8211;" + nf(hi) + " would read " +
+      nf((lo + hi) / 2) + "</span></span>");
+    h += '<div class="tp-sec"><div class="tp-sec-h">Odds of landing it</div><div class="tp-grid">' +
+      '<span class="tp-k">per roll</span><span class="tp-v">' + fmtOdds(r.odds) +
+      ' <span class="tp-dim">&#183; ' + oneIn(r.odds) + "</span></span>" +
+      '<span class="tp-k">listed</span><span class="tp-v">half the ' + DATA.CATEGORY_WEIGHTS.basic +
+      '-point basic category<span class="tp-dim"> &#183; Vitality is the other half, and does no damage' +
+      "</span></span></div></div>";
+    return h;
+  }
+
+  function tipHTML(entry, res) {
+    if (entry.row.isTrait) return traitTipHTML(entry, res);
+    if (entry.row.isBasic) return basicTipHTML(entry, res);
+    return specialTipHTML(entry, res);
+  }
+
+  /** A special family: its three tiers, what they are worth, and their odds. */
+  function specialTipHTML(entry, res) {
+    var r = entry.row, grade = entry.grade, fam = r.fam;
+    var h = tipHead(r, res);
 
     // the full official wording, placeholders and all
     h += '<div class="tp-full">' + esc(fam.label) + "</div>";
@@ -590,21 +768,10 @@
     h += "</tbody></table>";
 
     // what it is worth to THIS character, and the arithmetic behind it
-    var mult = Math.exp(r.d / 100);
-    var kv = "";
-    if (view === "family") {
-      kv += '<span class="tp-k">average roll</span><span class="tp-v">0.6&#215;' + fx(r.tierD[0], 3) +
-        " + 0.3&#215;" + fx(r.tierD[1], 3) + " + 0.1&#215;" + fx(r.tierD[2], 3) + " = " + fx(r.d, 3) + "</span>";
-    }
-    kv += '<span class="tp-k">score</span><span class="tp-v">' + fx(r.d, 3) +
-      ' <span class="tp-dim">= 100 &#215; ln(' + fx(mult, 6) + ")</span></span>";
-    kv += '<span class="tp-k">damage</span><span class="tp-v">' + fx(r.dmg, 3) +
-      '% <span class="tp-dim">= (e<sup>' + fx(r.d, 3) + "/100</sup> &#8722; 1) &#215; 100</span></span>";
-    kv += '<span class="tp-k">subrank</span><span class="tp-v">' + fx(r.pct, 1) + "% of the anchor" +
-      (r.d <= 0 ? ' <span class="tp-dim">&#183; does no damage, so F-</span>'
-        : ' <span class="tp-dim">&#183; ' + fx(r.pct - r.band.min, 1) + "pp above the " + r.band.key + " cut at " +
-          r.band.min + "%</span>") + "</span>";
-    h += '<div class="tp-sec"><div class="tp-sec-h">What it is worth</div><div class="tp-grid">' + kv + "</div></div>";
+    h += tipWorth(r, view === "family"
+      ? '<span class="tp-k">average roll</span><span class="tp-v">0.6&#215;' + fx(r.tierD[0], 3) +
+        " + 0.3&#215;" + fx(r.tierD[1], 3) + " + 0.1&#215;" + fx(r.tierD[2], 3) + " = " + fx(r.d, 3) + "</span>"
+      : "");
 
     // A "compared to the default character" section used to sit here. The table is
     // the default character now, so both of its columns would carry the same three
@@ -709,8 +876,17 @@
       '<span data-gloss="Bracelet.normalizeProfile({}) — the canonical build, every setting untouched. The Leaderboard scores on the same one.">default character</span>' +
       ", not on yours.</b> " +
       "Nothing you do on the Calculator moves this table, and nothing you do here moves the " +
-      "Calculator. The three controls above are this tab's own: the view, the bracelet grade, and " +
+      "Calculator. The four controls above are this tab's own: the view, the role, the bracelet grade, and " +
       "the two fight toggles.</p>" +
+      "<p><b>Role changes what a line is for.</b> On <i>DPS</i> a line is scored on your own damage, plus " +
+      "what the party lines hand your two allies. On <i>Support</i> every personal-damage line scores nothing " +
+      "and the whole value moves to the ally buffs and the party debuffs, measured on the dealer you buff — " +
+      "the same support model the Calculator uses.</p>" +
+      "<p><b>Combat traits are ranked at the roll you should expect, not the one you hope for.</b> Stove " +
+      "publishes ten six-wide bands with unequal weights — 10/16/16/16/10/10/10/4/4/4 — so an Ancient trait " +
+      "averages 84 of a possible 120 and a Relic 64 of 100. Hover a trait row for the whole table. Those rows " +
+      "are there to compare: this calculator takes both combat-trait places as filled at the drop, so no " +
+      "reroll can hand you one.</p>" +
       "<p><b>Each view is scored against the best line in that view</b>, and the two are not the same " +
       "line. By roll the anchor is the best <i>Epic</i>, set to 100: the five Legendary crit and shred " +
       "lines clear it and take the rainbow <b>S+</b>, their Epics land <b>S</b>, their Rares land " +
@@ -734,10 +910,18 @@
    * are worth reading, so the control has to live somewhere.
    */
   function controlsHTML() {
+    var sup = roleSel === "support";
     return '<div class="tl-ctl">' +
       '<div class="tl-seg" role="group" aria-label="View">' +
-      '<button type="button" class="mbtn' + (view === "family" ? " active" : "") + '" data-view="family">By family <span class="tl-n">33</span></button>' +
-      '<button type="button" class="mbtn' + (view === "roll" ? " active" : "") + '" data-view="roll">By roll <span class="tl-n">99</span></button>' +
+      '<button type="button" class="mbtn' + (view === "family" ? " active" : "") + '" data-view="family">By family <span class="tl-n">' + N_FAMILY + "</span></button>" +
+      '<button type="button" class="mbtn' + (view === "roll" ? " active" : "") + '" data-view="roll">By roll <span class="tl-n">' + N_ROLL + "</span></button>" +
+      "</div>" +
+      '<div class="tl-seg" role="group" aria-label="Role">' +
+      '<span class="tl-plabel">Role</span>' +
+      '<button type="button" class="mbtn' + (!sup ? " active" : "") + '" data-role="dps"' +
+      ' data-gloss="Your own damage, plus what the party lines hand your two allies.">DPS</button>' +
+      '<button type="button" class="mbtn' + (sup ? " active" : "") + '" data-role="support"' +
+      ' data-gloss="Your buffs and debuffs, measured on the dealer you buff. Every personal-damage line scores nothing.">Support</button>' +
       "</div>" +
       '<div class="tl-seg" role="group" aria-label="Bracelet grade">' +
       '<span class="tl-plabel">Grade</span>' +
@@ -746,10 +930,17 @@
       "</div>" +
       '<div class="tl-presets"><span class="tl-plabel">Fight</span>' +
       '<button type="button" class="mbtn' + (fight.supportEffects ? " active" : "") + '" data-preset="support"' +
-      ' data-gloss="On: you are the one bringing the party debuffs, so the four party lines score in full. Off: your support already applies them — they apply once per party, so a copy on your bracelet is worth nothing.">' +
+      ' data-gloss="' + (sup
+        ? "On: you bring the party debuffs, so the four party lines score in full. Off: someone else already applies them — they apply once per party, so your copy is worth nothing."
+        : "On: you are the one bringing the party debuffs, so the four party lines score in full. Off: your support already applies them — they apply once per party, so a copy on your bracelet is worth nothing.") + '">' +
       "Support effects · " + (fight.supportEffects ? "on" : "off") + "</button>" +
+      // Demon damage is personal damage, and a support scores none of it. The
+      // button would be inert rather than wrong, so it says so instead.
       '<button type="button" class="mbtn' + (fight.demon ? " active" : "") + '" data-preset="demon"' +
-      ' data-gloss="On: the fight is a Demon or Archdemon boss, so demon-damage lines score in full. Off: they score nothing.">' +
+      (sup ? " disabled" : "") +
+      ' data-gloss="' + (sup
+        ? "A support scores no personal damage, so demon-damage lines are worth nothing whatever the boss is."
+        : "On: the fight is a Demon or Archdemon boss, so demon-damage lines score in full. Off: they score nothing.") + '">' +
       "Demon boss · " + (fight.demon ? "on" : "off") + "</button>" +
       "</div>" +
       "</div>";
@@ -773,15 +964,23 @@
 
   function footHTML(res, grade) {
     var n = res.rows.length;
+    var who = roleSel === "support" ? "a support" : "a damage dealer";
+    var bands = DATA.TRAITS.bands, top = bands[bands.length - 1];
     return '<div class="tl-foot">' +
       "<b>" + n + (view === "family" ? " families" : " rolls") + "</b> on " +
-      (grade === "relic" ? "a Relic" : "an Ancient") + " bracelet, ranked by the same % damage figure the Calculator reports. " +
+      (grade === "relic" ? "a Relic" : "an Ancient") + " bracelet, ranked for " + who +
+      " by the same % damage figure the Calculator reports. " +
       "Odds are the official listed probabilities, renormalised the way the disclosure page requires " +
       "(listed ÷ the listed sum, scaled to the 30-point special category). " +
-      "A family whose every tier scores nothing sits in F- at 0% — it is not broken, it is worth nothing to a damage dealer. " +
+      "A family whose every tier scores nothing sits in F- at 0% — it is not broken, it is worth nothing to " + who + ". " +
       "F- is a wide band and most families live there; the rows inside it are still in order, and the strip above shows the real spread. " +
       "A subrank nobody landed in is left out rather than drawn empty — at eighteen steps that is most of them. " +
-      "Combat traits and Vitality are not listed: rolled into a granted slot they score nothing at all." +
+      "<b>Combat traits are ranked at their expected roll, " + fx(B.traitBandExpected(grade), 0) + ".</b> " +
+      "The ten bands are not equal — the top one, " + top[grade][0] + "–" + top[grade][1] + ", lands " + top.prob +
+      "% of the time — so what you should expect sits well under the " + top[grade][1] + " ceiling. " +
+      "A trait cannot reach a granted slot here: the calculator takes both trait places as filled at the drop. " +
+      "Those rows are for weighing a trait against a special line, not for rolling towards. " +
+      "Vitality is not listed: it does no damage." +
       "</div>";
   }
 
@@ -842,6 +1041,8 @@
       if (vb) { view = vb.getAttribute("data-view"); hidePop(); render(); return; }
       var gb = t.closest("[data-grade]");
       if (gb) { gradeSel = gb.getAttribute("data-grade"); hidePop(); render(); return; }
+      var rb = t.closest("[data-role]");
+      if (rb) { roleSel = rb.getAttribute("data-role"); hidePop(); render(); return; }
       var pb = t.closest("[data-preset]");
       if (pb) {
         var k = pb.getAttribute("data-preset");
@@ -936,6 +1137,8 @@
       ".tl-pop .tp-tbl th.tp-num{text-align:right}" +
       ".tl-pop .tp-tbl td{padding:3px 4px;border-bottom:1px solid #1c2230;font-variant-numeric:tabular-nums}" +
       ".tl-pop .tp-tbl tr:last-child td{border-bottom:none}" +
+      // The band table's summary row: the expected roll the line is scored at.
+      ".tl-pop .tp-tbl tfoot td{border-top:1px solid var(--border);color:var(--text);font-weight:700}" +
       ".tl-pop td.tp-num{text-align:right;font-family:'SF Mono',Menlo,monospace;font-size:11px}" +
       ".tl-pop .tp-rar{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:5px}" +
       ".tl-pop .tp-tier{display:inline-block;min-width:15px;text-align:center;border-radius:4px;font-size:10px;" +

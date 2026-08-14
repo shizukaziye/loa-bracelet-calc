@@ -8,7 +8,10 @@
     "verify-py": "python verify.py",
     "test-worker": "node tools/test-worker.mjs",
     "genrefs": "node tools/gen-refs.js",
-    "serve": "npx http-server -p 8080 -c-1 ."
+    "serve": "npx http-server -p 8080 -c-1 .",
+    "check-cache": "node tools/check-cache-versions.mjs",
+    "dist": "node tools/score-percentiles.mjs",
+    "check": "npm run verify && npm run verify-py && npm run test-worker && npm run check-cache"
   },
   "license": "MIT"
 }

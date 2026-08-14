@@ -42,8 +42,43 @@ DEFAULTS = {
     "msPct": 0.09,
     "wpPct": 0.085,
     "baseApPct": 0.125,
-    "flatAP": 2700,
+    "flatAP": 3600,   # Ancient attack core at 17+ points: 900 + 2700
     # Flat WEAPON power - zero on the reference build (attack cores, no flat
     # weapon-power rolls). It is weapon power, so it goes inside the square root.
     "flatWP": 0,
 }
+
+# ---- ARK-GRID CORES --------------------------------------------------------
+# A core grants flat power once its gems total 10 points, and more again at 17.
+# Two of the cores matter to a damage dealer, and a build runs one or the other:
+#
+# A core's thresholds ADD - they do not replace:
+#   attack core   10pt +900    17pt +1800 relic / +2700 ancient
+#                 -> TOTAL     2700 relic / 3600 ancient, flat ATTACK power
+#   weapon core   10pt +1300   17pt +2600 relic / +3900 ancient
+#                 -> TOTAL     3900 relic / 5200 ancient, flat WEAPON power
+# Points above 17 pay only a percentage, so the flat stops at the 17-point step.
+#
+# Flat attack power lands beside the square root; flat weapon power lands inside
+# it, where the weapon-power bucket then amplifies it. That is why the weapon
+# core's bigger number is not straightforwardly better.
+#
+# The character page carries each core's id, grade and point total, but says
+# NOTHING about which effect a core has, so the type is the deck's to set.
+ARK_CORE = {
+    "thresholds": [17, 10],
+    "attack": {"relic": {10: 900, 17: 2700}, "ancient": {10: 900, 17: 3600}},
+    "weapon": {"relic": {10: 1300, 17: 3900}, "ancient": {10: 1300, 17: 5200}},
+}
+
+
+def ark_core_flat(type_, grade, points):
+    """Flat power from one core: type_ "attack"|"weapon"|"none", points 0..20."""
+    t = ARK_CORE.get(type_)
+    if not t:
+        return 0
+    band = t["relic" if grade == "relic" else "ancient"]
+    for th in ARK_CORE["thresholds"]:
+        if points >= th:
+            return band[th]
+    return 0
