@@ -155,17 +155,15 @@ rarity on both axes or it means nothing, so the support cuts are read off the
 DPS band rarities — the approach the astrogem calculator took when it moved to
 percentile-aware letters.
 
-Matched to the ladder shipping today, and this is what `subrank.js` now carries:
-
-```
-S+ 98.8   S 91.0   S- 83.2   A+ 75.4   A 67.8   A- 60.5
-B+ 53.8   B 47.5   B- 41.2   C+ 35.3   C 28.8   C- 23.3
-D+ 19.2   D 15.4   D- 11.1   F+  7.2   F  5.5   F- the rest
-```
-
-If the DPS F / F+ move above is taken, rerun `tools/rank-match.mjs` and paste the
-table it prints: the support cuts are derived from the DPS ones and have to move
-with them.
+The exact matched cuts were 98.8 / 91.0 / 83.2 / 75.4 / 67.8 / 60.5 / 53.8 /
+47.5 / 41.2 / 35.3 / 28.8 / 23.3 / 19.2 / 15.4 / 11.1 / 7.2 / 5.5. **They are
+not what ships.** Shizu rounded them to a ladder a person can hold — S+ 100 and
+F 0 chosen for what they MEAN (the anchor; the worst real bracelet), 7.5-point
+steps through the letter grades, 5-point steps below — at a mean rarity cost of
+×1.11 against the exact match. That ladder lives in `subrank.js`
+(`SUPPORT_LADDER`) and stands by ruling; rerun `tools/rank-match.mjs` and
+`tools/support-ladder-round.mjs` only to MEASURE it against a moved
+distribution, never to replace it unasked.
 
 ---
 
