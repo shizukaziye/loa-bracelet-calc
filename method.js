@@ -22,9 +22,32 @@
   "use strict";
 
   var B = window.Bracelet, DATA = window.BraceletData;
+  // The gear defaults, for the two accessory figures the header quotes. They were
+  // literals — 71,429 and 2,085 — which is exactly the drift this file's own
+  // header promises it does not do.
+  var GEAR = (window.BraceletGearData && window.BraceletGearData.DEFAULTS) || {};
 
   function fx(v, n) { return (Math.round(v * Math.pow(10, n)) / Math.pow(10, n)).toFixed(n); }
   function nf(v) { return Math.round(v).toLocaleString("en-US"); }
+
+  /**
+   * How many families convert to no damage at all for a damage dealer, counted
+   * from the table rather than typed. Two groups, and the paragraph names both:
+   * the defensive and utility ones, and the three that only pay a support.
+   */
+  function deadFamilyCount(grade, profile) {
+    var out = { defensive: 0, support: 0 }, tiers = ["low", "mid", "high"];
+    var supportOnly = { 28: 1, 29: 1, 30: 1 };
+    for (var i = 0; i < DATA.SPECIALS.length; i++) {
+      var id = DATA.SPECIALS[i].id, best = 0;
+      for (var t = 0; t < tiers.length; t++) {
+        best = Math.max(best, B.lineDamage({ cat: "special", family: id, tier: tiers[t] }, grade, profile));
+      }
+      if (best > 0) continue;
+      if (supportOnly[id]) out.support++; else out.defensive++;
+    }
+    return out;
+  }
 
   function render() {
     var pane = document.getElementById("tab-method");
@@ -35,6 +58,7 @@
     var p = B.normalizeProfile({});
     var base = B.deriveBaseline({});
     var pool = B.addDamagePool(p);
+    var dead = deadFamilyCount("ancient", p);
 
     pane.innerHTML = "" +
       "<style>" +
@@ -65,7 +89,7 @@
       '<div class="formula">AP = √(mainStat × (weaponPower + flatWP) / 6) × (1 + gemsAndStone) + flatAP</div>' +
       "<p>The bracelet's flat lines go into the <b>raw</b> stat, before the percentage buckets, so those buckets amplify them exactly as they amplify gear. With no flat attack power the whole thing collapses to a plain square-root ratio; the ark-grid cores are what stop it.</p>" +
       "<p>Note where the two flats sit. Flat <b>attack</b> power — an ark-grid attack core, an accessory's “Attack Power +390” — is added at the end, outside the root and outside the gem bucket. Flat <b>weapon</b> power — a weapon core instead of an attack one, an accessory's “Weapon Power +480” — is weapon power, so it joins the weapon inside the root and the weapon-power bucket amplifies it. That makes it worth less per point than the same number of flat attack power, and it makes every weapon-power line on your bracelet worth slightly less, because you already have more of what the line gives.</p>" +
-      "<p>The gear numbers are bebkok's Serca honing table. The default build is weapon +25, gloves +23 and the other four at +21, which is item level " + base.ilvl + ": main stat " + nf(base.mainStatRaw) + " raw, weapon power " + nf(base.weaponPowerRaw) + " raw. Accessories sit at the top of their ranges with no flat-stat rolls (" + nf(71429) + " main stat), the roster bonus is " + nf(2085) + ", and the percentage buckets are " + fx(p.msPct * 100, 1) + "% on main stat (skins plus the stronghold ranch) and " + fx(p.wpPct * 100, 1) + "% on weapon power (two earring lines plus karma). Attack power carries " + fx(p.baseApPct * 100, 1) + "% from eleven level-9 damage gems and an ability stone worth its 1.5%, and " + nf(p.flatAP) + " flat from ark-grid cores. Every one of those is an input you can change.</p>" +
+      "<p>The gear numbers are bebkok's Serca honing table. The default build is weapon +25, gloves +23 and the other four at +21, which is item level " + base.ilvl + ": main stat " + nf(base.mainStatRaw) + " raw, weapon power " + nf(base.weaponPowerRaw) + " raw. Accessories sit at the top of their ranges with no flat-stat rolls (" + nf(GEAR.accessoryMainStat) + " main stat), the roster bonus is " + nf(GEAR.rosterBonus) + ", and the percentage buckets are " + fx(p.msPct * 100, 1) + "% on main stat (skins plus the stronghold ranch) and " + fx(p.wpPct * 100, 1) + "% on weapon power (two earring lines plus karma). Attack power carries " + fx(p.baseApPct * 100, 1) + "% from eleven level-9 damage gems and an ability stone worth its 1.5%, and " + nf(p.flatAP) + " flat from ark-grid cores. Every one of those is an input you can change.</p>" +
 
       "<h3>Crit</h3>" +
       "<p>A skill's expected multiplier is <code>1 + critRate × (critDamage − 1)</code>. Crit damage of 280% means a crit deals 2.8 times, not 3.8. The default character is one skill at 90% crit and 280% crit damage; add skills with damage shares and the multipliers are share-weighted. Crit rate is capped at 100% when a line pushes past it, which is why a crit-rate line quietly dies on a high-crit build.</p>" +
@@ -76,10 +100,12 @@
 
       "<h3>The other buckets</h3>" +
       "<p>Outgoing damage is its own multiplicative bucket and is not diluted. Stagger, demon, back, front and Hitmaster damage are each scaled by a share you set: how much of your damage actually lands in that window or from that angle. <b>Back, front and Hitmaster all start at " + fx(p.backAttackShare * 100, 0) + "%</b> — slide one down and that family's lines shrink with it. Stagger windows start at " + fx(p.staggeredShare * 100, 0) + "%. The Demon boss toggle starts off; turning it on says the whole fight is a Demon or Archdemon, and demon damage is then diluted by the " + fx(p.demonBase * 100, 1) + "% you already carry from cards and pets. Family 15 trades +2% cooldown for damage; it is scored as a weighted mean of the burst case (no penalty) and the sustained case (damage divided by 1.02), weighted <b>" + fx(p.cooldownPenaltyWeight * 100, 0) + "% to burst</b> by default, and you can slide that.</p>" +
-      "<p>Three weapon-power families carry a condition, and all three are now scored at their best case rather than as an input you tune. Family 20 stacks once per hit per second and caps at six, so it is scored at six stacks. Family 21's on-hit rider refreshes every five seconds while you are above 50% health, so it is scored at full uptime. Family 22 gains a stack every 30 seconds and holds each for 120, so four stacks is the ceiling it settles at and that is what it gets.</p>" +
+      "<p><b>Attack and move speed pays through extra casts</b>, at " + fx(p.atkMoveSpeedDamagePerPct * 10, 1) + "% damage per 10% speed &mdash; Shizu's rule, and a slider under Advanced. It is what family 1 is worth, and the speed half of the stacking weapon-power line rides on the same number. Raid Captain is not modelled on top of it.</p>" +
+      "<p>Three weapon-power families carry a condition, and all three are now scored at their best case rather than as an input you tune. Family 20 stacks once per hit per second and caps at six, so it is scored at six stacks. Family 21's on-hit rider refreshes every five seconds while you are above 50% health, so it is scored at full uptime. Family 22 is scored at the full <b>30 stacks</b>, its cap: in game each new stack refreshes the pile rather than letting the old ones expire, so it climbs to the cap and stays there. That is Shizu's ruling. Read naively &mdash; a stack every 30 seconds, each lasting 120, none of them refreshed &mdash; it would settle at four, which is not what the line does.</p>" +
 
       "<h2>Party lines get credit for the party</h2>" +
       "<p>Four families help everyone: enemy defense down, enemy crit resist down, enemy crit-damage resist down, and damage to a shielded target. Only one instance counts per party, and this model assumes you are the one carrying it.</p>" +
+      "<p>That assumption is a switch, <b>Support effects</b>, on the deck and on the Tier List. On means you bring the debuffs and all four families score in full; off means your party's support already applies them, so your own copy is worth exactly nothing &mdash; not less, nothing. On a support the switch is forced on and the control disappears: it asks whether somebody else brings them, and as the support you are that somebody.</p>" +
       "<p>They are scored as <code>1 + yourGain + " + p.allyDpsCount + " × allyGain</code>. Two other damage dealers, each assumed to deal what you deal before the line, each fixed at 90% crit and 280% crit damage. An ally's extra damage is counted as your extra damage, in units of your own baseline — that is the only way to put a party buff on the same scale as a personal one.</p>" +
       "<p>Defense shred goes through the enemy's damage reduction: if the boss reduces damage by " + fx(p.enemyBaseDR * 100, 0) + "% then shredding a fraction A of its defense multiplies damage by <code>(D+K) / (D(1−A)+K)</code>. Crit resist down reads as crit rate up for the whole party; crit-damage resist down likewise. The shielded-target line is flat damage while a shield is up, scaled by a " + fx(p.shieldUptime * 100, 0) + "% uptime.</p>" +
       "<p>The \"ally attack power buff +B%\" rider that rides along on all four scores <b>zero</b> for a damage dealer: it scales a buff only a support hands out. Switch the role to Support and it is the reason those four families sit at the top of the list.</p>" +
@@ -87,6 +113,7 @@
       "<h2>A support is scored on one damage dealer</h2>" +
       "<p>Every support figure on this site &mdash; the score, the percentage, the gold &mdash; is <b>what one damage dealer gains</b>. Not the party total, and not multiplied by anything. A bracelet that reads 2.2% is 2.2% more damage for a dealer standing next to you.</p>" +
       "<p>That is a reporting choice, not a limit. A support&rsquo;s buffs do land on every dealer in the party, so the party-wide figure is three times this one &mdash; but a number you can compare directly against a damage dealer&rsquo;s own bracelet is the more useful one, and multiplying it by party size would make the two axes incomparable. Both halves of a party line follow the same rule: the debuff half goes through the same crit and defence functions the damage-dealer side uses, counted once, and the ally attack-power rider goes through the buff model, also counted once.</p>" +
+      "<p><b>Shields convert to damage</b>, at " + fx(p.partyShieldHealValuePerPct, 2) + " points of damage per 1% of shield and heal effect. That is a modelling choice and Shizu&rsquo;s call: a shield that holds is damage the party keeps dealing, so the family scores rather than sitting at zero like the other lines nobody can price. The rate is a judgement, not a measurement.</p>" +
 
       "<h2>The two fixed combat traits</h2>" +
       "<p>Every bracelet arrives with two combat-trait lines, 61–120 points on Ancient and 41–100 on Relic. They never reroll, so whatever they are worth is a constant added to every score the solver can reach — it moves the headline number and the gold, and it changes nothing about which lines to lock.</p>" +
@@ -96,10 +123,10 @@
 
       "<h2>The letter on the family picker</h2>" +
       "<p>Each family in the slot picker carries a grade from F to S. It rates the family's <i>average</i> roll — the three tiers weighted 6 : 3 : 1, the odds of rolling each one — against the best family in the game, banded at 90, 70, 50, 30 and 10 percent of that best. The best family is always S and a family that converts to no damage at all is always F.</p>" +
-      "<p>The letter is always computed on the <b>default character</b>, never on your inputs. A grade labels the family, not your build, so it means the same thing to everyone and does not shuffle every time you move a slider. What a particular roll is worth to <i>you</i> is the tier box beside it and the line-by-line table below.</p>" +
+      "<p>The letter is always computed on the <b>default character of your role</b>, never on your own inputs. A grade labels the family, not your build, so it means the same thing to everyone and does not shuffle every time you move a slider &mdash; but role is not a slider. It decides which lines score at all, and a support reading &ldquo;S &middot; Crit Rate&rdquo; off a line worth exactly nothing to them would not be a stable label, only a wrong one. So a damage dealer sees damage-dealer letters and a support sees support letters, and neither set moves. What a particular roll is worth to <i>you</i> is the tier box beside it and the line-by-line table below.</p>" +
 
       "<h2>Buckets that score nothing</h2>" +
-      "<p>For a damage dealer: Vitality, combat traits in a granted slot, the ten defensive and utility families, and the three support families score 0% damage. That is not a claim they are worthless in game. It means they do not convert into a damage percentage, so the tool refuses to invent one. Attack and move speed is in the same bucket: real value through Raid Captain, out of scope for now.</p>" +
+      "<p>For a damage dealer: Vitality, combat traits in a granted slot, the <b>" + dead.defensive + "</b> defensive and utility families, and the <b>" + dead.support + "</b> support families score 0% damage. That is not a claim they are worthless in game. It means they do not convert into a damage percentage, so the tool refuses to invent one. Switch the role to Support and the second group is the whole scorecard, while every personal-damage family goes to zero instead.</p>" +
       "<p>This matters for the solver, not just the display. Every line that scores nothing is interchangeable with every other line that scores nothing in the same category, so they all collapse into a single outcome. That is what keeps a three-slot solve down to about 48,000 states instead of millions.</p>" +
 
       "<h2>The roll problem, solved exactly</h2>" +
@@ -124,9 +151,7 @@
 
       "<h2>What this does not model</h2>" +
       "<ul>" +
-      "<li><b>Speed lines.</b> Attack and move speed scores zero. It is worth real damage through Raid Captain, and that conversion is not built yet.</li>" +
-
-      "<li><b>Support classes other than Bard.</b> The Specialization-to-buff coefficient is Bard’s. Paladin and Artist have their own and nobody has published them, so the field is there to type into and the default is a Bard.</li>" +
+      "<li><b>Support classes other than Bard.</b> The Specialization-to-buff coefficient is Bard’s. Paladin, Artist and Valkyrie have their own and nobody has published them, so the field is there to type into and the default is a Bard.</li>" +
       "<li><b>Positional base multipliers.</b> A front attack is ×1.20 and a back attack ×1.05 with +10% crit rate before any bracelet line. The tool uses your share inputs but does not fold those base multipliers in, so a positional line is valued against your average damage rather than against the boosted hit.</li>" +
       "<li><b>Roll costs.</b> Silver per attempt rises with each roll and was never published. Treated as free.</li>" +
       "<li><b>The Relic to Ancient upgrade.</b> Upgrading bumps existing lines. Pick the grade you are actually holding.</li>" +

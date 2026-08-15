@@ -88,6 +88,31 @@ and 375px, both verify batteries green, then push to GitHub Pages and confirm li
   than an error, because the browser happily runs a new `subrank.js` against an old
   `model/bracelet.js`.
 
+## Rulings from the 2026-08-14 review pass — do not re-litigate
+
+Three reviewer recommendations were put to Shizu and overruled. A later session
+reading only the review evidence would reach the reviewers' conclusions again, so
+the rulings are recorded here with their reasons.
+
+- **Family 22 stays at 30 stacks.** The naive reading of the tooltip — one stack
+  per 30s, each lasting 120s, so at most 4 alive — was considered and is wrong
+  about the game: each new stack refreshes the pile, so it climbs to the full 30
+  over about fifteen minutes and holds. "Always assume max stacks" therefore
+  means 30 here. The Method tab prose said four and was the thing corrected.
+
+- **Family 28 keeps its damage conversion.** The reviewer read the 0.1-per-percent
+  shield/heal constant as a placeholder paying gold for a non-damage stat and
+  recommended zeroing it. Shizu: "it provides damage when you shield — this is
+  correct." Bigger shields mean more shielded uptime for the party, and shielded
+  allies deal more damage through the shielded-target effects, so the conversion
+  is a modelling choice, not a stub.
+
+- **Supports on the board: the better-letter rule.** A support-class character
+  (Bard, Paladin, Artist, Valkyrie — Guardian Knight is NOT a support) is scored
+  both ways and shown on whichever axis grades their bracelet better. A dealer-
+  spec Bard reads as a dealer; a support bracelet reads on the support ladder
+  with its % labelled per-dealer. No separate board, no badge-only compromise.
+
 ## Open for Shizu — 2026-08-14
 
 **1. The rank breakpoints.** `docs/research/score-distribution.md` has the exact

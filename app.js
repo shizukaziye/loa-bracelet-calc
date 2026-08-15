@@ -9,8 +9,9 @@
  *   BRACELET   one row per granted slot — family picker (grouped and priced),
  *              tier, and a value box for the basic-stat families. All rows empty
  *              means an unrolled bracelet, which is the default.
- *   RESULTS    headline cards, the roll advisor (best locks, P(improve), the
- *              spread of final scores), the cut flow, and a per-line breakdown.
+ *   RESULTS    the headline cards and the per-line breakdown. WHAT TO DO about
+ *              the bracelet — the lock advice, the spread, the keep-or-replace
+ *              cut — is the Advisor tab's, and so is the code that draws it.
  *
  * THE STATE IS NOT HERE (since 2026-08-11). window.Profile owns it, persists it
  * and renders the control deck; this file holds the LIVE state object it returns,
@@ -21,15 +22,16 @@
  * THE MATH IS NOT HERE either. Every number comes from window.Bracelet
  * (model/bracelet.js), which this file only ever reads:
  *   Bracelet.solve({grade, profile, fixedLines, grantedLines, slots, rollsLeft, …})
- *   Bracelet.advise(ctx, {current, rolled, rollsLeft})   — keep or replace
  *   Bracelet.lineDamage / lineInfo / damagePercent / deriveBaseline / attackPower
  *
  * WHY A WORKER. A three-slot, seven-roll solve is ~48,000 states and ~3 s. Run
  * on the main thread it freezes the page on every keystroke, so solve() lives in
  * solver-worker.js: one request in flight, later requests queued and collapsed,
  * stale answers dropped by id, results cached by a canonical state key. Input
- * changes are debounced ~300 ms. Gold never enters the key — value is
- * (expectedFinal − baseline) × gpd, recomputed here for free.
+ * changes are debounced ~300 ms. That worker is SHARED — the Advisor rides this
+ * file's solver through window.BraceletApp, because advise() answers off the one
+ * DP context the worker is holding. Gold never enters the key: worth is a sum
+ * over the distribution the solve returns, recomputed here for free.
  */
 (function () {
   "use strict";
@@ -65,9 +67,6 @@
   // Gold always converts the EXACT damage percentage, never the log-space score,
   // so the arithmetic on screen matches the percentages printed beside it.
   function gpd() { return num(S.econ.gpd, 0); }
-  // A DIFFERENCE between two options — lock mask A against lock mask B. Both are
-  // futures you could still choose, so this one is signed on purpose.
-  function deltaGold(Da, Db) { return (pct(Da) - pct(Db)) * gpd(); }
 
   /**
    * WHAT A BRACELET IS WORTH, in gold. The model's own definition, applied to the
@@ -129,19 +128,29 @@
   /**
    * The odds half of a worth figure, as a FIGURE — the second number of the
    * pair, not a sentence about it (docs/design/copy-rules.md, rules 1 and 5).
+   * The baseline it is measured against is on the control that sets it and in
+   * the gloss beside this figure, so the figure does not repeat it.
+   *
+   * SILENT AT A ZERO BASELINE. That is the shipped default, so every first-time
+   * visitor was told that "very nearly all of the outcomes clear your 0.00%
+   * baseline" — a proportion of a comparison against nothing.
+   *
    * The "worth nothing" case keeps its sentence: a gold figure of zero with no
    * explanation is the one state the cards cannot say for themselves (rule 4).
    */
   function worthNote(w) {
-    if (!w) return "";
-    var base = fx(num(S.econ.baseline, 0), 2) + "% baseline";
-    if (w.p <= 0) return "Nothing it can roll beats your " + base + ".";
-    return oddsTxt(w.p) + " of the outcomes clear your " + base;
+    if (!w || num(S.econ.baseline, 0) <= 0) return "";
+    if (w.p <= 0) return "Nothing it can roll beats your " + fx(num(S.econ.baseline, 0), 2) + "% baseline.";
+    // A FIGURE all the way up. oddsTxt's top rung is the words "very nearly all",
+    // which is right in a sentence and reads as a stutter in a pair — "very
+    // nearly all of outcomes".
+    return (w.p >= 0.9995 ? "over 99.9%" : oddsTxt(w.p)) + " of outcomes";
   }
   /** The meaning, in the tooltip where meaning belongs. */
   function worthGloss(w) {
     if (!w) return "What this bracelet is worth over the one you would wear instead. It needs a solve first.";
-    return "What this bracelet is worth over the one you would wear instead: how far the outcomes that beat your baseline clear it, averaged over how often they land, at " +
+    return "What this bracelet is worth over the one you would wear instead: how far the outcomes that beat your " +
+      fx(num(S.econ.baseline, 0), 2) + "% baseline clear it, averaged over how often they land, at " +
       gold(gpd()) + " gold per 1%. Never negative — a bracelet you would not equip is worth nothing, not a debt.";
   }
 
@@ -151,11 +160,12 @@
   // Everything below reads S (window.Profile's live object) and the handful of
   // derived numbers Profile exposes. Nothing here writes a control's value: the
   // deck does that and tells us through onChange. What this file DOES own is the
-  // bracelet itself — rows, fixed rows, locks, the rolled set and the history —
-  // because they are the Calculator's subject, not the character's.
+  // bracelet's own lines — the granted rows and the fixed rows — because they are
+  // the Calculator's subject, not the character's. The padlocks, the rolled set
+  // and the history are the Advisor's; this file only ever clears S.locks, when
+  // the bracelet they were chosen for stops existing.
   // ------------------------------------------------------------------
 
-  function blankRow() { return P.blankRow(); }
   function traitValues() { return P.traitValues(); }
   function traitBand() { return P.traitBand(); }
 
@@ -332,10 +342,14 @@
    * combat traits close the whole 35% trait share of the pool, which a fixed
    * junk special does not (expected final 5.94% against 4.49%). The Advanced
    * fixed-line editor therefore still lists every family by name.
+   *
+   * NOT CACHED. Which families score nothing depends on the ROLE as much as on
+   * the grade, and a cache keyed on the grade alone handed a support the damage
+   * dealer's stand-ins: a row labelled "Junk Line — no damage at all" scored
+   * +0.25% and +0.67% (Shizu, 2026-08-14). It is a sort over thirty families off
+   * letters profile.js already caches, so there was nothing here worth keeping.
    */
-  var junkPoolCache = {};
   function junkFamPool(grade) {
-    if (junkPoolCache[grade]) return junkPoolCache[grade];
     var fg = famGrades(grade), sum = DATA.GRANTED_LISTED_SUM, list = [], k, id, fam, w, t;
     for (k in fg.special) if (Object.prototype.hasOwnProperty.call(fg.special, k)) {
       if (fg.special[k].letter !== "F") continue;
@@ -348,24 +362,36 @@
     list.sort(function (a, b) { return a.w - b.w || a.id - b.id; });
     var out = [];
     for (k = 0; k < list.length; k++) out.push(list[k].id);
-    junkPoolCache[grade] = out;
     return out;
   }
 
   /**
-   * One stand-in per granted slot, index-aligned, skipping anything a fixed
-   * line already holds — two lines of the same family would otherwise trip the
+   * One stand-in per granted slot, index-aligned, skipping every family already
+   * named on the bracelet — two lines of the same family would otherwise trip the
    * duplicate check in validateSet.
+   *
+   * The GRANTED rows count too, not just the fixed ones. They hold their real
+   * family now even when it is worth nothing to the role being scored (see
+   * familyOptions), so a support who typed families 29 and 30 and pressed DPS has
+   * two rows naming the very families the damage dealer's junk pool hands out —
+   * and the panel used to answer "two lines share the same effect" about a
+   * duplicate the user never picked.
    */
   function junkReps() {
-    var pool = junkFamPool(S.grade), used = {}, i, r, out = [];
-    for (i = 0; i < S.fixedRows.length; i++) {
-      r = S.fixedRows[i];
-      if (r && r.fam && r.fam.indexOf("sp:") === 0) used[Number(r.fam.slice(3))] = 1;
-    }
+    var pool = junkFamPool(S.grade), used = {}, i, out = [];
+    markSpecials(S.fixedRows, used);
+    markSpecials(S.rows, used);
     for (i = 0; i < pool.length && out.length < S.slots; i++) if (!used[pool[i]]) out.push(pool[i]);
     while (out.length < S.slots) out.push(pool[out.length] || pool[0]);
     return out;
+  }
+
+  /** Every special family id these rows name, as a set. */
+  function markSpecials(rows, used) {
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      if (r && r.fam && r.fam.indexOf("sp:") === 0) used[Number(r.fam.slice(3))] = 1;
+    }
   }
 
   /**
@@ -403,8 +429,17 @@
    *
    * collapseJunk (granted slots only) drops every F-graded family, whichever
    * group it landed in, and puts one "Junk Line" in their place.
+   *
+   * `held` is the family the row is actually showing, and the collapse must
+   * never swallow it. Which families grade F depends on the ROLE — 28, 29 and 30
+   * are dead to a damage dealer and worth up to 0.90% to a support, and every
+   * crit line is the other way round — so a support who typed those three and
+   * then pressed DPS would find three slots holding a family the picker no
+   * longer lists. The state keeps the real family (profile.js collapses stored
+   * rows once, on load, and only for families dead to BOTH roles); this puts it
+   * back on screen, greyed, beside the reason it is worth nothing.
    */
-  function familyOptions(grade, collapseJunk) {
+  function familyOptions(grade, collapseJunk, held) {
     var fg = famGrades(grade);
     var G = { Damage: [], Party: [], "Weapon Power": [], Stats: [], Junk: [] };
     var i, g;
@@ -424,12 +459,24 @@
 
     var order = ["Damage", "Party", "Weapon Power", "Stats", "Junk"], j;
     if (collapseJunk) {
+      // The held family's own entry, taken before the collapse throws it away —
+      // so its name is the one the list would have shown, not a second spelling.
+      var heldOpt = null;
+      if (held && held !== "none" && held !== JUNK) {
+        for (i = 0; i < order.length && !heldOpt; i++) {
+          for (j = 0; j < G[order[i]].length; j++) if (G[order[i]][j].val === held) { heldOpt = G[order[i]][j]; break; }
+        }
+      }
       for (i = 0; i < order.length; i++) {
         var keep = [];
         for (j = 0; j < G[order[i]].length; j++) if (G[order[i]][j].letter !== "F") keep.push(G[order[i]][j]);
         G[order[i]] = keep;
       }
       G.Junk = [{ val: JUNK, text: "Junk Line — no damage at all", letter: "F", avg: 0 }];
+      if (heldOpt && heldOpt.letter === "F") {
+        G.Junk.push({ val: heldOpt.val, letter: "F", avg: 0,
+          text: heldOpt.text + " — worth nothing to " + (P.role() === "support" ? "a support" : "a damage dealer") });
+      }
     }
 
     var groups = [];
@@ -612,24 +659,25 @@
   var busy = 0;
 
   /**
-   * The solve cache's key. EVERY field the model reads has to be in here, or a
-   * setting the user changed serves a stale solve — role, the whole support
-   * block and supportHasEffects were all missing until 2026-08-14, so flipping
-   * to Support left the hero cards showing the damage dealer's answer.
+   * The solve cache's key. THE WHOLE PROFILE, not a list of its fields.
    *
-   * flatWP joins flatAP for the same reason: a weapon ark-grid core moves the
-   * square-root term and every weapon-power line with it.
+   * A hand-kept list is a list somebody has to remember to extend, and every
+   * omission is the same bug: a setting moves, the table under it moves, and the
+   * hero cards go on quoting a solve of the old one. Role, the support block and
+   * supportHasEffects were all missing until 2026-08-14, and
+   * atkMoveSpeedDamagePerPct outlived that fix — drag Attack speed from 1 to 3
+   * and the breakdown ran to +17.35% while every card stayed at +14.60%.
+   *
+   * The object is safe to stringify: it comes from normalizeProfile, which
+   * deep-copies the model's DEFAULT_PROFILE and writes over it, so the key order
+   * is that constant's order every time whatever the caller passed.
+   *
+   * GOLD IS STILL NOT IN HERE, because gold is not on the profile — the rate and
+   * the baseline live on S.econ and never reach normalizeProfile. That is what
+   * lets the gold slider drag without a three-second re-solve.
    */
   function profileSig(profile) {
-    return JSON.stringify([
-      profile.role, profile.support,
-      profile.mainStatRaw, profile.weaponPowerRaw, profile.msPct, profile.wpPct, profile.baseApPct,
-      profile.flatAP, profile.flatWP,
-      profile.skills, profile.master, profile.addDamage, profile.backAttackShare, profile.frontAttackShare,
-      profile.nonDirectionalShare, profile.staggeredShare, profile.demonShare, profile.demonBase,
-      profile.shieldUptime, profile.allyDpsCount, profile.supportHasEffects, profile.enemyBaseDR,
-      profile.cooldownPenaltyWeight, profile.traitWeights
-    ]);
+    return JSON.stringify(profile);
   }
 
   // Gold is deliberately NOT in the key, and the solve is sent goldPer1Pct 0 and
@@ -643,7 +691,7 @@
   function ensureWorker() {
     if (worker) return worker;
     try {
-      worker = new Worker("solver-worker.js?v=7");
+      worker = new Worker("solver-worker.js?v=9");
     } catch (e) {
       worker = null;
       return null;
@@ -756,6 +804,13 @@
     }
 
     var rolls = S.rollsLeft;
+    // DIM WHAT IS ABOUT TO BE REPLACED. A solve is a second or three, and until
+    // it lands every figure on screen answers a question the user has stopped
+    // asking — so a role flip looked like it did nothing at all. Here rather
+    // than in schedule(): this runs when the debounce has already fired, so a
+    // drag never flickers, and only when the key really moved, so dragging the
+    // gold slider (which is not in the key) never dims anything.
+    if (keyOf(profile, granted, rolls) !== lastSolveKey) markStale(true);
     solveState(profile, granted, rolls).then(function (out) {
       if (mine !== computeSeq) return;                       // a newer edit already landed
       lastSolve = out.res; lastSolveKey = out.key;
@@ -879,39 +934,13 @@
       "#tab-calculator .bc-ttrefs{margin-top:6px;font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}" +
       "#tab-calculator .bc-ttrefs b{color:var(--text);font-weight:700}" +
       "#tab-calculator .bc-ttrefs .sep{opacity:.5;margin:0 2px}" +
-      // quantile strip
-      "#tab-calculator .bc-strip{position:relative;height:34px;margin:12px 0 4px}" +
-      "#tab-calculator .bc-strip .track{position:absolute;left:0;right:0;top:13px;height:8px;border-radius:4px;background:var(--panel2);border:1px solid var(--border)}" +
-      "#tab-calculator .bc-strip .whisk{position:absolute;top:16px;height:2px;background:var(--border)}" +
-      "#tab-calculator .bc-strip .box{position:absolute;top:9px;height:16px;border-radius:4px;background:rgba(102,199,255,.22);border:1px solid var(--accent)}" +
-      "#tab-calculator .bc-strip .med{position:absolute;top:5px;width:2px;height:24px;background:var(--accent)}" +
-      "#tab-calculator .bc-strip .cur{position:absolute;top:2px;width:2px;height:30px;background:var(--high)}" +
-      "#tab-calculator .bc-qlab{display:flex;justify-content:space-between;font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}" +
-      // advisor
-      "#tab-calculator .bc-lockline{font-size:14px;line-height:1.6;margin:2px 0 8px}" +
-      "#tab-calculator .bc-pill{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:700;background:var(--panel2);border:1px solid var(--border);margin:0 4px 4px 0}" +
-      "#tab-calculator .bc-pill.lock{border-color:var(--accent);color:var(--accent)}" +
-      "#tab-calculator .bc-pill.roll{color:var(--dim)}" +
+      // The quantile strip, the lock pills, the cut grid and the verdict box went
+      // to advisor.js with the panels they dress, under its own av- names. This
+      // tab keeps what a bracelet IS: the cards, the breakdown and its warnings.
       "#tab-calculator .bc-tabwrap{overflow-x:auto}" +
       // tr:last-child kills the border on the last row of BOTH sections, so the
       // Total row would float free of the table without this.
       "#tab-calculator tfoot td{border-top:1px solid var(--border)}" +
-      // cut flow
-      "#tab-calculator .bc-cutgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}" +
-      "@media(max-width:760px){#tab-calculator .bc-cutgrid{grid-template-columns:1fr}}" +
-      "#tab-calculator .bc-lockrow{display:flex;align-items:center;gap:8px;padding:5px 8px;border:1px solid var(--border);border-radius:7px;margin-bottom:6px;background:var(--panel2);font-size:12.5px}" +
-      "#tab-calculator .bc-lockrow input{accent-color:var(--accent)}" +
-      "#tab-calculator .bc-lockrow .ln{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
-      "#tab-calculator .bc-verdict{border-radius:10px;padding:13px 15px;margin-top:12px;border:1px solid var(--border);background:var(--panel2)}" +
-      "#tab-calculator .bc-verdict.keep{border-color:var(--good)}" +
-      "#tab-calculator .bc-verdict.replace{border-color:var(--high)}" +
-      "#tab-calculator .bc-verdict .hd{font-size:19px;font-weight:800;letter-spacing:-.01em}" +
-      "#tab-calculator .bc-verdict.keep .hd{color:var(--good)}" +
-      "#tab-calculator .bc-verdict.replace .hd{color:var(--high)}" +
-      "#tab-calculator .bc-verdict .bd{font-size:12.5px;color:var(--dim);margin-top:6px;line-height:1.55}" +
-      "#tab-calculator .bc-hist{list-style:none;margin:8px 0 0;padding:0;font-size:12.5px}" +
-      "#tab-calculator .bc-hist li{padding:6px 0;border-bottom:1px solid var(--border);line-height:1.5}" +
-      "#tab-calculator .bc-hist li:last-child{border-bottom:none}" +
       "#tab-calculator .bc-warn{color:var(--bad);font-size:12.5px;margin:8px 0}" +
       "</style>";
   }
@@ -1133,10 +1162,11 @@
     var isSpecial = row.fam.indexOf("sp:") === 0;
     var famKey = isBasic ? row.fam.slice(6) : "mainStat";
     var msValue = (row.value === null || row.value === undefined || row.value === "") ? defaultBasicValue(grade, famKey) : num(row.value, defaultBasicValue(grade, famKey));
-    // Granted and rolled rows fold the F families into one "Junk Line"; the
+    // Granted rows fold the F families into one "Junk Line"; the
     // Advanced fixed-line editor ("bc-f") keeps every family by name, because a
-    // fixed line's category is load-bearing for the pool (see junkFamPool).
-    var groups = familyOptions(grade, prefix !== "bc-f");
+    // fixed line's category is load-bearing for the pool (see junkFamPool). The
+    // family this row holds is passed in so the fold can never hide it.
+    var groups = familyOptions(grade, prefix !== "bc-f", row.fam);
     var rg = msRange(grade, famKey);
 
     // Rarity first, family second: the rarity is the short, high-signal box and
@@ -1242,31 +1272,6 @@
   }
 
   /**
-   * A pill-sized name. The official labels carry placeholders (+A%, +X, +B%)
-   * that say nothing once the tier is known, so strip those and the value list,
-   * then keep the tier.
-   */
-  function shortLabel(line, grade) {
-    if (!line) return "—";
-    if (line.junk) return "Junk Line";
-    if (line.cat === "basic") return (line.family === "mainStat" ? "Str / Dex / Int +" : "Vitality +") + nf(line.value);
-    if (line.cat === "trait") return lineLabel(line, grade);
-    var fam = DATA.SPECIAL_BY_ID[line.family];
-    if (!fam) return "unknown";
-    var s = fam.label
-      .replace(/;\s*ally[^;]*$/i, "")            // the ally-buff rider scores 0 for a DPS
-      .replace(/\(1\/party\)/g, "")
-      .replace(/[+−-]\s*[AXB]%?/g, "")
-      .replace(/\s+([;,])/g, "$1")
-      .replace(/\(\s*\)/g, "")
-      .replace(/\s{2,}/g, " ")
-      .trim()
-      .replace(/[;,]$/, "");
-    if (s.length > 40) s = s.slice(0, 38).replace(/[\s,;]+$/, "") + "…";
-    return s + " · " + line.tier;
-  }
-
-  /**
    * The advisor reports locks as solver atom keys. Walk them back onto the slots
    * on screen: greedy match, because two slots CAN hold the same key only when
    * they are both junk, and junk is never locked.
@@ -1283,26 +1288,6 @@
     return out;
   }
 
-  function quantileStrip(q, cur) {
-    var lo = Math.min(pct(q.p10), pct(cur)), hi = Math.max(pct(q.p90), pct(cur));
-    var pad = Math.max(0.3, (hi - lo) * 0.12);
-    lo -= pad; hi += pad;
-    var span = hi - lo || 1;
-    function x(v) { return ((pct(v) - lo) / span * 100).toFixed(2) + "%"; }
-    function w(a, b) { return ((pct(b) - pct(a)) / span * 100).toFixed(2) + "%"; }
-    return '<div class="bc-strip">' +
-      '<div class="track"></div>' +
-      '<div class="whisk" style="left:' + x(q.p10) + ";width:" + w(q.p10, q.p90) + '"></div>' +
-      '<div class="box" style="left:' + x(q.p25) + ";width:" + w(q.p25, q.p75) + '"></div>' +
-      '<div class="med" style="left:' + x(q.p50) + '"></div>' +
-      '<div class="cur" style="left:' + x(cur) + '" data-gloss="Where the bracelet sits right now."></div>' +
-      "</div>" +
-      '<div class="bc-qlab" data-gloss="The spread of where this bracelet finishes, over every way the remaining rolls can land under the best play. p10 means one bracelet in ten ends below this; p90, one in ten ends above. The blue box is the middle half, the blue line the median, the orange line where you are today.">' +
-      "<span>p10 " + fx(pct(q.p10), 2) + "%</span><span>p25 " + fx(pct(q.p25), 2) +
-      "%</span><span>median " + fx(pct(q.p50), 2) + "%</span><span>p75 " + fx(pct(q.p75), 2) +
-      "%</span><span>p90 " + fx(pct(q.p90), 2) + "%</span></div>";
-  }
-
   function cardsHtml(res, profile) {
     var curPct = pct(res.currentScore), finPct = pct(res.expectedFinal);
     var w = worthOf(res, 0);
@@ -1313,15 +1298,17 @@
     //
     // Each card is a label, a number and a unit. What the number MEANS rides in
     // the label's gloss; the working is in the method block at the foot of the
-    // tab (docs/design/copy-rules.md). The one sub-line that survives as a
-    // sentence is "Unrolled" — an empty state, which the cards cannot show.
+    // tab (docs/design/copy-rules.md). A sub-line that only restates its own
+    // tooltip is cut, and cut with its element rather than emptied — a hole in
+    // the layout where a sentence used to be is worse than either (rule 6).
     h += '<div class="bc-card hero"><div class="k" data-gloss="What the bracelet on screen is worth in damage over no bracelet at all: every effect line and both combat traits, combined.">Current score</div><div class="v acc">' + fx(curPct, 2) +
-      '%</div><div class="s">' + (res.unrolled ? "Unrolled — no granted lines yet." : "both combat traits and every effect line") + "</div></div>";
+      "%</div></div>";
     h += '<div class="bc-card"><div class="k" data-gloss="The average score this bracelet finishes at once the remaining rolls are played perfectly. Rolls are free, so rolling always beats stopping. An average, not a promise.">Expected final</div><div class="v">' + fx(finPct, 2) +
       '%</div><div class="s">' + (S.rollsLeft ? "after " + S.rollsLeft + " roll" + (S.rollsLeft === 1 ? "" : "s") : "no rolls left") + "</div></div>";
+    var wn = worthNote(w);
     h += '<div class="bc-card"><div class="k" data-gloss="' + esc(worthGloss(w)) + '">Worth</div>' +
       '<div class="v gold">' + (w ? gold(w.gold) : "—") + "</div>" +
-      '<div class="s">' + esc(worthNote(w)) + "</div></div>";
+      (wn ? '<div class="s">' + esc(wn) + "</div>" : "") + "</div>";
     if (freshSolve) h += unrolledCardHtml();
     return h + "</div>";
   }
@@ -1342,26 +1329,32 @@
   // worker round trip, and the slider stays live under the hand.
   // ------------------------------------------------------------------
 
-  // null means "follow the bracelet's own traits"; a number is the user's pick.
-  var traitTotalUI = null;
+  // null means "follow the bracelet's own traits"; a number is the user's pick,
+  // PER LINE.
+  //
+  // It held the TOTAL until 2026-08-14, which made the pair on the card depend on
+  // how many trait lines happened to be switched on: park the slider at 90/90,
+  // switch a third trait on, and 180 points had three lines to cover, so the card
+  // rescaled itself to 61/61/61 under the user's hand. What the control shows is
+  // what it stores now, and the count is only ever multiplied back in where a
+  // total is genuinely wanted.
+  var traitEachUI = null;
 
-  /** The legal span of the two-trait sum for this grade, and its active count. */
-  function traitTotalRange() {
-    var band = traitBand(), n = 0, i;
-    for (i = 0; i < TRAIT_KEYS.length; i++) if (S.traits[TRAIT_KEYS[i]] && S.traits[TRAIT_KEYS[i]].on) n++;
-    if (!n) n = 2;
-    return { lo: band[0] * n, hi: band[1] * n, n: n };
+  /** How many trait lines the slider's value covers. Never zero: an empty bracelet still prices as a pair. */
+  function traitLineCount() { return P.traitOnCount() || 2; }
+  /** What the bracelet on screen carries, per line — its own lines averaged. */
+  function traitEachNow() {
+    var v = traitValues(), s = 0, n = 0, i, k;
+    for (i = 0; i < TRAIT_KEYS.length; i++) {
+      k = TRAIT_KEYS[i];
+      if (S.traits[k] && S.traits[k].on) { s += num(v[k], 0); n++; }
+    }
+    return n ? s / n : 0;
   }
-  /** What the bracelet on screen actually carries. */
-  function traitTotalNow() {
-    var v = traitValues(), s = 0, i;
-    for (i = 0; i < TRAIT_KEYS.length; i++) s += num(v[TRAIT_KEYS[i]], 0);
-    return s;
-  }
-  function traitTotalValue() {
-    var r = traitTotalRange();
-    var v = traitTotalUI === null ? traitTotalNow() : traitTotalUI;
-    return clamp(Math.round(v), r.lo, r.hi);
+  /** The per-line value being priced, always inside the grade's own band. */
+  function traitEachValue() {
+    var band = traitBand();
+    return clamp(Math.round(traitEachUI === null ? traitEachNow() : traitEachUI), band[0], band[1]);
   }
 
   /**
@@ -1378,16 +1371,12 @@
    * The value is still clamped to the grade's band — a bracelet the game cannot
    * produce must not be priced as if it could.
    */
-  function traitsForTotal(total) {
-    var out = { crit: 0, spec: 0, swift: 0 }, keys = [], i, k;
+  function traitsEven(each) {
+    var out = { crit: 0, spec: 0, swift: 0 }, band = traitBand(), v = clamp(num(each, 0), band[0], band[1]), i, k;
     for (i = 0; i < TRAIT_KEYS.length; i++) {
       k = TRAIT_KEYS[i];
-      if (S.traits[k] && S.traits[k].on) keys.push(k);
+      if (S.traits[k] && S.traits[k].on) out[k] = v;
     }
-    if (!keys.length) return out;
-    var band = traitBand();
-    var each = clamp(total / keys.length, band[0], band[1]);
-    for (i = 0; i < keys.length; i++) out[keys[i]] = each;
     return out;
   }
 
@@ -1404,10 +1393,10 @@
   /**
    * What to price. `worn` asks for the bracelet's own pair, lopsided or not —
    * true only for the headline figure while the slider has not been touched.
-   * Every other caller passes a total and gets an even pair.
+   * Every other caller passes a per-line value and gets an even pair.
    */
-  function traitsPriced(total, worn) {
-    return worn ? traitsAsWorn() : traitsForTotal(total);
+  function traitsPriced(each, worn) {
+    return worn ? traitsAsWorn() : traitsEven(each);
   }
 
   /**
@@ -1423,10 +1412,16 @@
    * headline figures ran a difference of means. Both now go through worthOf,
    * which is where that arithmetic and its reasoning live.
    */
-  function unrolledWorthAt(total, worn) {
+  // APPROXIMATION under the 0.4.x joint pool: shifting a solved distribution by
+  // a trait-damage DELTA treats traits as additive, which they no longer exactly
+  // are — the pooled crit factor bends near the 100% cap. The error is zero for
+  // Spec/Swift-weighted pairs and only bites when the priced pair pushes crit to
+  // saturation, where it reads slightly high. Re-solving per slider step is the
+  // exact answer at ~3s a step; not worth it for a preview figure.
+  function unrolledWorthAt(each, worn) {
     if (!freshSolve) return null;
     var prof = buildProfile();
-    var shift = B.traitDamage(traitsPriced(total, worn), prof) - num(freshSolve.traitDamage, 0);
+    var shift = B.traitDamage(traitsPriced(each, worn), prof) - num(freshSolve.traitDamage, 0);
     var w = worthOf(freshSolve, shift);          // the same truncated expectation every worth uses
     return w ? w.gold : null;
   }
@@ -1446,11 +1441,11 @@
   }
 
   function unrolledCardHtml() {
-    var r = traitTotalRange(), t = traitTotalValue();
-    var w = unrolledWorthAt(t, traitTotalUI === null);
+    var each = traitEachValue();
+    var w = unrolledWorthAt(each, traitEachUI === null);
     var refs = traitRefPoints(), rh = "", i;
     for (i = 0; i < refs.length; i++) {
-      var rw = unrolledWorthAt(refs[i] * r.n);
+      var rw = unrolledWorthAt(refs[i]);
       rh += (i ? ' <span class="sep">·</span> ' : "") + '<b>' + traitPairLabel(refs[i]) + "</b> " +
         (rw == null ? "—" : gold(rw));
     }
@@ -1459,106 +1454,46 @@
       '<div class="k" data-gloss="What a sealed bracelet of this grade and slot count is worth before anyone opens it. The two combat traits never reroll, so they are the part a buyer cannot change — slide to price a different pair.">Unrolled, ' +
       S.slots + " slots</div>" +
       '<div class="v gold" id="bc-tt-val">' + (w == null ? "—" : gold(w)) + "</div>" +
-      '<div class="s" id="bc-tt-say">' + unrolledSayHtml(t) + "</div>" +
+      '<div class="s" id="bc-tt-say">' + unrolledSayHtml(each) + "</div>" +
       '<div class="bc-ttrow">' +
       '<label for="bc-tt" data-gloss="The fixed combat traits, both at the same value. ' +
       (S.grade === "relic" ? "Relic" : "Ancient") + " lines run " + band[0] + "&ndash;" + band[1] +
       ' points each. Only even pairs are priced: at the same total a lopsided pair costs MORE on the auction house — 120/80 asks about 25,100 gold where 100/100 asks 18,300 — so the even pair is always the cheaper way to buy a given total.">Combat traits, each</label>' +
-      '<input id="bc-tt" type="range" min="' + band[0] + '" max="' + band[1] + '" step="1" value="' +
-      Math.round(t / r.n) + '">' +
-      '<span class="chip" id="bc-tt-chip">' + traitPairLabel(Math.round(t / r.n)) + "</span></div>" +
+      '<input id="bc-tt" type="range" min="' + band[0] + '" max="' + band[1] + '" step="1" value="' + each + '">' +
+      '<span class="chip" id="bc-tt-chip">' + traitPairLabel(each) + "</span></div>" +
       '<div class="bc-ttrefs" id="bc-tt-refs" data-gloss="The same price at three lower pairs, so the shape of the curve reads without dragging.">' + rh + "</div>" +
       "</div>";
   }
 
   /** "90 / 90" for the active line count, or just "90" if only one is on. */
   function traitPairLabel(each) {
-    var r = traitTotalRange(), out = [], i;
-    for (i = 0; i < r.n; i++) out.push(each);
+    var n = traitLineCount(), out = [], i;
+    for (i = 0; i < n; i++) out.push(each);
     return out.join(" / ");
   }
 
   /**
    * The sub-line under the price. Grade, slots and rolls are all on controls
-   * overhead, so the card does not repeat them: what it shows is the SPLIT the
-   * slider does not — which two trait lines that total is made of — and, when it
-   * is following the bracelet rather than the slider, that provenance.
+   * overhead, so the card does not repeat them: what it shows is WHICH trait
+   * lines are being priced, which the slider's bare number does not — and, when
+   * it is following the bracelet rather than the slider, that provenance.
    */
-  function unrolledSayHtml(t) {
-    var tv = traitsPriced(t, traitTotalUI === null), parts = [], i, k;
+  function unrolledSayHtml(each) {
+    var tv = traitsPriced(each, traitEachUI === null), parts = [], i, k;
     for (i = 0; i < TRAIT_KEYS.length; i++) {
       k = TRAIT_KEYS[i];
       if (tv[k] > 0) parts.push(TRAIT_LABELS[k] + " " + Math.round(tv[k]));
     }
     return esc(parts.length ? parts.join(" / ") : "no combat traits") +
-      (traitTotalUI === null ? " · as on this bracelet" : "");
+      (traitEachUI === null ? " · as on this bracelet" : "");
   }
 
   /** Slider moved: repaint the three numbers, never the card under the cursor. */
   function paintTraitTotal() {
-    var t = traitTotalValue(), w = unrolledWorthAt(t, traitTotalUI === null);
-    var c = $("bc-tt-chip"); if (c) c.textContent = traitPairLabel(Math.round(t / traitTotalRange().n));
+    var each = traitEachValue(), w = unrolledWorthAt(each, traitEachUI === null);
+    var c = $("bc-tt-chip"); if (c) c.textContent = traitPairLabel(each);
     var v = $("bc-tt-val"); if (v) v.textContent = (w == null ? "—" : gold(w));
-    var s = $("bc-tt-say"); if (s) s.innerHTML = unrolledSayHtml(t);
-  }
-
-  function advisorHtml(res, profile, lines) {
-    if (res.unrolled) {
-      return '<div class="panel"><h2 style="margin-top:0">Roll advisor</h2>' +
-        "<p>The bracelet has not been opened yet. When it drops, type its granted lines into the Bracelet panel above and the advisor will name the best lines to lock.</p>" +
-        "<p class=\"note\">An unrolled bracelet is worth " + fx(pct(res.expectedFinal), 2) +
-        "% expected, and the spread below is what the " + S.rollsLeft + " rolls can make of it.</p>" +
-        quantileStrip(res.finalScore.quantiles, res.currentScore) + "</div>";
-    }
-    if (!res.maskEV.length) {
-      return '<div class="panel"><h2 style="margin-top:0">Roll advisor</h2>' +
-        "<p>No rolls left — this bracelet is final at " + fx(pct(res.currentScore), 2) + "%.</p></div>";
-    }
-
-    var best = res.maskEV[0];
-    var lockFlags = locksFromKeys(best.lockedKeys, lines, S.grade, profile);
-    var h = '<div class="panel"><h2 style="margin-top:0">Roll advisor</h2>';
-
-    h += '<div class="bc-lockline">';
-    if (!best.lockedKeys.length) {
-      h += "<b>Lock nothing.</b> Reroll all " + S.slots + " slots.";
-    } else {
-      h += "<b>Lock</b> ";
-      var i;
-      for (i = 0; i < lockFlags.length; i++) if (lockFlags[i]) h += '<span class="bc-pill lock">Slot ' + (i + 1) + " · " + esc(shortLabel(lines[i], S.grade)) + "</span>";
-      h += "<b>reroll</b> ";
-      for (i = 0; i < lockFlags.length; i++) if (!lockFlags[i]) h += '<span class="bc-pill roll">Slot ' + (i + 1) + " · " + esc(shortLabel(lines[i], S.grade)) + "</span>";
-    }
-    h += "</div>";
-
-    var second = res.maskEV.length > 1 ? res.maskEV[1] : null;
-    h += '<p class="note">Expected final ' + fx(pct(best.ev), 3) + "%" +
-      (second ? ", worth " + gold(deltaGold(best.ev, second.ev)) + " gold more than the next best mask" : "") +
-      ". A lock is only worth it when the line it holds is scarcer than what a fresh draw would give you — the solver weighs both, over every remaining roll.</p>";
-
-    h += '<div class="bc-tabwrap"><table><thead><tr><th><span data-gloss="Which slots you pay to keep before pressing reroll. Everything not listed is rerolled together — one attempt rerolls every unlocked slot at once.">Lock</span></th><th class="num"><span data-gloss="The average score this bracelet finishes at if you lock exactly these slots now and then play the remaining rolls perfectly. Rolls are free, so rolling always beats stopping.">Expected final</span></th><th class="num"><span data-gloss="What choosing this mask instead of the best one costs you, in gold, at your gold-per-1% rate.">vs best</span></th></tr></thead><tbody>';
-    var n = Math.min(res.maskEV.length, 6), k;
-    for (k = 0; k < n; k++) {
-      var m = res.maskEV[k], fl = locksFromKeys(m.lockedKeys, lines, S.grade, profile), names = [], j;
-      for (j = 0; j < fl.length; j++) if (fl[j]) names.push("slot " + (j + 1));
-      h += "<tr" + (k === 0 ? ' class="accent"' : "") + "><td>" + (names.length ? esc(names.join(" + ")) : "nothing — reroll everything") +
-        '</td><td class="num">' + fx(pct(m.ev), 3) + '%</td><td class="num">' +
-        (k === 0 ? "—" : gold(deltaGold(m.ev, best.ev))) + "</td></tr>";
-    }
-    h += "</tbody></table></div>";
-    if (res.maskCount > n) {
-      var rest = res.maskCount - n;
-      h += '<div class="note">' + rest + (rest === 1 ? " weaker mask" : " weaker masks") + " not shown.</div>";
-    }
-
-    h += '<div class="grid c2" style="margin-top:14px">';
-    h += "<div><div class=\"subh\"><span data-gloss=\"How often the bracelet you end up with beats the one you are holding. It is not the chance any single roll is better — you keep the old set whenever the new one is worse, so the only way to finish below where you started is to never take a roll.\">Chance this improves</span></div><div style=\"font-size:22px;font-weight:800\">" +
-      fx(res.pImprove * 100, 1) + "%</div><div class=\"note\">Probability the bracelet ends above its current " +
-      fx(pct(res.currentScore), 2) + "%, over all " + S.rollsLeft + " remaining rolls played well.</div></div>";
-    h += "<div><div class=\"subh\">Where it can land</div>" + quantileStrip(res.finalScore.quantiles, res.currentScore) +
-      '<div class="note">Box = the middle half, whisker = p10 to p90, orange = today.</div></div>';
-    h += "</div></div>";
-    return h;
+    var s = $("bc-tt-say"); if (s) s.innerHTML = unrolledSayHtml(each);
   }
 
   /** One row per active combat trait, with the arithmetic in its tooltip. */
@@ -1614,95 +1549,14 @@
     return h;
   }
 
-  // ---- cut flow ----
-
-  function cutLocks(res, lines, profile) {
-    if (S.locks && S.locks.length === S.slots) return S.locks;
-    if (res && res.bestLockMask) return locksFromKeys(res.bestLockMask.lockedKeys, lines, S.grade, profile);
-    var out = [], i;
-    for (i = 0; i < S.slots; i++) out.push(false);
-    return out;
-  }
-
-  function ensureRolled() {
-    if (!S.rolled || S.rolled.length !== S.slots) {
-      S.rolled = [];
-      for (var i = 0; i < S.slots; i++) S.rolled.push(blankRow());
-    }
-    return S.rolled;
-  }
-
-  var lastVerdict = null;
-
-  function cutHtml(res, profile, lines) {
-    if (res.unrolled) return "";
-    var h = '<div class="panel" id="bc-cut"><h2 style="margin-top:0">I rolled — keep or replace?</h2>';
-    if (S.rollsLeft <= 0) {
-      return h + "<p>No rolls left.</p>" + historyHtml() + "</div>";
-    }
-    var locks = cutLocks(res, lines, profile);
-    ensureRolled();
-
-    h += '<p class="note">Lock what you locked in game, type the lines the roll gave you, and the tool compares the two sets by what they are worth with ' +
-      (S.rollsLeft - 1) + " roll" + (S.rollsLeft - 1 === 1 ? "" : "s") +
-      ' still to come<span data-gloss="Not by which set scores more today. A weaker set can be worth more because of what it clears out of the pool for the rolls that follow.">*</span>.</p>';
-
-    h += '<div class="bc-cutgrid"><div><div class="subh">Locked for this roll</div>';
-    var i;
-    for (i = 0; i < S.slots; i++) {
-      h += '<div class="bc-lockrow"><input type="checkbox" data-lock="' + i + '"' + (locks[i] ? " checked" : "") +
-        '><span class="ln">Slot ' + (i + 1) + " · " + esc(shortLabel(lines[i], S.grade)) + "</span></div>";
-    }
-    h += "</div><div><div class=\"subh\">What the roll gave you</div>";
-    var any = false;
-    for (i = 0; i < S.slots; i++) {
-      if (locks[i]) continue;
-      any = true;
-      h += rowMarkup(i, S.rolled[i], "bc-n", "Slot " + (i + 1));
-    }
-    if (!any) h += '<div class="note">Every slot is locked — nothing would reroll.</div>';
-    h += "</div></div>";
-
-    h += '<div class="barrow"><button class="primary" id="bc-check" type="button">Check this roll</button>' +
-      '<button class="mbtn" id="bc-undo" type="button"' + (S.history.length ? "" : " disabled") + ">Undo last</button></div>";
-
-    if (lastVerdict) h += verdictHtml(lastVerdict);
-    h += historyHtml();
-    return h + "</div>";
-  }
-
-  function verdictHtml(v) {
-    if (v.error) return '<div class="bc-warn">' + esc(v.error) + "</div>";
-    var take = v.verdict === "replace";
-    var dGold = deltaGold(v.vNew, v.vKeep);
-    var h = '<div class="bc-verdict ' + (take ? "replace" : "keep") + '">' +
-      '<div class="hd">' + (take ? "TAKE THE NEW SET" : "KEEP WHAT YOU HAVE") + "</div>" +
-      '<div class="bd">New set is worth ' + fx(pct(v.vNew), 3) + "% against " + fx(pct(v.vKeep), 3) +
-      "% for the old one, both counting the " + v.rollsLeft + " roll" + (v.rollsLeft === 1 ? "" : "s") + " still to come. " +
-      "That is " + signPct(pct(v.vNew) - pct(v.vKeep)) + ", or " + (dGold >= 0 ? "+" : "−") + gold(Math.abs(dGold)) + " gold. " +
-      "On today's score alone it would be " + fx(pct(v.scoreNew), 2) + "% against " + fx(pct(v.scoreKeep), 2) + "%.</div>" +
-      '<div class="barrow"><button class="' + (take ? "primary" : "mbtn") + '" id="bc-apply-new" type="button">Apply — take the new set</button>' +
-      '<button class="' + (take ? "mbtn" : "primary") + '" id="bc-apply-keep" type="button">Apply — keep the old set</button></div>' +
-      "</div>";
-    return h;
-  }
-
-  function historyHtml() {
-    if (!S.history.length) return "";
-    var h = '<div class="subh">This session</div><ul class="bc-hist">', i;
-    for (i = S.history.length - 1; i >= 0; i--) {
-      var e = S.history[i];
-      h += "<li><b>" + (e.took ? "Replaced" : "Kept") + "</b> at " + e.rollsBefore + " rolls left · " +
-        (e.locked.length ? "locked " + esc(e.locked.join(", ")) : "nothing locked") + " · rolled " +
-        esc(e.rolledText) + " · " + signPct(e.deltaPct) + "</li>";
-    }
-    return h + "</ul>";
-  }
-
   function renderResults(profile, err) {
     var box = $("bc-results");
     if (!box) return;
     paintSlotAdvice();         // the solve this paint is reporting is what decides them
+    // Whatever this paint puts up is current — a fresh answer, a warning or the
+    // "Solving…" placeholder. Every one of them is the tool's answer to the
+    // question being asked now, so nothing is left dimmed.
+    markStale(false);
     if (err) {
       box.innerHTML = '<div class="panel"><div class="bc-warn">' + esc(err) + "</div></div>";
       return;
@@ -1716,25 +1570,24 @@
       return;
     }
     var lines = grantedLines();
-    // The roll ADVICE and the cut flow moved to the Advisor tab (advisor.js).
-    // The Calculator keeps what a bracelet IS — its lines, score, worth and
-    // breakdown; the Advisor owns what to DO about it. The advisorHtml/cutHtml
-    // machinery below is now unreachable and can be deleted in a tidy-up pass.
+    // The roll ADVICE and the cut flow are advisor.js's, and so is the code that
+    // draws them — this file's stranded copies went on 2026-08-14. The Calculator
+    // keeps what a bracelet IS: its lines, its score, its worth and the breakdown.
     box.innerHTML = cardsHtml(lastSolve, profile) +
       breakdownHtml(profile, lines, lastSolve);
     paintCharStats();          // the banner's headline stats read the same solve
-    markStale(false);
   }
 
   /**
    * Dim every figure that is about to be replaced.
    *
-   * Switching between default and character settings re-solves, and a solve is a
-   * second or three. Until it lands, the numbers on screen were computed on the
-   * OTHER profile — so the switch looked like it did nothing at all (Shizu,
-   * 2026-08-11: the toggle "does nothing visible"). It did: it just said so three
-   * seconds later, in numbers that often move only in the second decimal. Dimming
-   * them is the tool admitting they are stale. Every paint clears it.
+   * A solve is a second or three, and until it lands the numbers on screen were
+   * computed on a profile the user has already left — so a change looked like it
+   * did nothing at all (Shizu, 2026-08-11: the old settings toggle "does nothing
+   * visible"). It did: it just said so three seconds later, in numbers that often
+   * move only in the second decimal. Dimming them is the tool admitting they are
+   * stale. recompute() turns it on whenever the solve key has moved, and every
+   * paint turns it off.
    */
   function markStale(on) {
     var els = [document.querySelector("#bc-charhdr .bc-sum"), $("bc-results")], i, e;
@@ -1835,14 +1688,13 @@
   function onProfileChange(d) {
     d = d || {};
     if (d.reset) {
-      lastVerdict = null; cache = {}; cacheOrder = [];
+      cache = {}; cacheOrder = [];
       freshSolve = null; lastSolve = null; freshSolveKey = null; lastSolveKey = null; workerCtxKey = null;
     }
     if (d.shape || d.reset) {
-      lastVerdict = null;
-      // Grade moves the trait band, so a total picked under the old one is not a
-      // legal total any more: go back to following the bracelet's own traits.
-      traitTotalUI = null;
+      // Grade moves the trait band, so a value picked under the old one is not a
+      // legal one any more: go back to following the bracelet's own traits.
+      traitEachUI = null;
       keepFocus(renderBracelet);
     } else {
       redrawLive();
@@ -1853,23 +1705,23 @@
     }
     // "Import Character Stats" just rewrote the left column: every number on
     // screen is on a different profile now, so the banner's figures and the
-    // priced pickers both have to follow — and until the re-solve lands they are
-    // dimmed, because they are still the old profile's answers.
-    if (d.imported) { renderCharHeader(); redrawLive(); markStale(true); }
+    // priced pickers both have to follow. The dimming is recompute's, below —
+    // an import is `immediate`, so the solve is scheduled in the same tick.
+    if (d.imported) { renderCharHeader(); redrawLive(); }
     if (d.immediate) solveNow(); else schedule();
   }
 
-  // Slot / fixed / rolled rows share one delegated handler, keyed by the id
-  // prefix the row was rendered with.
+  // Granted and fixed rows share one delegated handler, keyed by the id prefix
+  // the row was rendered with. There was a third prefix, bc-n, for the cut
+  // flow's rolled rows; the cut lives on the Advisor tab now and draws its own
+  // rows as av-n-*, so the pattern below deliberately does not match an n.
   function rowsFor(prefix) {
-    if (prefix === "bc-r") return S.rows;
-    if (prefix === "bc-f") return S.fixedRows;
-    return ensureRolled();
+    return prefix === "bc-f" ? S.fixedRows : S.rows;
   }
 
   function handleRowEvent(el) {
     var id = el.id || "";
-    var m = /^(bc-[rfn])-(fam|tier|val)-(\d+)$/.exec(id);
+    var m = /^(bc-[rf])-(fam|tier|val)-(\d+)$/.exec(id);
     if (!m) return false;
     var rows = rowsFor(m[1]), i = Number(m[3]), row = rows[i];
     if (!row) return false;
@@ -1883,7 +1735,8 @@
       // afterwards, but not before the browser has painted the new selection.
       var lt = letterOf(row.fam, S.grade);
       el.style.color = lt ? GRADE_COLOR[lt] : "var(--text)";
-      if (m[1] === "bc-r") { S.locks = null; lastVerdict = null; }
+      // A different bracelet: the Advisor's padlocks were chosen for the old one.
+      if (m[1] === "bc-r") S.locks = null;
     } else if (m[2] === "tier") {
       row.tier = el.value;
     } else {
@@ -1901,22 +1754,21 @@
     root.addEventListener("change", function (e) {
       if (!handleRowEvent(e.target)) return;
       save();
-      var pre = (e.target.id || "").slice(0, 4);
-      if (pre === "bc-f") keepFocus(renderFixedRows);
-      else if (pre === "bc-n") keepFocus(function () { renderResults(buildProfile(), null); });
+      if ((e.target.id || "").slice(0, 4) === "bc-f") keepFocus(renderFixedRows);
       else redrawSlots();
       schedule();
     });
     root.addEventListener("input", function (e) {
       var id = e.target.id || "", tr;
-      if (/^bc-[rfn]-val-\d+$/.test(id)) { handleRowEvent(e.target); save(); schedule(); return; }
-      // The unrolled card's trait-total slider. It changes NOTHING in the state
+      if (/^bc-[rf]-val-\d+$/.test(id)) { handleRowEvent(e.target); save(); schedule(); return; }
+      // The unrolled card's combat-trait slider. It changes NOTHING in the state
       // and needs no solve — it reprices the distribution already in hand — so
       // it repaints three numbers and stops there.
       if (id === "bc-tt") {
-        // The control is PER LINE and the state is the total, so the two lines
-        // can never drift apart: an even pair is the only thing it can express.
-        traitTotalUI = num(e.target.value, 0) * traitTotalRange().n;
+        // The control is PER LINE and so is the state, so switching a trait on
+        // or off cannot move the pair the user picked.
+        var tb = traitBand();
+        traitEachUI = clamp(Math.round(num(e.target.value, tb[1])), tb[0], tb[1]);
         paintTraitTotal();
         return;
       }
@@ -1932,7 +1784,7 @@
       if (e.target.getAttribute && e.target.getAttribute("data-tr")) renderTraits();
     });
     root.addEventListener("click", function (e) {
-      var t = e.target, lk, tron;
+      var t = e.target, tron;
       if ((tron = t.getAttribute && t.getAttribute("data-tron"))) {
         // A plain on/off toggle. Turning a third one on is allowed — the panel
         // warns that the bracelet is illegal instead of silently dropping one.
@@ -1941,98 +1793,12 @@
         return;
       }
       if (t.id === "bc-clear") {
-        S.rows = []; P.fit(); S.locks = null; S.rolled = null; lastVerdict = null;
+        // A blank bracelet: the Advisor's padlocks and its half-typed roll both
+        // described the one being cleared.
+        S.rows = []; P.fit(); S.locks = null; S.rolled = null;
         save(); redrawSlots(); recompute();
-      } else if ((lk = t.getAttribute && t.getAttribute("data-lock")) !== null && lk !== undefined && lk !== "") {
-        var locks = cutLocks(lastSolve, grantedLines(), buildProfile()).slice();
-        locks[Number(lk)] = !!t.checked;
-        S.locks = locks; lastVerdict = null; save();
-        renderResults(buildProfile(), null);
-      } else if (t.id === "bc-check") { checkRoll(); }
-      else if (t.id === "bc-apply-new") { applyVerdict(true); }
-      else if (t.id === "bc-apply-keep") { applyVerdict(false); }
-      else if (t.id === "bc-undo") { undo(); }
+      }
     });
-  }
-
-  // ---- the cut flow ----
-
-  function rolledSet(locks) {
-    var lines = grantedLines(), reps = junkReps(), out = [], i;
-    for (i = 0; i < S.slots; i++) {
-      // Same slot, same junk stand-in on both sides, so a locked junk slot and
-      // a rolled one can never collide into a duplicate family.
-      out.push(locks[i] ? lines[i] : rowToLine(S.rolled[i], S.grade, reps[i]));
-    }
-    return out;
-  }
-
-  function checkRoll() {
-    var profile = buildProfile(), lines = grantedLines();
-    var locks = cutLocks(lastSolve, lines, profile);
-    var newSet = rolledSet(locks), i;
-    for (i = 0; i < newSet.length; i++) {
-      if (!newSet[i]) { lastVerdict = { error: "Slot " + (i + 1) + " of the new roll is still empty — pick the line it gave you." }; renderResults(profile, null); return; }
-    }
-    var bad = validateSet(fixedLines().concat(newSet));
-    if (bad) { lastVerdict = { error: "That roll is not legal: " + bad }; renderResults(profile, null); return; }
-
-    // advise() reads the solved DP inside the worker. If the worker is holding a
-    // different bracelet — a cache hit answered the display without ever calling
-    // it — solve this one first, in the same click.
-    var ready = (workerCtxKey === lastSolveKey && lastSolveKey)
-      ? Promise.resolve()
-      : solveState(profile, lines, S.rollsLeft, { force: true }).then(function (out) {
-        lastSolve = out.res; lastSolveKey = out.key;
-      });
-
-    ready.then(function () {
-      return send("advise", { current: lines, rolled: newSet, rollsLeft: S.rollsLeft - 1, ctxKey: lastSolveKey });
-    }).then(function (v) {
-      if (v.verdict === "unknown") lastVerdict = { error: "The solver does not recognise one of those sets — check for a duplicate effect." };
-      else { v.newSet = newSet; v.locks = locks; lastVerdict = v; }
-      renderResults(buildProfile(), null);
-    }, function (e) {
-      if (e && e.message === "superseded") return;
-      lastVerdict = { error: "Could not judge that roll: " + ((e && e.message) || "unknown error") + ". Change any input to rebuild, then try again." };
-      renderResults(buildProfile(), null);
-    });
-  }
-
-  function applyVerdict(take) {
-    if (!lastVerdict || lastVerdict.error) return;
-    var lines = grantedLines(), locks = lastVerdict.locks, i;
-    var lockNames = [];
-    for (i = 0; i < locks.length; i++) if (locks[i]) lockNames.push("slot " + (i + 1));
-    var rolledText = [];
-    for (i = 0; i < S.slots; i++) if (!locks[i]) rolledText.push(shortLabel(lastVerdict.newSet[i], S.grade));
-
-    S.history.push({
-      rollsBefore: S.rollsLeft,
-      locked: lockNames,
-      rolledText: rolledText.join(" + "),
-      took: !!take,
-      deltaPct: pct(lastVerdict.vNew) - pct(lastVerdict.vKeep),
-      prevRows: JSON.parse(JSON.stringify(S.rows))
-    });
-
-    if (take) {
-      var rows = [];
-      for (i = 0; i < S.slots; i++) rows.push(locks[i] ? S.rows[i] : JSON.parse(JSON.stringify(S.rolled[i])));
-      S.rows = rows;
-    }
-    S.rollsLeft = Math.max(0, S.rollsLeft - 1);
-    S.locks = null; S.rolled = null; lastVerdict = null;
-    save(); P.render(); renderSlots(); renderCharHeader(); recompute();   // rollsLeft moved: redraw its field too
-  }
-
-  function undo() {
-    var e = S.history.pop();
-    if (!e) return;
-    S.rows = e.prevRows;
-    S.rollsLeft = e.rollsBefore;
-    S.locks = null; S.rolled = null; lastVerdict = null;
-    P.fit(); save(); P.render(); renderSlots(); renderCharHeader(); recompute();
   }
 
   // ------------------------------------------------------------------
@@ -2294,7 +2060,6 @@
       } else {
         next.locks = null;
       }
-      lastVerdict = null;
       // The banner and the cards read lastSolve. It belongs to the bracelet being
       // replaced, so drop it: "—" for a moment beats the previous character's score.
       lastSolve = null; lastSolveKey = null; freshSolve = null; freshSolveKey = null;

@@ -69,11 +69,24 @@
   // where the deck starts, so an untouched table is normalizeProfile({}) exactly.
   var fight = { supportEffects: true, demon: false };
 
-  /** The default character, with only this tab's own controls patched in. */
+  /**
+   * The default character, with only this tab's own controls patched in.
+   *
+   * ON A SUPPORT THE SWITCH HAS NO ANSWER, so it is forced off — the same rule
+   * profile.js's buildProfile() follows, and for the same reason. The switch asks
+   * whether somebody ELSE brings the party debuffs; as the support, you are that
+   * somebody. Reading a stored "off" here zeroed families 16-19 down to their
+   * ally rider alone (1.85 to 0.42 on an Ancient) and re-anchored the whole
+   * by-roll table on family 30, which is the four best lines a support can carry
+   * silently deleted.
+   *
+   * `fight.supportEffects` is left ALONE, never written: it is the damage
+   * dealer's own choice and switching back to DPS has to restore it.
+   */
   function tlProfile() {
     return B.normalizeProfile({
       role: roleSel,
-      supportHasEffects: !fight.supportEffects,
+      supportHasEffects: roleSel === "support" ? false : !fight.supportEffects,
       demonShare: fight.demon ? 1 : 0
     });
   }
@@ -154,8 +167,12 @@
 
   // The six letter GROUPS, for the strip: eighteen dashed cuts and eighteen
   // letters on one 1000-unit axis is a picket fence. The strip draws one cut per
-  // GROUP boundary — 85, 70, 55, 40, 25 — and one letter per group, which is the
-  // old six-band picture with the ladder's own colours on it.
+  // GROUP boundary and one letter per group, which is the old six-band picture
+  // with the ladder's own colours on it.
+  //
+  // The cuts are read off SR.BANDS, so they are whatever the shared ladder says
+  // today. The comment here used to name 85 / 70 / 55 / 40 / 25, which were the
+  // cuts of a ladder this file has not used for some time.
   var GROUPS = (function () {
     var out = [], i, b;
     for (i = 0; i < BANDS.length; i++) {
@@ -165,7 +182,7 @@
       }
       out[out.length - 1].bottom = isFinite(b.min) ? b.min : 0;
     }
-    return out;                       // descending: S 85, A 70, B 55, C 40, D 25, F 0
+    return out;                       // descending, on today's ladder: S 90, A 75, B 60, C 45, D 30, F 0
   })();
 
   // Rarity of a roll, and the house tokens for it. The three tiers ARE the three
@@ -480,11 +497,25 @@
     // group rather than one per subrank — eighteen dashed lines across 930 units
     // is a fence, not a chart, and the group edges are the ones a reader reasons
     // about ("this is B territory").
+    //
+    // DRAWN AGAINST THE ANCHOR, WHICH IS WHAT THE TABLE BANDS ON. These used to
+    // be a share of the BEST ROW, and in the by-roll view the best row is a
+    // Legendary while the anchor is the best Epic — 17% apart — so every cut sat
+    // that far to the right of where the table put it and five rows the table
+    // called S sat inside the strip's A region. The bar and the AXIS still scale
+    // to the best row: the top dot has to stay on screen.
+    //
+    // cutAt() also converts the same way the dots do. A row's score is a ratio in
+    // LOG SPACE (d / anchor) and the axis is in converted percentages, so a cut
+    // has to be damagePercent(anchor x share) rather than a share of a converted
+    // maximum. On these values that is a few hundredths of a point, but it is the
+    // difference between a cut that is right and one that is nearly right.
+    function cutAt(share) { return B.damagePercent(res.anchor * share / 100); }
     var cuts = "", letters = "", cutXs = [];
     for (i = 0; i < GROUPS.length; i++) {
       var g = GROUPS[i];
-      var upper = i === 0 ? hi : maxDmg * GROUPS[i - 1].bottom / 100;
-      var lower = g.bottom ? maxDmg * g.bottom / 100 : lo;
+      var upper = i === 0 ? hi : cutAt(GROUPS[i - 1].bottom);
+      var lower = g.bottom ? cutAt(g.bottom) : lo;
       if (g.bottom && lower > lo && lower < hi) {
         var cx = X(lower);
         cutXs.push(cx);
@@ -513,7 +544,7 @@
     axis += '<text x="' + X0 + '" y="154" text-anchor="start" class="tlcap">% damage on ' +
       (grade === "relic" ? "a Relic" : "an Ancient") + " bracelet, on the default " +
       (roleSel === "support" ? "support" : "damage dealer") + " →</text>";
-    axis += '<text x="' + X1 + '" y="154" text-anchor="end" class="tlcap">dashed cuts are the letter-group edges (% of the best line); each group holds three subranks</text>';
+    axis += '<text x="' + X1 + '" y="154" text-anchor="end" class="tlcap">dashed cuts are the letter-group edges (% of this view&#8217;s anchor); each group holds three subranks</text>';
 
     return '<svg viewBox="0 0 1000 162" role="img" aria-label="Every effect on a damage-percent axis with the tier thresholds drawn to scale">' +
       axis + cuts + letters + dots + "</svg>";
@@ -929,11 +960,17 @@
       '<button type="button" class="mbtn' + (gradeSel === "relic" ? " active" : "") + '" data-grade="relic">Relic</button>' +
       "</div>" +
       '<div class="tl-presets"><span class="tl-plabel">Fight</span>' +
-      '<button type="button" class="mbtn' + (fight.supportEffects ? " active" : "") + '" data-preset="support"' +
-      ' data-gloss="' + (sup
-        ? "On: you bring the party debuffs, so the four party lines score in full. Off: someone else already applies them — they apply once per party, so your copy is worth nothing."
-        : "On: you are the one bringing the party debuffs, so the four party lines score in full. Off: your support already applies them — they apply once per party, so a copy on your bracelet is worth nothing.") + '">' +
-      "Support effects · " + (fight.supportEffects ? "on" : "off") + "</button>" +
+      // The Support effects switch asks whether somebody ELSE brings the party
+      // debuffs. On a support there is no such somebody, so the button goes and
+      // this note takes its place — the deck does exactly the same, in the same
+      // words, and the stored DPS choice waits untouched for the switch back.
+      (sup
+        ? '<span class="tl-note" data-gloss="Families 16, 17, 18 and 19 apply once per party. On a damage dealer a switch here asks whether the party support already brings them, because a second copy would be worth nothing. You are that support, so your copies are the ones that count and the switch is off.">' +
+          "You bring the party debuffs, so the four party lines score in full.</span>"
+        : '<button type="button" class="mbtn' + (fight.supportEffects ? " active" : "") + '" data-preset="support"' +
+          ' data-gloss="On: you are the one bringing the party debuffs, so the four party lines score in full.' +
+          ' Off: your support already applies them — they apply once per party, so a copy on your bracelet is worth nothing.">' +
+          "Support effects · " + (fight.supportEffects ? "on" : "off") + "</button>") +
       // Demon damage is personal damage, and a support scores none of it. The
       // button would be inert rather than wrong, so it says so instead.
       '<button type="button" class="mbtn' + (fight.demon ? " active" : "") + '" data-preset="demon"' +
@@ -966,6 +1003,12 @@
     var n = res.rows.length;
     var who = roleSel === "support" ? "a support" : "a damage dealer";
     var bands = DATA.TRAITS.bands, top = bands[bands.length - 1];
+    // COUNTED, not asserted. This used to read "most families live there", which
+    // is true for a support (70 of the 106 by-roll rows) and plainly false for a
+    // damage dealer (39). It changes with the role, the view and the grade, so
+    // the only honest version is the one that counts the table it is under.
+    var dead = 0, di;
+    for (di = 0; di < res.rows.length; di++) if (res.rows[di].band.key === "F-") dead++;
     return '<div class="tl-foot">' +
       "<b>" + n + (view === "family" ? " families" : " rolls") + "</b> on " +
       (grade === "relic" ? "a Relic" : "an Ancient") + " bracelet, ranked for " + who +
@@ -973,7 +1016,9 @@
       "Odds are the official listed probabilities, renormalised the way the disclosure page requires " +
       "(listed ÷ the listed sum, scaled to the 30-point special category). " +
       "A family whose every tier scores nothing sits in F- at 0% — it is not broken, it is worth nothing to " + who + ". " +
-      "F- is a wide band and most families live there; the rows inside it are still in order, and the strip above shows the real spread. " +
+      "F- is a wide band, and <b>" + dead + " of these " + n + " rows</b> sit in it" +
+      (dead * 2 > n ? " — more than half the table" : "") +
+      "; the rows inside it are still in order, and the strip above shows the real spread. " +
       "A subrank nobody landed in is left out rather than drawn empty — at eighteen steps that is most of them. " +
       "<b>Combat traits are ranked at their expected roll, " + fx(B.traitBandExpected(grade), 0) + ".</b> " +
       "The ten bands are not equal — the top one, " + top[grade][0] + "–" + top[grade][1] + ", lands " + top.prob +
@@ -1071,6 +1116,9 @@
       "#tab-tierlist .tl-ctl{display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin:0 0 4px}" +
       "#tab-tierlist .tl-seg,#tab-tierlist .tl-presets{display:flex;gap:6px;align-items:center;flex-wrap:wrap}" +
       "#tab-tierlist .tl-plabel{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-right:2px}" +
+      // The note that stands where the Support effects button stands on a damage
+      // dealer. Sized to sit on the same line as the buttons beside it.
+      "#tab-tierlist .tl-note{color:var(--dim);font-size:12px;line-height:1.4;max-width:44ch;cursor:help}" +
       "#tab-tierlist .tl-n{opacity:.6;font-weight:400;font-size:11px;margin-left:3px}" +
       "#tab-tierlist .tl-ctl .mbtn[disabled]{opacity:.45;cursor:default}" +
       // the spread strip

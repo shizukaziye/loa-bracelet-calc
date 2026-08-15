@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generated": "2026-08-14T11:54:23.894Z",
+    "generated": "2026-08-15T02:59:34.051Z",
     "modelSig": "bracelet-v1",
     "floatTolerance": 1e-8,
     "note": "Captured references for the bracelet core. Regenerate with `node tools/gen-refs.js`. Scoring is % damage in log space (D = 100*ln(multiplier)); the solver's V is the expected final score under optimal play with free rerolls."
@@ -535,37 +535,37 @@
       "grade": "relic",
       "family": 21,
       "tier": "low",
-      "damage": 1.631442092
+      "damage": 1.622265836
     },
     {
       "grade": "relic",
       "family": 21,
       "tier": "mid",
-      "damage": 1.850136501
+      "damage": 1.838535232
     },
     {
       "grade": "relic",
       "family": 21,
       "tier": "high",
-      "damage": 2.068159069
+      "damage": 2.053865247
     },
     {
       "grade": "relic",
       "family": 22,
       "tier": "low",
-      "damage": 1.934318638
+      "damage": 1.916945314
     },
     {
       "grade": "relic",
       "family": 22,
       "tier": "mid",
-      "damage": 2.172975194
+      "damage": 2.151434194
     },
     {
       "grade": "relic",
       "family": 22,
       "tier": "high",
-      "damage": 2.410918376
+      "damage": 2.384819186
     },
     {
       "grade": "relic",
@@ -1157,37 +1157,37 @@
       "grade": "ancient",
       "family": 21,
       "tier": "low",
-      "damage": 1.850136501
+      "damage": 1.838535232
     },
     {
       "grade": "ancient",
       "family": 21,
       "tier": "mid",
-      "damage": 2.068159069
+      "damage": 2.053865247
     },
     {
       "grade": "ancient",
       "family": 21,
       "tier": "high",
-      "damage": 2.285514423
+      "damage": 2.268264025
     },
     {
       "grade": "ancient",
       "family": 22,
       "tier": "low",
-      "damage": 2.172975194
+      "damage": 2.151434194
     },
     {
       "grade": "ancient",
       "family": 22,
       "tier": "mid",
-      "damage": 2.410918376
+      "damage": 2.384819186
     },
     {
       "grade": "ancient",
       "family": 22,
       "tier": "high",
-      "damage": 2.648152951
+      "damage": 2.617110656
     },
     {
       "grade": "ancient",
@@ -1513,7 +1513,7 @@
       "grade": "ancient",
       "family": 29,
       "tier": "high",
-      "damage": 0.995803868
+      "damage": 0.994509034
     },
     {
       "label": "solo (no allies)",
@@ -1620,6 +1620,240 @@
       "damage": 0
     }
   ],
+  "joint": [
+    {
+      "label": "two crit lines + crit trait + spec trait (over the cap)",
+      "grade": "ancient",
+      "profile": {},
+      "lines": [
+        {
+          "cat": "special",
+          "family": 11,
+          "tier": "high"
+        },
+        {
+          "cat": "special",
+          "family": 31,
+          "tier": "high"
+        }
+      ],
+      "traits": {
+        "crit": 120,
+        "spec": 120
+      },
+      "setDamage": 8.13337119,
+      "traitDamage": 5.815361107,
+      "jointScore": 11.04277119
+    },
+    {
+      "label": "the same set with no traits",
+      "grade": "ancient",
+      "profile": {},
+      "lines": [
+        {
+          "cat": "special",
+          "family": 11,
+          "tier": "high"
+        },
+        {
+          "cat": "special",
+          "family": 31,
+          "tier": "high"
+        }
+      ],
+      "traits": {},
+      "setDamage": 8.13337119,
+      "traitDamage": 0,
+      "jointScore": 8.13337119
+    },
+    {
+      "label": "two additional-damage lines (one pool)",
+      "grade": "ancient",
+      "profile": {},
+      "lines": [
+        {
+          "cat": "special",
+          "family": 24,
+          "tier": "high"
+        },
+        {
+          "cat": "special",
+          "family": 14,
+          "tier": "high"
+        }
+      ],
+      "traits": {},
+      "setDamage": 5.275855957,
+      "traitDamage": 0,
+      "jointScore": 5.275855957
+    },
+    {
+      "label": "three weapon-power sources (one square root)",
+      "grade": "ancient",
+      "profile": {},
+      "lines": [
+        {
+          "cat": "special",
+          "family": 33,
+          "tier": "high"
+        },
+        {
+          "cat": "special",
+          "family": 21,
+          "tier": "high"
+        },
+        {
+          "cat": "basic",
+          "family": "mainStat",
+          "value": 13888
+        }
+      ],
+      "traits": {},
+      "setDamage": 4.949400016,
+      "traitDamage": 0,
+      "jointScore": 4.949400016
+    },
+    {
+      "label": "orthogonal lines only (pooling changes nothing)",
+      "grade": "ancient",
+      "profile": {},
+      "lines": [
+        {
+          "cat": "special",
+          "family": 23,
+          "tier": "high"
+        },
+        {
+          "cat": "special",
+          "family": 25,
+          "tier": "high"
+        }
+      ],
+      "traits": {
+        "spec": 100
+      },
+      "setDamage": 6.396022896,
+      "traitDamage": 2.4245,
+      "jointScore": 8.820522896
+    },
+    {
+      "label": "already at the crit cap",
+      "grade": "ancient",
+      "profile": {
+        "skills": [
+          {
+            "share": 1,
+            "critRate": 1,
+            "critDamage": 2.8
+          }
+        ]
+      },
+      "lines": [
+        {
+          "cat": "special",
+          "family": 31,
+          "tier": "high"
+        },
+        {
+          "cat": "special",
+          "family": 32,
+          "tier": "high"
+        }
+      ],
+      "traits": {
+        "crit": 120
+      },
+      "setDamage": 3.509131981,
+      "traitDamage": 0,
+      "jointScore": 3.509131981
+    },
+    {
+      "label": "relic, a trait line among the effect lines (scores zero)",
+      "grade": "relic",
+      "profile": {},
+      "lines": [
+        {
+          "cat": "trait",
+          "family": "crit",
+          "value": 100
+        },
+        {
+          "cat": "special",
+          "family": 31,
+          "tier": "high"
+        }
+      ],
+      "traits": {},
+      "setDamage": 2.844649632,
+      "traitDamage": 0,
+      "jointScore": 2.844649632
+    },
+    {
+      "label": "support: two weapon-power sources and the spec trait",
+      "grade": "ancient",
+      "profile": {
+        "role": "support"
+      },
+      "lines": [
+        {
+          "cat": "special",
+          "family": 33,
+          "tier": "high"
+        },
+        {
+          "cat": "special",
+          "family": 30,
+          "tier": "high"
+        }
+      ],
+      "traits": {
+        "spec": 120
+      },
+      "setDamage": 1.689030988,
+      "traitDamage": 0.587841288,
+      "jointScore": 2.276872276
+    }
+  ],
+  "traitAtoms": [
+    {
+      "grade": "relic",
+      "dps": {
+        "trait:crit": 1.560831444,
+        "trait:spec": 1.5521649,
+        "trait:domination": 0,
+        "trait:swiftness": 1.5521649,
+        "trait:endurance": 0,
+        "trait:expertise": 0
+      },
+      "support": {
+        "trait:crit": 0,
+        "trait:spec": 0.314043278,
+        "trait:domination": 0,
+        "trait:swiftness": 0.314043278,
+        "trait:endurance": 0,
+        "trait:expertise": 0
+      }
+    },
+    {
+      "grade": "ancient",
+      "dps": {
+        "trait:crit": 2.043486593,
+        "trait:spec": 2.0370649,
+        "trait:domination": 0,
+        "trait:swiftness": 2.0370649,
+        "trait:endurance": 0,
+        "trait:expertise": 0
+      },
+      "support": {
+        "trait:crit": 0,
+        "trait:spec": 0.41194931,
+        "trait:domination": 0,
+        "trait:swiftness": 0.41194931,
+        "trait:endurance": 0,
+        "trait:expertise": 0
+      }
+    }
+  ],
   "traitSolve": {
     "traitValues": {
       "crit": 120,
@@ -1638,11 +1872,11 @@
     "goldPer1Pct": 30000,
     "traitDamage": 5.815361107,
     "plainCurrent": 0,
-    "plainFinal": 1.98933675,
+    "plainFinal": 3.314247824,
     "traitCurrent": 5.815361107,
-    "traitFinal": 7.804697857,
-    "traitValueGold": 243918.393781368,
-    "states": 2745
+    "traitFinal": 8.550535264,
+    "traitValueGold": 268265.722012048,
+    "states": 2669
   },
   "familyGrades": [
     {
@@ -1790,13 +2024,13 @@
           "letter": "B"
         },
         "special:21": {
-          "avg": 1.740722113,
-          "share": 0.487368047,
+          "avg": 1.730306596,
+          "share": 0.484451907,
           "letter": "C"
         },
         "special:22": {
-          "avg": 2.053575579,
-          "share": 0.574960881,
+          "avg": 2.034079365,
+          "share": 0.569502324,
           "letter": "B"
         },
         "special:23": {
@@ -2001,13 +2235,13 @@
           "letter": "B"
         },
         "special:21": {
-          "avg": 1.959081064,
-          "share": 0.483705386,
+          "avg": 1.946107116,
+          "share": 0.480502063,
           "letter": "C"
         },
         "special:22": {
-          "avg": 2.291875924,
-          "share": 0.565873842,
+          "avg": 2.268017338,
+          "share": 0.559983056,
           "letter": "B"
         },
         "special:23": {
@@ -2577,7 +2811,7 @@
           "family": "t:C"
         }
       ],
-      "expectedFinal": 4.133789062,
+      "expectedFinal": 4.133789063,
       "brute": 4.133789063,
       "currentScore": 3,
       "distMean": 4.133789063,
@@ -2586,7 +2820,7 @@
         3,
         3.5625,
         3.9140625,
-        4.133789062
+        4.133789063
       ]
     },
     {
@@ -2845,31 +3079,31 @@
       "granted": [],
       "unrolled": true,
       "currentScore": 0,
-      "expectedFinal": 3.923580012,
-      "distMean": 3.923580012,
-      "valueGold": 120501.745945059,
+      "expectedFinal": 3.921943409,
+      "distMean": 3.921943409,
+      "valueGold": 120450.765383363,
       "pImprove": 0.999939185,
       "quantiles": {
         "p10": 1.230650991,
-        "p25": 2.907220941,
+        "p25": 2.903260883,
         "p50": 3.775757801,
         "p75": 5.062408508,
-        "p90": 6.222634705
+        "p90": 6.230751569
       },
       "evByRollsLeft": [
-        1.107602483,
-        1.79908772,
-        2.315687129,
-        2.738353273,
-        3.098150078,
-        3.409931882,
-        3.68284958,
-        3.923580012
+        1.107279638,
+        1.798465378,
+        2.314795331,
+        2.737227462,
+        3.096830477,
+        3.408464842,
+        3.681275979,
+        3.921943409
       ],
       "bestLockMask": null,
       "maskEVTop": [],
       "states": 2669,
-      "stateAtoms": 76,
+      "stateAtoms": 79,
       "lockMasks": 74
     },
     {
@@ -2880,31 +3114,31 @@
       "granted": [],
       "unrolled": true,
       "currentScore": 0,
-      "expectedFinal": 5.821050525,
-      "distMean": 5.821050525,
-      "valueGold": 180498.988972421,
+      "expectedFinal": 5.818003362,
+      "distMean": 5.818003362,
+      "valueGold": 180402.693440494,
       "pImprove": 0.999999889,
       "quantiles": {
-        "p10": 3.212123854,
-        "p25": 4.330472818,
-        "p50": 5.785880268,
-        "p75": 7.233365739,
-        "p90": 8.558946795
+        "p10": 3.201158098,
+        "p25": 4.328988295,
+        "p50": 5.782958273,
+        "p75": 7.231233744,
+        "p90": 8.562198289
       },
       "evByRollsLeft": [
-        1.713450855,
-        2.710986077,
-        3.470448898,
-        4.095512629,
-        4.624545918,
-        5.07916205,
-        5.474274872,
-        5.821050525
+        1.712888722,
+        2.709876331,
+        3.468818478,
+        4.093423543,
+        4.6220739,
+        5.076399748,
+        5.471326166,
+        5.818003362
       ],
       "bestLockMask": null,
       "maskEVTop": [],
       "states": 59999,
-      "stateAtoms": 76,
+      "stateAtoms": 79,
       "lockMasks": 2594
     },
     {
@@ -2915,31 +3149,31 @@
       "granted": [],
       "unrolled": true,
       "currentScore": 0,
-      "expectedFinal": 3.239647435,
-      "distMean": 3.239647435,
-      "valueGold": 99121.086876479,
+      "expectedFinal": 3.238160507,
+      "distMean": 3.238160507,
+      "valueGold": 99075.026020092,
       "pImprove": 0.999939185,
       "quantiles": {
         "p10": 0.910461505,
         "p25": 2.325958905,
-        "p50": 3.09637368,
+        "p50": 3.087268405,
         "p75": 4.239754658,
-        "p90": 5.224114488
+        "p90": 5.227265559
       },
       "evByRollsLeft": [
-        0.882172299,
-        1.450391546,
-        1.881644723,
-        2.236713058,
-        2.539921165,
-        2.803450319,
-        3.034841022,
-        3.239647435
+        0.881909538,
+        1.449883475,
+        1.880912422,
+        2.235780733,
+        2.53881233,
+        2.802190621,
+        3.033458391,
+        3.238160507
       ],
       "bestLockMask": null,
       "maskEVTop": [],
       "states": 2669,
-      "stateAtoms": 76,
+      "stateAtoms": 79,
       "lockMasks": 74
     },
     {
@@ -2966,30 +3200,30 @@
       ],
       "unrolled": false,
       "currentScore": 6.309251025,
-      "expectedFinal": 6.94663216,
-      "distMean": 6.94663216,
-      "valueGold": 215976.00229239,
+      "expectedFinal": 6.947364352,
+      "distMean": 6.947364352,
+      "valueGold": 215999.763802651,
       "pImprove": 0.429758489,
       "quantiles": {
         "p10": 6.309251025,
         "p25": 6.309251025,
         "p50": 6.309251025,
-        "p75": 7.530669635,
+        "p75": 7.516628939,
         "p90": 8.491499754
       },
       "evByRollsLeft": [
         6.309251025,
-        6.482542165,
-        6.646035108,
-        6.80049909,
-        6.94663216
+        6.482727744,
+        6.646405212,
+        6.801051683,
+        6.947364352
       ],
       "bestLockMask": {
         "lockedKeys": [
           "special:23:low",
           "special:32:high"
         ],
-        "ev": 6.94663216
+        "ev": 6.947364352
       },
       "maskEVTop": [
         {
@@ -2997,24 +3231,24 @@
             "special:23:low",
             "special:32:high"
           ],
-          "ev": 6.94663216
+          "ev": 6.947364352
         },
         {
           "lockedKeys": [
             "special:32:high"
           ],
-          "ev": 6.942907964
+          "ev": 6.943949484
         },
         {
           "lockedKeys": [
             "basic:mainStat:b6",
             "special:32:high"
           ],
-          "ev": 6.904101943
+          "ev": 6.904898277
         }
       ],
       "states": 59998,
-      "stateAtoms": 76,
+      "stateAtoms": 79,
       "lockMasks": 2594
     },
     {
@@ -3035,48 +3269,48 @@
         }
       ],
       "unrolled": false,
-      "currentScore": 8.189177234,
-      "expectedFinal": 8.199039447,
-      "distMean": 8.199039447,
-      "valueGold": 256337.48349131,
-      "pImprove": 0.018743043,
+      "currentScore": 8.080577524,
+      "expectedFinal": 8.092856172,
+      "distMean": 8.092856172,
+      "valueGold": 252882.074174339,
+      "pImprove": 0.019585358,
       "quantiles": {
-        "p10": 8.189177234,
-        "p25": 8.189177234,
-        "p50": 8.189177234,
-        "p75": 8.189177234,
-        "p90": 8.189177234
+        "p10": 8.080577524,
+        "p25": 8.080577524,
+        "p50": 8.080577524,
+        "p75": 8.080577524,
+        "p90": 8.080577524
       },
       "evByRollsLeft": [
-        8.189177234,
-        8.199039447
+        8.080577524,
+        8.092856172
       ],
       "bestLockMask": {
         "lockedKeys": [
           "special:12:high"
         ],
-        "ev": 8.199039447
+        "ev": 8.092856172
       },
       "maskEVTop": [
         {
           "lockedKeys": [
             "special:12:high"
           ],
-          "ev": 8.199039447
+          "ev": 8.092856172
         },
         {
           "lockedKeys": [
             "special:32:high"
           ],
-          "ev": 8.189276606
+          "ev": 8.080853658
         },
         {
           "lockedKeys": [],
-          "ev": 8.189223492
+          "ev": 8.080635612
         }
       ],
       "states": 2668,
-      "stateAtoms": 76,
+      "stateAtoms": 79,
       "lockMasks": 74
     }
   ],
@@ -3139,10 +3373,10 @@
       ],
       "rollsLeft": 2,
       "verdict": "replace",
-      "vKeep": 5.506807209,
-      "vNew": 8.208792152,
+      "vKeep": 5.507206448,
+      "vNew": 8.302072825,
       "scoreKeep": 5.357694441,
-      "scoreNew": 8.189177234
+      "scoreNew": 8.285437074
     },
     {
       "label": "clear downgrade",
@@ -3170,8 +3404,8 @@
       ],
       "rollsLeft": 2,
       "verdict": "keep",
-      "vKeep": 5.506807209,
-      "vNew": 1.79908772,
+      "vKeep": 5.507206448,
+      "vNew": 1.798465378,
       "scoreKeep": 5.357694441,
       "scoreNew": 0
     },

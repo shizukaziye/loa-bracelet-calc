@@ -208,10 +208,24 @@ def _ap_wp(dw):
 # family 20 stacks 6x(+1% atk/move speed) alongside the weapon power, and log
 # space is additive, so the expected value carries both terms.
 check("analytic.f20.ancient.high", r9(_d(20, "high")), r9(_D(_ap_wp(1480 * 6) / _ap0) + _D(1.006)))
-check("analytic.f21.ancient.high", r9(_d(21, "high")),
-      r9(_D((_ap_wp(9000) / _ap0) * (_ap_wp(2400 * 1.0) / _ap0))))
-check("analytic.f22.ancient.high", r9(_d(22, "high")),
-      r9(_D((_ap_wp(8700) / _ap0) * (_ap_wp(150 * 30) / _ap0))))
+# A family carrying TWO weapon-power components adds them and takes ONE
+# attack-power ratio - they are the same square root, not two of them. Multiplying
+# two ratios, which is what this did until 0.4.0, overstated family 21 by 0.76%
+# and family 22 by 1.19% at the top tier.
+check("analytic.f21.ancient.high", r9(_d(21, "high")), r9(_D(_ap_wp(9000 + 2400 * 1.0) / _ap0)))
+check("analytic.f22.ancient.high", r9(_d(22, "high")), r9(_D(_ap_wp(8700 + 150 * 30) / _ap0)))
+# The old form, kept as the thing being ruled out: strictly bigger, because the
+# flat attack term breaks the pure ratio.
+check_true("analytic.f21.oneSquareRootIsLower",
+           _d(21, "high") < _D((_ap_wp(9000) / _ap0) * (_ap_wp(2400) / _ap0)) - 1e-9)
+check_true("analytic.f22.oneSquareRootIsLower",
+           _d(22, "high") < _D((_ap_wp(8700) / _ap0) * (_ap_wp(4500) / _ap0)) - 1e-9)
+# And a two-component family prices exactly like ONE weapon-power component
+# carrying the sum: family 22 high is 8,700 + 30 x 150 = 13,200, full stop.
+check("analytic.f22.equalsOneWeaponPowerComponent", r9(_d(22, "high")),
+      r9(_D(B.component_multiplier("weaponPower", 8700 + 150 * 30, P))))
+check("analytic.f21.equalsOneWeaponPowerComponent", r9(_d(21, "high")),
+      r9(_D(B.component_multiplier("weaponPower", 9000 + 2400 * 1.0, P))))
 check("analytic.f14.ancient.high", r9(_d(14, "high")), r9(_D((1.3844 + 0.035) / 1.3844)))
 check_true("analytic.f14.belowF24", _d(14, "high") < _d(24, "high"))
 _p_demon = B.normalize_profile({"demonShare": 1})
@@ -329,13 +343,25 @@ check("traitSolve.traitCurrent", r9(_with["currentScore"]), _t["traitCurrent"])
 check("traitSolve.traitFinal", r9(_with["expectedFinal"]), _t["traitFinal"])
 check("traitSolve.valueGold", r9(_with["valueGold"]), _t["traitValueGold"])
 check("traitSolve.states", _with["stats"]["states"], _t["states"], exact=True)
+# With NO granted line to pool against, the traits are still exactly their own
+# score: this case is unrolled, so the current score is the fixed term alone.
 check_true("analytic.traitSolve.currentShift",
            abs((_with["currentScore"] - _plain["currentScore"]) - _with["traitDamage"]) < 1e-9)
-check_true("analytic.traitSolve.finalShift",
-           abs((_with["expectedFinal"] - _plain["expectedFinal"]) - _with["traitDamage"]) < 1e-9)
-check_true("analytic.traitSolve.gainUnchanged", abs(_with["gain"] - _plain["gain"]) < 1e-9)
-check_true("analytic.traitSolve.dpUnchanged", _with["stats"]["states"] == _plain["stats"]["states"])
-check_true("analytic.traitSolve.pImproveUnchanged", abs(_with["pImprove"] - _plain["pImprove"]) < 1e-12)
+# The FINAL score no longer shifts by that same constant, and must not: every
+# reachable state carries crit lines, and 120 points of Crit trait is 4.29pp of
+# crit rate competing with them for one cap.
+_shift = _with["expectedFinal"] - _plain["expectedFinal"]
+check_true("analytic.traitSolve.finalShiftIsNotTheConstant", abs(_shift - _with["traitDamage"]) > 1e-6)
+check_true("analytic.traitSolve.finalShiftIsSmaller", _shift < _with["traitDamage"])
+check_true("analytic.traitSolve.finalShiftIsClose", _shift > _with["traitDamage"] - 1.5)
+# NAMING THE TRAITS FILLS THEIR PLACES: traitValues counts against the trait cap,
+# so `_with` can no longer draw a third combat trait and `_plain` still can.
+check_true("analytic.traitSolve.namedTraitsCapTheCategory",
+           _with["stats"]["states"] < _plain["stats"]["states"])
+_as_lines = B.solve({"grade": _t["grade"], "profile": {}, "slots": _t["slots"], "rollsLeft": _t["rollsLeft"],
+                     "fixedLines": [{"cat": "trait", "family": "crit"}, {"cat": "trait", "family": "spec"}],
+                     "grantedLines": _t["granted"], "goldPer1Pct": _t["goldPer1Pct"], "baselinePct": 0})
+check("analytic.traitSolve.valuesCapLikeLines", _as_lines["stats"]["states"], _with["stats"]["states"], exact=True)
 # See verify.js: worth is E[max(0, final% - baseline%)] x gpd, recomputed from this
 # live solve's own distribution rather than restating the formula.
 _w_exp = 0.0
@@ -345,6 +371,184 @@ for _wr in _with["finalScore"]["cdf"]:
         _w_exp += _wr["p"] * _w_over
 check_true("analytic.traitSolve.valueGold",
            abs(_with["valueGold"] - _w_exp * _t["goldPer1Pct"]) < 1e-6)
+
+# ================= 4e. joint scoring across a set =================
+# A bracelet is not the sum of its lines. Crit (capped at 100%), the
+# additional-damage pool and the one square root that flat weapon power and flat
+# main stat both move are shared by the whole item, so the lines feeding one of
+# them pool first and the bucket applies once.
+for i, c in enumerate(refs["joint"]):
+    _p = B.normalize_profile(c["profile"])
+    check("joint[%d].setDamage %s" % (i, c["label"]), r9(B.set_damage(c["lines"], c["grade"], _p)), c["setDamage"])
+    check("joint[%d].traitDamage" % i, r9(B.trait_damage(c["traits"], _p)), c["traitDamage"])
+    check("joint[%d].jointScore" % i, r9(B.joint_score(c["lines"], c["traits"], c["grade"], _p)), c["jointScore"])
+
+for c in refs["traitAtoms"]:
+    for _role in ("dps", "support"):
+        _atoms = B.build_atoms(c["grade"], B.normalize_profile({"role": "support"} if _role == "support" else {}), {})
+        _got = dict((a["key"], r9(a["damage"])) for a in _atoms if a["cat"] == "trait")
+        check("traitAtoms[%s][%s].count" % (c["grade"], _role), len(_got), len(c[_role]), exact=True)
+        for _k, _v in c[_role].items():
+            check("traitAtoms[%s][%s].%s" % (c["grade"], _role, _k), _got.get(_k), _v)
+
+_f11h = {"cat": "special", "family": 11, "tier": "high"}     # crit +5%, on crit +1.5%
+_f31h = {"cat": "special", "family": 31, "tier": "high"}     # crit +5%
+_f32h = {"cat": "special", "family": 32, "tier": "high"}     # crit damage +10%
+_f24h = {"cat": "special", "family": 24, "tier": "high"}     # additional damage +4%
+_f33h = {"cat": "special", "family": 33, "tier": "high"}     # weapon power +9000
+_f23h = {"cat": "special", "family": 23, "tier": "high"}     # outgoing damage +3%
+_f25h = {"cat": "special", "family": 25, "tier": "high"}     # back attack +3.5%
+
+# The audited case: two crit lines and a 120-point Crit trait on a character
+# already at 90% crit. 5 + 5 + 4.29 = 14.29pp of crit rate, of which the cap eats
+# 4.29. Priced line by line it comes to 14.032; it is worth 11.043.
+_apart = (B.line_damage(_f11h, "ancient", P) + B.line_damage(_f31h, "ancient", P)
+          + B.trait_damage({"crit": 120, "spec": 120}, P))
+_together = B.joint_score([_f11h, _f31h], {"crit": 120, "spec": 120}, "ancient", P)
+check("analytic.joint.critCap.apart", r9(_apart), 14.03181578)
+check("analytic.joint.critCap.together", r9(_together), 11.042771190)
+check("analytic.joint.critCap.closedForm", r9(_together),
+      r9(_D((1 + 1.0 * (2.8 * 1.015 - 1)) / (1 + 0.9 * 1.8)) + 120 * 0.024245))
+check_true("analytic.joint.critCap.overstatement", _apart / _together - 1 > 0.27)
+
+# A SATURATED set gains nothing more from crit RATE, but the other buckets still
+# pay: family 17's crit-resist shred is a party multiplier, not a crit source.
+_sat_base = B.joint_score([_f11h, _f31h], {"crit": 120}, "ancient", P)
+_sat_plus = B.joint_score([_f11h, _f31h, {"cat": "special", "family": 17, "tier": "high"}],
+                          {"crit": 120}, "ancient", P)
+check_true("analytic.joint.saturated.otherBucketsStillPay", _sat_plus > _sat_base + 1)
+# The marginal worth of one more crit-rate line at 98.93% crit, which is what the
+# advisor was quoting at 3.377: the cap leaves it 1.07pp, worth 0.690.
+_at_cap = B.normalize_profile({"skills": [{"share": 1, "critRate": 0.9893, "critDamage": 2.8}]})
+_marginal = B.joint_score([_f31h], {}, "ancient", _at_cap)
+check("analytic.joint.marginalCritAtCap", r9(_marginal), r9(_D((1 + 1.0 * 1.8) / (1 + 0.9893 * 1.8))))
+check_true("analytic.joint.marginalCritIsFarUnderStandalone",
+           B.line_damage(_f31h, "ancient", P) / _marginal > 4.8)
+# Crit DAMAGE has no cap, so two crit lines of different kinds do not fight.
+check("analytic.joint.critDamageIsNotCapped", r9(B.set_damage([_f31h, _f32h], "ancient", P)),
+      r9(_D((1 + 0.95 * (2.9 - 1)) / (1 + 0.9 * 1.8))))
+
+# Two lines feeding one additional-damage pool dilute each other.
+_f14h = {"cat": "special", "family": 14, "tier": "high"}     # additional damage +3.5%
+check("analytic.joint.addPool", r9(B.set_damage([_f24h, _f14h], "ancient", P)),
+      r9(_D((1.3844 + 0.04 + 0.035) / 1.3844)))
+check_true("analytic.joint.addPoolIsLessThanApart",
+           B.set_damage([_f24h, _f14h], "ancient", P)
+           < B.line_damage(_f24h, "ancient", P) + B.line_damage(_f14h, "ancient", P) - 1e-9)
+
+# Flat weapon power and flat main stat move the SAME attack-power figure.
+_ms = {"cat": "basic", "family": "mainStat", "value": 13888}
+
+
+def _ap2(d_ms, d_wp):
+    return math.sqrt((703826 + d_ms) * 1.09 * (241367 + d_wp) * 1.085 / 6) * 1.125 + 3600
+
+
+check("analytic.joint.oneSquareRoot", r9(B.set_damage([_f33h, _ms], "ancient", P)),
+      r9(_D(_ap2(13888, 9000) / _ap2(0, 0))))
+# Two sources on the SAME side of the root dilute each other, which is the 0.4.0
+# fix to families 21 and 22.
+_f21h = {"cat": "special", "family": 21, "tier": "high"}
+check_true("analytic.joint.sameSideDilutes",
+           B.set_damage([_f33h, _f21h], "ancient", P)
+           < B.line_damage(_f33h, "ancient", P) + B.line_damage(_f21h, "ancient", P) - 0.07)
+# Main stat and weapon power sit on OPPOSITE sides, where the two ratios would
+# multiply cleanly if attack power were a pure square root. The flat attack term
+# sits outside it, so pooling is a hair HIGHER, not lower.
+check_true("analytic.joint.oppositeSidesBarelyMove",
+           B.set_damage([_f33h, _ms], "ancient", P)
+           > B.line_damage(_f33h, "ancient", P) + B.line_damage(_ms, "ancient", P))
+check_true("analytic.joint.oppositeSidesMoveLittle",
+           B.set_damage([_f33h, _ms], "ancient", P)
+           - (B.line_damage(_f33h, "ancient", P) + B.line_damage(_ms, "ancient", P)) < 0.001)
+_p_no_flat2 = B.normalize_profile({"flatAP": 0})
+check("analytic.joint.oppositeSidesExactWithoutFlatAP",
+      r9(B.set_damage([_f33h, _ms], "ancient", _p_no_flat2)),
+      r9(B.line_damage(_f33h, "ancient", _p_no_flat2) + B.line_damage(_ms, "ancient", _p_no_flat2)))
+
+# What pooling must NOT touch.
+check("analytic.joint.orthogonalStillAdds", r9(B.set_damage([_f23h, _f25h], "ancient", P)),
+      r9(B.line_damage(_f23h, "ancient", P) + B.line_damage(_f25h, "ancient", P)))
+check("analytic.joint.oneLineIsItself", r9(B.set_damage([_f11h], "ancient", P)),
+      r9(B.line_damage(_f11h, "ancient", P)))
+check("analytic.joint.emptySetIsZero", r9(B.set_damage([], "ancient", P)), 0)
+check("analytic.joint.noTraitsIsSetDamage", r9(B.joint_score([_f11h, _f23h], {}, "ancient", P)),
+      r9(B.set_damage([_f11h, _f23h], "ancient", P)))
+check("analytic.joint.traitLineScoresZero",
+      r9(B.set_damage([{"cat": "trait", "family": "crit", "value": 120}, _f23h], "ancient", P)),
+      r9(B.line_damage(_f23h, "ancient", P)))
+check("analytic.joint.orderFree", r9(B.set_damage([_f11h, _f24h, _f33h], "ancient", P)),
+      r9(B.set_damage([_f33h, _f24h, _f11h], "ancient", P)))
+_S2 = B.normalize_profile({"role": "support"})
+check("analytic.joint.supportPoolsWeaponPower",
+      r9(B.set_damage([_f33h, _f21h], "ancient", _S2)),
+      r9(_D(B.support_gain(_S2, None, 0, 9000 + 9000 + 2400))))
+
+# THE PYTHON SEAM. line_damage() normalises a partial profile, as the JS has
+# always done. This mirror did not: {"master": True} has no "role" key, so every
+# call raised KeyError: 'role' the moment it reached component_multiplier. Both
+# sides now answer, and answer the same.
+check("analytic.joint.partialProfileNormalises",
+      r9(B.line_damage(_f31h, "ancient", {"master": True})), r9(B.line_damage(_f31h, "ancient", P)))
+check("analytic.joint.emptyProfileNormalises",
+      r9(B.line_damage(_f31h, "ancient", {})), r9(B.line_damage(_f31h, "ancient", P)))
+check("analytic.joint.partialProfileIsUsed",
+      r9(B.line_damage(_f24h, "ancient", {"master": True})),
+      r9(B.line_damage(_f24h, "ancient", B.normalize_profile({"master": True}))))
+check_true("analytic.joint.partialProfileMasterMoves",
+           B.line_damage(_f24h, "ancient", {"master": True}) < B.line_damage(_f24h, "ancient", P))
+
+# ================= 4f. the combat-trait draw =================
+# A trait DRAW is priced now; a trait LINE still is not.
+_TRAIT_LINES = [{"cat": "trait", "family": "crit"}, {"cat": "trait", "family": "spec"}]
+_draw_base = {"grade": "ancient", "profile": {}, "slots": 3, "rollsLeft": 2,
+              "grantedLines": [], "goldPer1Pct": 0, "baselinePct": 0}
+
+
+def _solve_with(o):
+    m = dict(_draw_base)
+    m.update(o)
+    return B.solve(m)
+
+
+# TWO PLACES FILLED: the trait atoms cannot be drawn, so what they are priced at
+# cannot move the answer, however wildly they are repriced.
+_two = _solve_with({"fixedLines": _TRAIT_LINES})
+_two_reprice = _solve_with({"fixedLines": _TRAIT_LINES,
+                            "profile": {"traitWeights": {"spec": 1.5, "swift": 1.5}}})
+check_true("analytic.traitDraw.cappedIsInvariant",
+           abs(_two["expectedFinal"] - _two_reprice["expectedFinal"]) < 1e-12)
+check("analytic.traitDraw.cappedStatesInvariant",
+      _two_reprice["stats"]["states"], _two["stats"]["states"], exact=True)
+_two_v = _solve_with({"traitValues": {"crit": 110, "spec": 100}})
+_two_v_reprice = _solve_with({"traitValues": {"crit": 110, "spec": 100},
+                              "profile": {"traitWeights": {"spec": 0.024245, "swift": 1.5}}})
+check_true("analytic.traitDraw.cappedByValuesIsInvariant",
+           abs(_two_v["expectedFinal"] - _two_v_reprice["expectedFinal"]) < 1e-12)
+
+# ONE PLACE OPEN: the draw is real, so its price reaches the answer.
+_one = _solve_with({"traitValues": {"crit": 110}})
+_one_reprice = _solve_with({"traitValues": {"crit": 110},
+                            "profile": {"traitWeights": {"spec": 1.5, "swift": 1.5}}})
+check_true("analytic.traitDraw.openPlacePaysMore", _one_reprice["expectedFinal"] > _one["expectedFinal"] + 1)
+_one_dead = _solve_with({"traitValues": {"crit": 110}, "profile": {"traitWeights": {"spec": 0, "swift": 0}}})
+check_true("analytic.traitDraw.openPlaceIsWorthSomething", _one["expectedFinal"] > _one_dead["expectedFinal"])
+
+_trait_atoms = [a for a in B.build_atoms("ancient", P, {}) if a["cat"] == "trait"]
+check("analytic.traitDraw.pricedFamilies", len([a for a in _trait_atoms if not a["junk"]]), 3, exact=True)
+check("analytic.traitDraw.deadFamilies", len([a for a in _trait_atoms if a["junk"]]), 3, exact=True)
+check("analytic.traitDraw.lineStillScoresZero",
+      r9(B.line_damage({"cat": "trait", "family": "crit", "value": 120}, "ancient", P)), 0)
+check("analytic.traitDraw.familyLetterStillF",
+      B.family_grades("ancient")["trait"]["crit"]["letter"], "F", exact=True)
+# A trait the bracelet already carries is not a draw it can still make, so a
+# caller holding the line in grantedLines is not paid for it twice.
+_held = B.solve({"grade": "ancient", "profile": {}, "slots": 2, "rollsLeft": 1,
+                 "fixedLines": [], "traitValues": {"crit": 110, "spec": 100},
+                 "grantedLines": [{"cat": "trait", "family": "crit"}, _f23h],
+                 "goldPer1Pct": 0, "baselinePct": 0})
+check("analytic.traitDraw.heldTraitIsNotPaidTwice", r9(_held["currentScore"]),
+      r9(B.joint_score([_f23h], {"crit": 110, "spec": 100}, "ancient", P)))
 
 # ================= 4d. the support channel =================
 # A support scores nothing for its own damage. What it scores is what its buffs
@@ -366,7 +570,10 @@ def _sup_contribution(lines=None, d_ms=0, d_wp=0):
     # The support's own base attack power: no flat attack term, because the buff
     # reads the base figure and not the total.
     sup_atk = math.sqrt(((703826 + d_ms) * 1.09) * ((241367 + d_wp) * 1.085) / 6) * 1.125
-    dps_atk = math.sqrt(260918 * 767170 / 6)
+    # The dealer being buffed is OUR OWN default dealer since 0.4.0: weapon power
+    # 241,367 x 1.085 and main stat 703,826 x 1.09, the two figures the profile
+    # itself carries, instead of the accessory calculator's inherited pair.
+    dps_atk = math.sqrt(261883.195 * 767170 / 6)
     mults = 1 + 0.2948
     ap_mult = ((dps_atk + sup_atk * 0.22 * (1 + atk_enh)) * mults + 3600) / (dps_atk * mults + 3600)
     ap = 1 + 0.95 * (ap_mult - 1)
@@ -375,7 +582,7 @@ def _sup_contribution(lines=None, d_ms=0, d_wp=0):
     # damage, so they share one bracket and the dealer's own base dilutes them.
     identity = 1 + (0.70 * (0.15 * (1 + ally_dmg) * (1 + spec_eff)) +
                     0.70 * (0.02 * (1 + ally_dmg) * (1 + spec_eff)) +
-                    0.40 * (0.10 * (1 + ally_dmg_t))) / (1 + 0.3585)
+                    0.40 * (0.10 * (1 + ally_dmg_t))) / (1 + 0.3844)
     return ap * brand * identity
 
 
@@ -390,8 +597,20 @@ def _fam_d(fid, tier, prof=None):
 # What a naked support is already worth to one dealer. Every other number in this
 # block is a ratio against it, so pin it outright — twice: the model's own figure,
 # and the re-derivation above landing on the same one.
-check("analytic.support.contribution", r9(B.support_contribution(_S, None, 0, 0)), 1.935042758)
-check("analytic.support.contributionRederived", r9(_sup_contribution(None, 0, 0)), 1.935042758)
+check("analytic.support.contribution", r9(B.support_contribution(_S, None, 0, 0)), 1.927654588)
+check("analytic.support.contributionRederived", r9(_sup_contribution(None, 0, 0)), 1.927654588)
+# THE DEALER IS OUR OWN. Two of the four figures describing the damage dealer a
+# support is scored against were the accessory calculator's, and named a slightly
+# different character than this model's own defaults do: 2.1% karma against our
+# 2.5%, and a 35.85% additional-damage pool against our 38.44%. Both are now read
+# off the profile, so one reference build stands behind both roles.
+check("analytic.support.dealerIsOurWeaponPower", B.DEFAULT_PROFILE["support"]["dpsWP"], 241367 * 1.085)
+check("analytic.support.dealerIsOurMainStat", B.DEFAULT_PROFILE["support"]["dpsMS"],
+      round(703826 * 1.09), exact=True)
+check("analytic.support.dealerCarriesOurAddPool", B.DEFAULT_PROFILE["support"]["baseAdd"], B.add_damage_pool(P))
+check("analytic.support.dealerCarriesOurFlatAP", B.DEFAULT_PROFILE["support"]["dpsFlatAtk"], P["flatAP"], exact=True)
+check_true("analytic.support.dealerMainStatIsWithinAPoint",
+           abs(B.DEFAULT_PROFILE["support"]["dpsMS"] - 703826 * 1.09) < 1)
 # A gain is that contribution with the line over the contribution without.
 check("analytic.support.gainIsARatio", r9(B.support_gain(_S, {"allyDmg": 0.09}, 0, 0)),
       r9(B.support_contribution(_S, {"allyDmg": 0.09}, 0, 0) / B.support_contribution(_S, None, 0, 0)))

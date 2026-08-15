@@ -54,9 +54,13 @@ BAD   <div class="s">What the bracelet is worth over the one you would wear
                      Worth is how far they clear it, on average, at 4,200 gold
                      per 1%. It is never negative.</div>
 GOOD  <div class="k" data-gloss="What this bracelet is worth over the one you
-                     would wear instead …">Worth</div>
-      <div class="s">62% of outcomes clear your 4.10% baseline</div>
+                     would wear instead … your 4.10% baseline …">Worth</div>
+      <div class="s">62% of outcomes</div>
 ```
+
+The baseline is named once, in the gloss. The sub-line is the second half of a
+figure pair — a number and its unit — not a sentence that repeats what the
+tooltip beside it already says.
 
 ## 3. Methodology lives at the bottom of the tab
 
@@ -133,7 +137,13 @@ question nobody had asked yet.
   for a paragraph.
 - **Do not leave an empty element behind.** If cutting a sub-line empties a
   card's `.s` slot, either give the slot a value or drop the element, so the
-  layout does not keep a hole where the sentence was.
+  layout does not keep a hole where the sentence was. This applies to a sub-line
+  that is only *sometimes* empty too: build it conditionally rather than emitting
+  a blank `<div class="s">`.
+- **A figure needs something to be measured against.** A proportion of a
+  comparison against nothing is not a fact, it is a placeholder — suppress it.
+  "Very nearly all of the outcomes clear your 0.00% baseline" was on every card a
+  first-time visitor saw.
 - **A table's summary belongs in a `<tfoot>` row**, not in a paragraph under the
   table. `Total | +4.12% | 100%` beats a sentence about totals.
 - **Do not gloss a `<button class="primary">`** — the dotted underline lands on

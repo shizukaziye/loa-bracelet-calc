@@ -22,7 +22,7 @@ import gear_data as GEAR          # noqa: E402
 # Bump VERSION whenever a change here can move a stored number: the Worker stamps
 # MODEL_SIG + "@" + VERSION on every record and re-scores anything that no longer
 # matches. See bracelet.js for what each version changed.
-VERSION = "0.3.0"
+VERSION = "0.4.1"
 MODEL_SIG = "bracelet-v1"
 
 ADD_DMG_ASTROGEM_LV60 = 0.0484
@@ -117,13 +117,18 @@ DEFAULT_PROFILE = {
     # The party DEBUFF halves of families 16-19 are NOT here. They land on every
     # dealer whoever carries them, so they take the same crit and defence path
     # the DPS side uses.
+    # The dealer being buffed is OUR OWN default dealer, not the accessory
+    # calculator's. Two of the four figures below, inherited whole from
+    # loa-gpd/model/support.js, described a slightly different character than this
+    # file's own defaults do (Shizu, 2026-08-14). dpsMS keeps loa-gpd's rounded
+    # integer, which is our own 703,826 x 1.09 = 767,170.34 to the point.
     "support": {
         # The damage dealer being buffed.
-        "dpsWP": 260918,        # 241,367 weapon x (1 + 6% earrings + 2.1% karma)
-        "dpsMS": 767170,        # 703,826 raw x (1 + 8% skins + 1% stronghold)
+        "dpsWP": 261883.195,    # OUR weaponPowerRaw 241,367 x (1 + wpPct 8.5%)
+        "dpsMS": 767170,        # OUR mainStatRaw 703,826 x (1 + msPct 9%)
         "dpsAtkPct": 0.2948,    # accessories, attack core, node 60, gems, stone, Adrenaline
-        "dpsFlatAtk": 3600,     # ancient attack core
-        "baseAdd": 0.3585,      # the dealer's own additional damage, which dilutes identity
+        "dpsFlatAtk": 3600,     # OUR flatAP: the ancient attack core
+        "baseAdd": 0.3844,      # OUR addDamage pool, the divisor that dilutes identity
 
         # The support's own buff bases, in percent, at level-9 gems.
         "brandPower": 45.00,
@@ -489,53 +494,130 @@ def resolve_special(f):
     return DATA.SPECIAL_BY_ID.get(f) or DATA.SPECIAL_BY_KEY.get(f)
 
 
-def special_multiplier(family, tier, grade, profile):
+# ----------------------------------------------------------------------
+# Contribution records - what a line brings to the whole bracelet
+# ----------------------------------------------------------------------
+#
+# {dcr, dcd, chd, dAdd, dWp, dMs, mult}: crit rate, crit damage and the on-crit
+# rider as fractions, additional damage in percentage points, flat weapon power
+# and flat main stat in raw units, and everything orthogonal already multiplied
+# together. Four buckets are shared by the whole bracelet - the crit cap, the
+# additional-damage pool, and the single square root that flat weapon power and
+# flat main stat both move - so the lines feeding one of them pool first and the
+# bucket applies once. bracelet.js carries the long version and the numbers that
+# forced it.
+#
+# A flat log-space term (the Spec / Swiftness weights, a test-pool atom) rides in
+# `mult` as exp(D/100), in both mirrors, in the same order.
+
+def empty_contribution():
+    return {"dcr": 0.0, "dcd": 0.0, "chd": 0.0, "dAdd": 0.0, "dWp": 0.0, "dMs": 0.0, "mult": 1.0}
+
+
+def copy_contribution(r):
+    return {"dcr": r["dcr"], "dcd": r["dcd"], "chd": r["chd"], "dAdd": r["dAdd"],
+            "dWp": r["dWp"], "dMs": r["dMs"], "mult": r["mult"]}
+
+
+def add_contribution(a, b):
+    """a += b, in place. Returns a."""
+    a["dcr"] += b["dcr"]
+    a["dcd"] += b["dcd"]
+    a["chd"] += b["chd"]
+    a["dAdd"] += b["dAdd"]
+    a["dWp"] += b["dWp"]
+    a["dMs"] += b["dMs"]
+    a["mult"] *= b["mult"]
+    return a
+
+
+def contribution_multiplier(rec, profile):
+    """A pooled record -> the damage multiplier of everything in it.
+
+    Residual first, in the order the family lists its components, then the three
+    shared buckets - the order that reproduces the old per-line arithmetic bit
+    for bit when only one component is pooled.
+    """
+    dps = profile["role"] != "support"
+    m = rec["mult"]
+    if dps and (rec["dcr"] != 0 or rec["dcd"] != 0 or rec["chd"] != 0):
+        m *= crit_factor_full(profile, rec["dcr"], rec["dcd"], rec["chd"]) / crit_factor_full(profile, 0, 0, 0)
+    if dps and rec["dAdd"] != 0:
+        pool = add_damage_pool(profile)
+        m *= (1 + pool + rec["dAdd"] / 100.0) / (1 + pool)
+    if rec["dWp"] != 0 or rec["dMs"] != 0:
+        # On a support these raise the base attack power its ally buff is a share
+        # of. Same pooling, different channel.
+        m *= (attack_power(profile, rec["dMs"], rec["dWp"]) / attack_power(profile, 0, 0)) if dps \
+            else support_gain(profile, None, rec["dMs"], rec["dWp"])
+    return m
+
+
+def contribution_damage(rec, profile):
+    return to_d(contribution_multiplier(rec, profile))
+
+
+def special_contribution(family, tier, grade, profile):
     vals = family["values"][grade][tier]
-    m = 1.0
-    dcr = 0.0
-    dcd = 0.0
-    chd = 0.0
-    any_crit = False
+    r = empty_contribution()
+    dps = profile["role"] != "support"
     for c in family["comp"]:
         x = c["v"] if "v" in c else vals[c["from"]]
         if c.get("scaleKey"):
             x = x * profile[c["scaleKey"]]
-        if profile["role"] != "support" and c["k"] in ("critRate", "critDamage", "onCritDamage"):
-            any_crit = True
+        if dps and c["k"] in ("critRate", "critDamage", "onCritDamage"):
             if c["k"] == "critRate":
-                dcr += x / 100.0
+                r["dcr"] += x / 100.0
             elif c["k"] == "critDamage":
-                dcd += x / 100.0
+                r["dcd"] += x / 100.0
             else:
-                chd += x / 100.0
-            continue
-        m *= component_multiplier(c["k"], x, profile, c)
-    if any_crit:
-        m *= crit_factor_full(profile, dcr, dcd, chd) / crit_factor_full(profile, 0, 0, 0)
-    return m
+                r["chd"] += x / 100.0
+        elif dps and c["k"] == "addDamage":
+            r["dAdd"] += x
+        elif c["k"] == "weaponPower":
+            r["dWp"] += x
+        elif c["k"] == "mainStat":
+            r["dMs"] += x
+        else:
+            r["mult"] *= component_multiplier(c["k"], x, profile, c)
+    return r
+
+
+def line_contribution(line, grade, profile):
+    """One line's record. A combat-trait line contributes nothing - its points
+    ride in trait_damage / trait_contribution instead, which is what keeps
+    lines_pct meaning the effect lines alone."""
+    r = empty_contribution()
+    if line["cat"] == "trait":
+        return r
+    if line["cat"] == "basic":
+        if line["family"] != "mainStat":
+            return r
+        v = line.get("value")
+        r["dMs"] = v if v is not None else basic_band_expected("mainStat", grade)
+        return r
+    fam = resolve_special(line["family"])
+    if not fam:
+        return r
+    # A tier the family's table for THIS grade does not carry - see line_damage().
+    if line["tier"] not in fam["values"].get(grade, {}):
+        return r
+    return special_contribution(fam, line["tier"], grade, profile)
+
+
+def special_multiplier(family, tier, grade, profile):
+    return contribution_multiplier(special_contribution(family, tier, grade, profile), profile)
 
 
 def line_damage(line, grade, profile):
-    if line["cat"] == "trait":
-        return 0.0
-    if line["cat"] == "basic":
-        if line["family"] != "mainStat":
-            return 0.0
-        v = line.get("value")
-        if v is None:
-            v = basic_band_expected("mainStat", grade)
-        return to_d(component_multiplier("mainStat", v, profile))
-    fam = resolve_special(line["family"])
-    if not fam:
-        return 0.0
-    # A tier the family's table for THIS grade does not carry. Reachable from a
-    # decode that landed on the wrong grade — Crit Damage +10% exists on Ancient
-    # and not on Relic, so the Relic table has no tier for it. Score it zero and
-    # let the caller's unmatchedValue flag do the complaining; a raised error
+    # ONE line from the bare profile. The JS has normalised a partial profile
+    # here since it was written; this mirror did not, and raised KeyError: 'role'
+    # on {"master": True} or on a bare {}. Same guard, same place, same meaning.
+    profile = profile if (profile and profile.get("role")) else normalize_profile(profile)
+    # A tier the grade's table does not carry scores zero rather than raising -
+    # reachable from a decode that landed on the wrong grade, and an exception
     # here takes a whole import down over one line.
-    if line["tier"] not in fam["values"].get(grade, {}):
-        return 0.0
-    return to_d(special_multiplier(fam, line["tier"], grade, profile))
+    return to_d(contribution_multiplier(line_contribution(line, grade, profile), profile))
 
 
 def line_info(line, grade, profile):
@@ -559,6 +641,20 @@ def line_info(line, grade, profile):
         out["value"] = fam["values"][grade][line["tier"]]
         out["damage"] = line_damage(line, grade, profile)
     return out
+
+
+def _trait_alias(o, key):
+    """"swift" and "swiftness" must be interchangeable or a Swiftness bracelet
+    silently scores zero. Membership, not `is not None`, on the alias branches:
+    bracelet.js tests those for undefined alone, so a null spelling has to fall
+    through the same way."""
+    if o.get(key) is not None:
+        return o[key]
+    if key == "swift" and "swiftness" in o:
+        return o["swiftness"]
+    if key == "swiftness" and "swift" in o:
+        return o["swift"]
+    return 0
 
 
 def trait_damage(traits, profile):
@@ -589,21 +685,8 @@ def trait_damage(traits, profile):
     """
     profile = profile if (profile and profile.get("role")) else normalize_profile(profile)
     traits = traits or {}
-    # See bracelet.js: "swift" and "swiftness" must be interchangeable or a
-    # Swiftness bracelet silently scores zero.
     w = profile.get("traitWeights") or {}
-
-    def _alias(o, key):
-        if o.get(key) is not None:
-            return o[key]
-        # Membership, not `is not None`: bracelet.js tests the alias branches for
-        # undefined alone, so a null spelling has to fall through the same way.
-        if key == "swift" and "swiftness" in o:
-            return o["swiftness"]
-        if key == "swiftness" and "swift" in o:
-            return o["swift"]
-        return 0
-
+    _alias = _trait_alias
     support = profile.get("role") == "support"
     s = 0.0
     for k in TRAIT_KEYS:
@@ -621,6 +704,29 @@ def trait_damage(traits, profile):
         else:
             s += v * (_alias(w, k) or 0)
     return s
+
+
+def trait_contribution(traits, profile):
+    """The same combat traits as a record, so they pool with the rest of the
+    bracelet: crit into dcr, where it meets one cap; the Spec / Swiftness weight
+    as exp(D/100); a support's pair through support_gain, a multiplier already."""
+    traits = traits or {}
+    w = profile.get("traitWeights") or {}
+    r = empty_contribution()
+    support = profile.get("role") == "support"
+    for k in TRAIT_KEYS:
+        v = _trait_alias(traits, k) or 0
+        if not v:
+            continue
+        if support:
+            if k in ("spec", "swift"):
+                r["mult"] *= support_gain(profile, {"spec": v}, 0, 0)
+            continue
+        if k == "crit":
+            r["dcr"] += v * TRAIT_CRIT_PP_PER_POINT / 100.0
+        else:
+            r["mult"] *= math.exp(v * (_trait_alias(w, k) or 0) / 100.0)
+    return r
 
 
 # Within one family the three tiers land 6 : 3 : 1.
@@ -675,8 +781,34 @@ def family_grades(grade="ancient", role=None):
 
 
 def set_damage(lines, grade, profile):
+    """D for a whole set of EFFECT lines - pooled, not a sum of line_damage().
+
+    One crit factor over the set's whole crit contribution and the profile's own
+    base rate, capped once; one additional-damage pool; one attack-power ratio.
+    A combat-trait line still scores zero here, so lines_pct keeps meaning what
+    lostark.bible's "Bracelet Effects +X%" means; joint_score() pools the traits
+    in as well, which is the truth for a whole bracelet.
+    """
     profile = normalize_profile(profile)
-    return sum(line_damage(ln, grade, profile) for ln in lines)
+    rec = empty_contribution()
+    for ln in lines:
+        add_contribution(rec, line_contribution(ln, grade, profile))
+    return contribution_damage(rec, profile)
+
+
+def joint_score(lines, traits, grade, profile):
+    """D for the WHOLE bracelet, effect lines and combat traits in one pool.
+
+    set_damage(lines) + trait_damage(traits) over-pays whenever the two compete
+    for the same 100% crit cap. A separate entry point on purpose: the two
+    functions the set scorers already call keep their own jobs.
+    """
+    profile = normalize_profile(profile)
+    rec = empty_contribution()
+    for ln in (lines or []):
+        add_contribution(rec, line_contribution(ln, grade, profile))
+    add_contribution(rec, trait_contribution(traits, profile))
+    return contribution_damage(rec, profile)
 
 
 # ----------------------------------------------------------------------
@@ -684,6 +816,12 @@ def set_damage(lines, grade, profile):
 # ----------------------------------------------------------------------
 
 def build_atoms(grade, profile, options=None):
+    """Every outcome one granted slot can produce.
+
+    Each atom carries a CONTRIBUTION RECORD as well as its standalone `damage`:
+    the record is what the DP pools, `damage` is the display figure and the junk
+    test, so junk stays a property of the line alone rather than of the set.
+    """
     options = options or {}
     basic_mode = options.get("basicMode", "bands")
     atoms = []
@@ -691,58 +829,84 @@ def build_atoms(grade, profile, options=None):
 
     def push(a):
         a["idx"] = len(atoms)
+        a["damage"] = to_d(contribution_multiplier(a["rec"], profile))
         atoms.append(a)
+
+    def ms_rec(v):
+        r = empty_contribution()
+        r["dMs"] = v
+        return r
 
     basic_fam_w = cat_w["basic"] * 0.5
     if basic_mode == "expected":
         ev = basic_band_expected("mainStat", grade)
         push({"key": "basic:mainStat", "cat": "basic", "family": "basic:mainStat", "tier": None,
               "band": None, "weight": basic_fam_w, "value": ev, "label": "Str / Dex / Int",
-              "damage": to_d(component_multiplier("mainStat", ev, profile))})
+              "rec": ms_rec(ev)})
     else:
         for b, bd in enumerate(DATA.BASIC["bands"]):
             mv = _band_mid(bd[grade]["mainStat"])
             push({"key": "basic:mainStat:b%d" % b, "cat": "basic", "family": "basic:mainStat",
                   "tier": None, "band": b, "weight": basic_fam_w * bd["prob"] / 100.0, "value": mv,
                   "label": "Str / Dex / Int %d-%d" % (bd[grade]["mainStat"][0], bd[grade]["mainStat"][1]),
-                  "damage": to_d(component_multiplier("mainStat", mv, profile))})
+                  "rec": ms_rec(mv)})
     push({"key": "basic:vitality", "cat": "basic", "family": "basic:vitality", "tier": None,
           "band": None, "weight": basic_fam_w, "value": basic_band_expected("vitality", grade),
-          "label": "Vitality", "damage": 0.0})
+          "label": "Vitality", "rec": empty_contribution()})
 
+    # A DRAWN combat trait is priced at the band-weighted value it would land on.
+    # It used to be flat zero, so the solver would roll a trait away and never
+    # towards one. line_damage() still answers zero for a trait LINE - this is the
+    # draw's price, not a line's score. See bracelet.js for the long version.
     trait_ev = trait_band_expected(grade)
     for tf in DATA.TRAITS["families"]:
         push({"key": "trait:" + tf["key"], "cat": "trait", "family": "trait:" + tf["key"],
               "tier": None, "band": None, "weight": cat_w["trait"] / float(len(DATA.TRAITS["families"])),
-              "value": trait_ev, "label": tf["label"], "damage": 0.0})
+              "value": trait_ev, "label": tf["label"],
+              "rec": trait_contribution({tf["key"]: trait_ev}, profile)})
 
     total = DATA.GRANTED_LISTED_SUM
     for fam in DATA.SPECIALS:
-        dmg = []
+        recs = []
         fam_w = 0.0
         any_dmg = False
         for tier in DATA.TIERS:
-            d = to_d(special_multiplier(fam, tier, grade, profile))
-            if abs(d) > 1e-12:
+            rec = special_contribution(fam, tier, grade, profile)
+            if abs(to_d(contribution_multiplier(rec, profile))) > 1e-12:
                 any_dmg = True
-            dmg.append(d)
+            recs.append(rec)
             fam_w += cat_w["special"] * fam["granted"][tier] / total
         if not any_dmg:
             push({"key": "special:%d" % fam["id"], "cat": "special", "family": "special:%d" % fam["id"],
                   "tier": None, "band": None, "weight": fam_w, "value": None,
-                  "label": fam["label"], "damage": 0.0})
+                  "label": fam["label"], "rec": empty_contribution()})
         else:
             for ti, tr in enumerate(DATA.TIERS):
                 push({"key": "special:%d:%s" % (fam["id"], tr), "cat": "special",
                       "family": "special:%d" % fam["id"], "tier": tr, "band": None,
                       "weight": cat_w["special"] * fam["granted"][tr] / total,
                       "value": fam["values"][grade][tr],
-                      "label": "%s (%s)" % (fam["label"], tr), "damage": dmg[ti]})
+                      "label": "%s (%s)" % (fam["label"], tr), "rec": recs[ti]})
 
     for a in atoms:
         a["junk"] = abs(a["damage"]) <= 1e-12
         a["stateKey"] = ("junk:" + a["cat"]) if a["junk"] else a["key"]
     return atoms
+
+
+def trait_family_key(key):
+    """The official trait-family key a traitValues key names, or None.
+
+    traitValues is written in the profile deck's spelling ("swift"); the draw
+    table and every trait LINE use the official one ("swiftness"). Both have to
+    land on the same family or one trait counts as two places.
+    """
+    if key == "swift":
+        key = "swiftness"
+    for tf in DATA.TRAITS["families"]:
+        if tf["key"] == key:
+            return key
+    return None
 
 
 def line_family_id(line):
@@ -807,7 +971,7 @@ def _make_state_atoms(atoms):
         k = a["stateKey"]
         if k not in mapping:
             mapping[k] = len(lst)
-            lst.append({"key": k, "cat": a["cat"], "damage": a["damage"], "junk": a["junk"],
+            lst.append({"key": k, "cat": a["cat"], "damage": a["damage"], "rec": a["rec"], "junk": a["junk"],
                         "label": ("(no-damage %s line)" % a["cat"]) if a["junk"] else a["label"],
                         "family": None if a["junk"] else a["family"],
                         "tier": a["tier"], "band": a["band"]})
@@ -919,12 +1083,18 @@ def _match_atom(atoms, line, grade):
 
 
 def _normalize_test_pool(pool):
+    """A test atom names its damage outright, with no components behind it, so
+    its record is that number as a plain multiplier - orthogonal to everything,
+    which is what a synthetic atom means."""
     atoms = []
     for i, p in enumerate(pool):
+        rec = empty_contribution()
+        rec["mult"] = math.exp(p.get("damage", 0.0) / 100.0)
         atoms.append({"idx": i, "key": p["key"], "cat": p.get("cat", "special"),
                       "family": p.get("family", "test:" + p["key"]), "tier": p.get("tier"),
                       "band": None, "weight": p["weight"], "value": p.get("value"),
-                      "label": p.get("label", p["key"]), "damage": p.get("damage", 0.0)})
+                      "label": p.get("label", p["key"]), "damage": p.get("damage", 0.0),
+                      "rec": rec})
     for a in atoms:
         a["junk"] = abs(a["damage"]) <= 1e-12
         a["stateKey"] = ("junk:" + a["cat"]) if a["junk"] else a["key"]
@@ -939,20 +1109,57 @@ def solve(opts):
 
     atoms = _normalize_test_pool(options["testPool"]) if options.get("testPool") \
         else build_atoms(grade, profile, options)
-    state_atoms = _make_state_atoms(atoms)
-
     fixed_lines = opts.get("fixedLines") or []
     granted_lines = opts.get("grantedLines") or []
     slots = opts.get("slots") or len(granted_lines) or 2
-    codec = _Codec(len(state_atoms), slots)
 
     fixed_present = {}
     for ln in fixed_lines:
         fixed_present[line_family_id(ln)] = True
     fixed_counts = count_cats(fixed_lines)
-    # The two fixed combat traits are a constant on every reachable state.
+
+    # THE TWO COMBAT TRAITS OCCUPY TRAIT PLACES, however the caller names them.
+    # Their points arrive in traitValues rather than as lines, and nothing counted
+    # them until 0.4.0: a caller that did not ALSO list them in fixedLines left the
+    # trait category wide open, so about 35% of every draw came back a combat trait
+    # the DP then priced at zero. A family named both ways is one place, not two.
+    if opts.get("traitValues"):
+        for tk, tv in opts["traitValues"].items():
+            if not tv:
+                continue
+            t_fam = trait_family_key(tk)
+            if not t_fam or fixed_present.get("trait:" + t_fam):
+                continue
+            fixed_present["trait:" + t_fam] = True
+            fixed_counts["trait"] += 1
+        # A trait the bracelet ALREADY carries is not a draw it can still make, and
+        # its exact points are in traitValues already. Zero that family's atom so a
+        # caller holding the line in grantedLines - which is where an imported
+        # bracelet's unlocked trait lands - is never paid for it twice.
+        for a in atoms:
+            if a["cat"] != "trait" or not fixed_present.get(a["family"]):
+                continue
+            a["rec"] = empty_contribution()
+            a["damage"] = 0.0
+            a["junk"] = True
+            a["stateKey"] = "junk:trait"
+
+    state_atoms = _make_state_atoms(atoms)
+    codec = _Codec(len(state_atoms), slots)
+
+    # The fixed lines and the combat traits are a constant on every reachable state
+    # - but a constant MULTIPLIER, not a constant number of points. They pool with
+    # whatever the granted slots hold (a crit trait and a granted crit line share
+    # one cap), so what rides along is the record.
+    base_rec = empty_contribution()
+    for ln in fixed_lines:
+        add_contribution(base_rec, line_contribution(ln, grade, profile))
+    add_contribution(base_rec, trait_contribution(opts.get("traitValues"), profile))
+    # Reported for the readout and for callers repricing the trait pair: the traits
+    # priced on their own, which is what trait_damage() has always meant. The score
+    # below does not simply add it.
     trait_bonus = trait_damage(opts.get("traitValues"), profile)
-    fixed_damage = set_damage(fixed_lines, grade, profile) + trait_bonus
+    fixed_damage = contribution_damage(base_rec, profile)
 
     start_pieces = []
     for ln in granted_lines:
@@ -979,10 +1186,14 @@ def solve(opts):
     for code in codes:
         pc = codec.decode(code)
         pieces[code] = pc
-        sc = fixed_damage
+        # The whole bracelet in one pool: fixed lines, combat traits and whatever
+        # this state's granted slots hold, with one crit cap, one additional-damage
+        # pool and one attack-power ratio over the lot. The DP only ever needs
+        # score[code], so pooling costs the state space nothing.
+        rec = copy_contribution(base_rec)
         for idx in pc:
-            sc += state_atoms[idx]["damage"]
-        score[code] = sc
+            add_contribution(rec, state_atoms[idx]["rec"])
+        score[code] = contribution_damage(rec, profile)
 
         lockable = [j for j in range(len(pc)) if allow_lock_junk or not state_atoms[pc[j]]["junk"]]
         masks = []
@@ -1237,7 +1448,14 @@ def brute_solve(opts):
     fixed_lines = opts.get("fixedLines") or []
     fixed_present = dict((line_family_id(ln), True) for ln in fixed_lines)
     fixed_counts = count_cats(fixed_lines)
-    fixed_damage = set_damage(fixed_lines, grade, profile) + trait_damage(opts.get("traitValues"), profile)
+    # Same pooled scoring as solve(), or the oracle would be checking a different
+    # model. The trait-place counting is solve()'s alone: this one is only ever
+    # called on the hand-written test pools, which carry no trait atoms.
+    base_rec = empty_contribution()
+    for ln in fixed_lines:
+        add_contribution(base_rec, line_contribution(ln, grade, profile))
+    add_contribution(base_rec, trait_contribution(opts.get("traitValues"), profile))
+    fixed_damage = contribution_damage(base_rec, profile)
 
     start_pieces = []
     for ln in opts.get("grantedLines") or []:
@@ -1253,7 +1471,10 @@ def brute_solve(opts):
     allow_lock_junk = bool(options.get("allowLockJunk"))
 
     def score_of(pc):
-        return fixed_damage + sum(state_atoms[i]["damage"] for i in pc)
+        rec = copy_contribution(base_rec)
+        for i in pc:
+            add_contribution(rec, state_atoms[i]["rec"])
+        return contribution_damage(rec, profile)
 
     def V(pc, r):
         if r == 0:

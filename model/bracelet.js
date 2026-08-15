@@ -18,9 +18,15 @@
  *
  * Damage in Lost Ark is multiplicative, so each line is scored
  *     D = 100 · ln(multiplier)          (≈ % damage gain, additive in log space)
- * and a bracelet's score is the sum of its line scores. The exact combined
- * figure is damagePercent(D) = (e^(D/100) − 1)·100. This is the same
- * convention as the accessory and astrogem calculators.
+ * and the exact combined figure is damagePercent(D) = (e^(D/100) − 1)·100. This
+ * is the same convention as the accessory and astrogem calculators.
+ *
+ * A bracelet's score is NOT simply the sum of its lines. Four buckets are shared
+ * by the whole item — crit (capped at 100%), the additional-damage pool, flat
+ * weapon power and flat main stat — so the lines that feed one of them pool first
+ * and the bucket is applied once. See "Contribution records"; setDamage() and the
+ * solver both work that way, and lineDamage() still prices ONE line from the bare
+ * profile, which is what the pickers and the family letters want.
  *
  * Character inputs (see DEFAULT_PROFILE) drive every number; no tier's damage
  * value is hardcoded.
@@ -131,7 +137,28 @@
   //   - The support role is real. It was a stub with two flat per-percent
   //     constants; it is now the house ap / brand / identity model.
   // Every one of the fifty-nine seeded characters moved, by up to 0.22pp.
-  var VERSION = "0.3.0";
+  // 0.4.0: four changes. The big one is that a SET is now scored jointly.
+  //   - Crit, additional damage, weapon power and main stat POOL across the whole
+  //     bracelet instead of each line being priced from the bare profile. Crit is
+  //     capped at 100% once, over the pooled total, so a bracelet can no longer be
+  //     paid for crit it cannot use: family 11 high + family 31 high + Crit 120 +
+  //     Spec 120 scored 14.032 and is worth 11.043. Pooling the weapon-power
+  //     components also retires the double square root inside families 21 and 22,
+  //     which were 0.76% and 1.19% over at the top tier.
+  //   - support.baseAdd and support.dpsWP are our own default dealer's numbers
+  //     (0.3844 and 261,883.195), not the accessory calculator's inherited pair.
+  //   - The DP prices a combat-trait DRAW instead of calling it junk, and counts
+  //     the traits named in traitValues against the trait cap, so a bracelet with
+  //     both places filled can no longer draw a dead third one.
+  //   - The Python mirror's line_damage() normalises a partial profile, as the JS
+  //     has always done; it used to raise KeyError: 'role'.
+  // 0.4.1: the BOARD adopted the joint pool. worker score() and subrank's
+  // braceletScore/anchors now price the whole bracelet through jointScore
+  // instead of traitDamage + setDamage summed, which paid crit twice across the
+  // two halves. 42 of 59 seeded characters move, most under 0.1pp; the two
+  // crit-saturated ones land where the 0.4.0 audit predicted (Kyulo -8.4%,
+  // Heero -5.7% against their pre-pooling scores).
+  var VERSION = "0.4.1";
   var MODEL_SIG = "bracelet-v1";
 
   // ------------------------------------------------------------------
@@ -282,13 +309,21 @@
     // The party DEBUFF halves of families 16-19 are NOT in here. They land on
     // every dealer whoever carries them, so they go through the same crit and
     // defence functions the DPS side uses and multiply into the same product.
+    // The dealer being buffed is OUR OWN default dealer, not the accessory
+    // calculator's. The four figures below were inherited whole from
+    // loa-gpd/model/support.js, and two of them described a slightly different
+    // character than the one this file's own defaults describe — so a support and
+    // a damage dealer scored against two different reference builds. Both are now
+    // read off the profile above (Shizu, 2026-08-14). dpsMS keeps loa-gpd's
+    // rounded integer, which is our own 703,826 × 1.09 = 767,170.34 to the point,
+    // and dpsFlatAtk 3600 already matched.
     support: {
       // The damage dealer being buffed.
-      dpsWP: 260918,          // 241,367 weapon × (1 + 6% earrings + 2.1% karma)
-      dpsMS: 767170,          // 703,826 raw × (1 + 8% skins + 1% stronghold)
+      dpsWP: 261883.195,      // OUR weaponPowerRaw 241,367 × (1 + wpPct 8.5%)
+      dpsMS: 767170,          // OUR mainStatRaw 703,826 × (1 + msPct 9%)
       dpsAtkPct: 0.2948,      // accessories, attack core, node 60, gems, stone, Adrenaline
-      dpsFlatAtk: 3600,       // ancient attack core
-      baseAdd: 0.3585,        // the dealer's own additional damage, which dilutes identity
+      dpsFlatAtk: 3600,       // OUR flatAP: the ancient attack core
+      baseAdd: 0.3844,        // OUR addDamage pool, the divisor that dilutes identity
 
       // The support's own buff bases, in percent, at level-9 gems.
       brandPower: 45.00,
@@ -692,32 +727,154 @@
     return wsum > 0 ? tot / wsum : 0;
   }
 
+  // ------------------------------------------------------------------
+  // Contribution records — what a line brings to the whole bracelet
+  // ------------------------------------------------------------------
+
+  /**
+   * A CONTRIBUTION RECORD is what one scoring atom — a line, a tier, the two
+   * combat traits — adds to a bracelet, kept in the units the game adds them in
+   * rather than already converted to damage:
+   *
+   *   dcr  crit rate, as a fraction (0.05 = +5 percentage points)
+   *   dcd  crit damage, as a fraction (0.10 = +10pp, i.e. 2.8× -> 2.9×)
+   *   chd  the "on crit, damage +x%" rider, as a fraction
+   *   dAdd additional damage, in PERCENTAGE POINTS (the unit the tables print)
+   *   dWp  flat weapon power, added to the raw pool
+   *   dMs  flat main stat, added to the raw pool
+   *   mult everything orthogonal, already a multiplier: outgoing, staggered,
+   *        demon, positional, the party lines, attack/move speed, the support
+   *        riders. Those genuinely do multiply line by line, so they are simply
+   *        collected here.
+   *
+   * WHY THIS EXISTS. Damage is multiplicative BETWEEN buckets and additive
+   * INSIDE one, and four of these buckets are shared by the whole bracelet:
+   *
+   *   - crit rate is capped at 100% per skill. Score three crit lines separately
+   *     from the same base and you sell crit the character cannot use — a
+   *     bracelet holding family 11 high, family 31 high, Crit 120 and Spec 120
+   *     scored 14.032 when the joint truth is 11.043, 27% over.
+   *   - additional damage is one additive pool; two lines feeding it dilute each
+   *     other, and priced apart they do not.
+   *   - flat weapon power and flat main stat both move ONE attack-power figure
+   *     through a square root, so two of them are not two independent ratios.
+   *     Families 21 and 22 carry two weapon-power components each and were
+   *     multiplying two separate square-root ratios: 0.76% and 1.19% over at the
+   *     top tier, fixed here for free by the pooling.
+   *
+   * So a SET is scored by summing the records, applying each shared bucket ONCE,
+   * and multiplying the residual. A single line from the bare profile is that
+   * same arithmetic over one record, which is why lineDamage() still means
+   * exactly what it always meant.
+   *
+   * A flat log-space term (the Spec / Swiftness trait weights, a hand-written
+   * test-pool atom) rides in `mult` as exp(D/100). The round trip costs about
+   * 1e-16 and both mirrors take it in the same order, so they still agree.
+   */
+  function emptyContribution() {
+    return { dcr: 0, dcd: 0, chd: 0, dAdd: 0, dWp: 0, dMs: 0, mult: 1 };
+  }
+
+  function copyContribution(r) {
+    return { dcr: r.dcr, dcd: r.dcd, chd: r.chd, dAdd: r.dAdd, dWp: r.dWp, dMs: r.dMs, mult: r.mult };
+  }
+
+  /** a += b, in place. Returns a. */
+  function addContribution(a, b) {
+    a.dcr += b.dcr; a.dcd += b.dcd; a.chd += b.chd;
+    a.dAdd += b.dAdd; a.dWp += b.dWp; a.dMs += b.dMs;
+    a.mult *= b.mult;
+    return a;
+  }
+
+  /**
+   * A pooled record -> the damage multiplier of everything in it.
+   *
+   * Order matters only to the last bit, and it is chosen so that a record
+   * carrying ONE pooled component reproduces the old per-line arithmetic exactly:
+   * the residual first, in the order the family lists its components, then the
+   * three shared buckets.
+   */
+  function contributionMultiplier(rec, profile) {
+    var dps = profile.role !== "support";
+    var m = rec.mult;
+    if (dps && (rec.dcr !== 0 || rec.dcd !== 0 || rec.chd !== 0)) {
+      m *= critFactorFull(profile, rec.dcr, rec.dcd, rec.chd) / critFactorFull(profile, 0, 0, 0);
+    }
+    if (dps && rec.dAdd !== 0) {
+      var pool = addDamagePool(profile);
+      m *= (1 + pool + rec.dAdd / 100) / (1 + pool);
+    }
+    if (rec.dWp !== 0 || rec.dMs !== 0) {
+      // On a support these two are not dead weight: they raise the base attack
+      // power its ally buff is a share of. Same pooling, different channel.
+      m *= dps ? attackPower(profile, rec.dMs, rec.dWp) / attackPower(profile, 0, 0)
+        : supportGain(profile, null, rec.dMs, rec.dWp);
+    }
+    return m;
+  }
+
+  function contributionDamage(rec, profile) { return toD(contributionMultiplier(rec, profile)); }
+
+  /** The record one special family contributes at one tier. */
+  function specialContribution(family, tier, grade, profile) {
+    var vals = family.values[grade][tier], r = emptyContribution();
+    var dps = profile.role !== "support";
+    for (var i = 0; i < family.comp.length; i++) {
+      var c = family.comp[i];
+      var x = (c.v !== undefined) ? c.v : vals[c.from];
+      if (c.scaleKey) x = x * profile[c.scaleKey];
+      if (dps && (c.k === "critRate" || c.k === "critDamage" || c.k === "onCritDamage")) {
+        if (c.k === "critRate") r.dcr += x / 100;
+        else if (c.k === "critDamage") r.dcd += x / 100;
+        else r.chd += x / 100;
+      } else if (dps && c.k === "addDamage") {
+        r.dAdd += x;
+      } else if (c.k === "weaponPower") {
+        r.dWp += x;
+      } else if (c.k === "mainStat") {
+        r.dMs += x;
+      } else {
+        r.mult *= componentMultiplier(c.k, x, profile, c);
+      }
+    }
+    return r;
+  }
+
+  /**
+   * lineContribution(line, grade, profile) — one line's record.
+   *
+   * A combat-trait line contributes NOTHING here, exactly as lineDamage() scores
+   * it zero: its points ride in traitDamage / traitContribution instead. That
+   * split is what keeps `linesPct` meaning "the effect lines alone". See the rule
+   * in traitDamage()'s header.
+   */
+  function lineContribution(line, grade, profile) {
+    var r = emptyContribution();
+    if (line.cat === "trait") return r;
+    if (line.cat === "basic") {
+      if (line.family !== "mainStat") return r;                 // vitality is dead weight
+      r.dMs = (line.value !== undefined && line.value !== null) ? line.value : basicBandExpected("mainStat", grade);
+      return r;
+    }
+    var fam = resolveSpecial(line.family);
+    if (!fam) return r;
+    // A tier the family's table for THIS grade does not carry — see lineDamage().
+    if (!fam.values[grade] || !fam.values[grade][line.tier]) return r;
+    return specialContribution(fam, line.tier, grade, profile);
+  }
+
   /**
    * Multiplier of one special family at one tier.
    *
    * The crit components of a line (crit rate, crit damage, the "+1.5% on crit"
    * rider) are resolved together in one crit factor, because they genuinely
-   * interact inside a single hit. Different LINES still combine additively in
-   * log space — the house convention.
+   * interact inside a single hit — and since 0.4.0 so are the crit, additional
+   * damage and weapon-power components of everything else on the bracelet, which
+   * is what specialContribution is for.
    */
   function specialMultiplier(family, tier, grade, profile) {
-    var vals = family.values[grade][tier], m = 1;
-    var dcr = 0, dcd = 0, chd = 0, anyCrit = false;
-    for (var i = 0; i < family.comp.length; i++) {
-      var c = family.comp[i];
-      var x = (c.v !== undefined) ? c.v : vals[c.from];
-      if (c.scaleKey) x = x * profile[c.scaleKey];
-      if (profile.role !== "support" && (c.k === "critRate" || c.k === "critDamage" || c.k === "onCritDamage")) {
-        anyCrit = true;
-        if (c.k === "critRate") dcr += x / 100;
-        else if (c.k === "critDamage") dcd += x / 100;
-        else chd += x / 100;
-        continue;
-      }
-      m *= componentMultiplier(c.k, x, profile, c);
-    }
-    if (anyCrit) m *= critFactorFull(profile, dcr, dcd, chd) / critFactorFull(profile, 0, 0, 0);
-    return m;
+    return contributionMultiplier(specialContribution(family, tier, grade, profile), profile);
   }
 
   /**
@@ -731,21 +888,14 @@
    */
   function lineDamage(line, grade, profile) {
     profile = profile.role ? profile : normalizeProfile(profile);
-    if (line.cat === "trait") return 0;
-    if (line.cat === "basic") {
-      if (line.family !== "mainStat") return 0;                 // vitality is dead weight
-      var v = (line.value !== undefined && line.value !== null) ? line.value : basicBandExpected("mainStat", grade);
-      return toD(componentMultiplier("mainStat", v, profile));
-    }
-    var fam = resolveSpecial(line.family);
-    if (!fam) return 0;
-    // A tier the family's table for THIS grade does not carry. Reachable from a
-    // decode that landed on the wrong grade — Crit Damage +10% exists on Ancient
-    // and not on Relic, so the Relic table has no tier for it. Score it zero and
-    // let the caller's `unmatchedValue` flag do the complaining; a thrown error
-    // here takes a whole import down over one line.
-    if (!fam.values[grade] || !fam.values[grade][line.tier]) return 0;
-    return toD(specialMultiplier(fam, line.tier, grade, profile));
+    // ONE line from the bare profile — correct by definition, and unchanged in
+    // meaning by the 0.4.0 pooling: a single record over the shared buckets is
+    // the same arithmetic it always was. A tier the family's table for this grade
+    // does not carry scores zero rather than throwing (reachable from a decode
+    // that landed on the wrong grade); the caller's `unmatchedValue` flag does the
+    // complaining, because an exception here takes a whole import down over one
+    // line.
+    return toD(contributionMultiplier(lineContribution(line, grade, profile), profile));
   }
 
   function resolveSpecial(f) {
@@ -780,6 +930,17 @@
     return out;
   }
 
+  // The decoder names the trait with the official family key ("swiftness"); the
+  // profile deck writes the short one ("swift"). They must mean the same thing or
+  // a Swiftness bracelet silently scores zero for that line — which is exactly
+  // what happened until 2026-08-11. Accept either spelling on both sides.
+  function traitAlias(o, key) {
+    if (o[key] !== undefined && o[key] !== null) return o[key];
+    if (key === "swift" && o.swiftness !== undefined) return o.swiftness;
+    if (key === "swiftness" && o.swift !== undefined) return o.swift;
+    return 0;
+  }
+
   /**
    * traitDamage(traits, profile) -> D, the score of EVERY combat-trait line the
    * bracelet carries.
@@ -810,14 +971,17 @@
    *
    * WHAT THE DP DOES WITH IT. A granted trait keeps `fixed: false`, still counts
    * against the granted-slot total and is still rerollable — nothing here makes it
-   * permanent. But solve() folds this whole term into `fixedDamage`, a constant on
-   * every state, and buildAtoms() still gives the six trait draws damage 0. So the
-   * reroll advisor will happily roll a granted trait away and will never roll
-   * towards one. That is a real gap in the ADVISOR, deliberately left: closing it
-   * means giving lineDamage() a non-zero answer for a trait line, and the
-   * calculator's own copy and family picker are built on lineDamage saying zero.
-   * It costs the SCORE nothing, which is what the board ranks on. Written up in
-   * docs/research/scoring-gap.md §7.
+   * permanent. solve() carries this whole term as part of the base contribution
+   * record, so the crit half of it meets the granted lines' crit inside one cap.
+   *
+   * The DP used to price a trait DRAW at zero as well, so it would roll a trait
+   * away and never towards one — a gap in the advisor that cost any bracelet with
+   * a trait place still open about 1.17 points of expected final score. Since
+   * 0.4.0 buildAtoms() prices the draw at the band-weighted value it would land
+   * on, and solve() counts the traits named in traitValues against the trait cap
+   * so a bracelet with both places filled cannot draw a third. lineDamage() still
+   * answers ZERO for a trait line, which is what the calculator's copy, the family
+   * picker and `linesPct` are built on. Written up in docs/research/scoring-gap.md §7.
    *
    *   Crit   converts exactly: 25 pp of crit rate per 699 trait points, fed
    *          through the per-skill crit model additively with every other
@@ -828,6 +992,14 @@
    *
    * The trait term is added once, into solve()'s fixedDamage, and never enters the
    * DP alphabet.
+   *
+   * SINCE 0.4.0 the crit trait POOLS with everything else on the bracelet when the
+   * bracelet is scored as a set — see traitContribution() below, which is what
+   * jointScore() and the DP use. This function keeps its old meaning: every trait
+   * line priced from the bare profile, one term added to the next. That is what
+   * the display, the Tier List and the trait slider want, and it is what the four
+   * set scorers still sum against setDamage(). It reads HIGH next to the joint
+   * answer whenever the bracelet's other lines already push crit near the cap.
    */
   function traitDamage(traits, profile) {
     profile = profile && profile.role ? profile : normalizeProfile(profile);
@@ -837,12 +1009,7 @@
     // a Swiftness bracelet silently scores zero for that line — which is exactly
     // what happened until 2026-08-11. Accept either spelling on both sides.
     var w = profile.traitWeights || {}, s = 0, i, k, v;
-    function alias(o, key) {
-      if (o[key] !== undefined && o[key] !== null) return o[key];
-      if (key === "swift" && o.swiftness !== undefined) return o.swiftness;
-      if (key === "swiftness" && o.swift !== undefined) return o.swift;
-      return 0;
-    }
+    var alias = traitAlias;
     var support = profile.role === "support";
     for (i = 0; i < TRAIT_KEYS.length; i++) {
       k = TRAIT_KEYS[i];
@@ -870,6 +1037,33 @@
       }
     }
     return s;
+  }
+
+  /**
+   * traitContribution(traits, profile) — the same combat traits as a record, so
+   * they pool with the rest of the bracelet.
+   *
+   * Crit lands in dcr, where it meets every other crit-rate source and one cap.
+   * Spec and Swiftness are a flat log-space weight, so they ride in `mult` as
+   * exp(D/100); a support's pair go through supportGain, which is a multiplier
+   * already.
+   */
+  function traitContribution(traits, profile) {
+    traits = traits || {};
+    var w = profile.traitWeights || {}, r = emptyContribution(), i, k, v;
+    var support = profile.role === "support";
+    for (i = 0; i < TRAIT_KEYS.length; i++) {
+      k = TRAIT_KEYS[i];
+      v = traitAlias(traits, k) || 0;
+      if (!v) continue;
+      if (support) {
+        if (k === "spec" || k === "swift") r.mult *= supportGain(profile, { spec: v }, 0, 0);
+        continue;
+      }
+      if (k === "crit") r.dcr += v * TRAIT_CRIT_PP_PER_POINT / 100;
+      else r.mult *= Math.exp(v * (traitAlias(w, k) || 0) / 100);
+    }
+    return r;
   }
 
   // ------------------------------------------------------------------
@@ -944,12 +1138,49 @@
     return out;
   }
 
-  /** Sum of line damages (additive in log space). */
+  /**
+   * setDamage(lines, grade, profile) -> D for a whole set of EFFECT lines.
+   *
+   * Not a sum of lineDamage() any more. The lines pool first — one crit factor
+   * over the set's whole crit contribution and the profile's own base crit rate,
+   * capped once; one additional-damage pool; one attack-power ratio — and only
+   * the orthogonal buckets multiply line by line. Two crit lines on a character
+   * already at 90% crit are worth less together than apart, and that is the whole
+   * point: the second one is selling crit rate the cap eats.
+   *
+   * A combat-trait line still scores ZERO here (lineContribution gives it an
+   * empty record), so `linesPct` keeps meaning what lostark.bible's "Bracelet
+   * Effects +X%" means. To pool the traits in as well — which is the truth for a
+   * whole bracelet — call jointScore().
+   */
   function setDamage(lines, grade, profile) {
     profile = normalizeProfile(profile);
-    var s = 0;
-    for (var i = 0; i < lines.length; i++) s += lineDamage(lines[i], grade, profile);
-    return s;
+    var rec = emptyContribution();
+    for (var i = 0; i < lines.length; i++) addContribution(rec, lineContribution(lines[i], grade, profile));
+    return contributionDamage(rec, profile);
+  }
+
+  /**
+   * jointScore(lines, traits, grade, profile) -> D for the WHOLE bracelet.
+   *
+   * setDamage(lines) + traitDamage(traits) is what the four set scorers still
+   * add up, and it over-pays whenever the effect lines and the crit trait are
+   * competing for the same 100% cap: family 11 high + family 31 high + Crit 120 +
+   * Spec 120 sums to 14.032 and is jointly worth 11.043. This is that same
+   * bracelet scored in one pool.
+   *
+   * It is deliberately a SEPARATE entry point rather than a change of meaning for
+   * the two functions the scorers already call. traitDamage() is the trait
+   * slider's constant and the Tier List's per-trait figure; setDamage() is the
+   * effect-lines-only number the leaderboard ranks on. Both keep their jobs; a
+   * caller that wants the honest total for a whole bracelet asks for it here.
+   */
+  function jointScore(lines, traits, grade, profile) {
+    profile = normalizeProfile(profile);
+    var rec = emptyContribution(), i;
+    for (i = 0; i < (lines || []).length; i++) addContribution(rec, lineContribution(lines[i], grade, profile));
+    addContribution(rec, traitContribution(traits, profile));
+    return contributionDamage(rec, profile);
   }
 
   // ------------------------------------------------------------------
@@ -963,6 +1194,11 @@
    * scale. Families whose every tier scores 0 collapse to a single atom (they
    * are interchangeable), which is what keeps the solver's alphabet small.
    *
+   * Every atom carries a CONTRIBUTION RECORD as well as its standalone `damage`.
+   * The record is what the DP pools; `damage` is the display figure, the family
+   * letters' input, and the junk test — which is why junk stays a property of the
+   * line on its own rather than of the set it lands in.
+   *
    * options.basicMode: "bands" (default, one atom per value band) | "expected".
    */
   function buildAtoms(grade, profile, options) {
@@ -971,57 +1207,79 @@
     var atoms = [];
     var catW = DATA.CATEGORY_WEIGHTS;
 
-    function push(a) { a.idx = atoms.length; atoms.push(a); }
+    function push(a) {
+      a.idx = atoms.length;
+      a.damage = toD(contributionMultiplier(a.rec, profile));
+      atoms.push(a);
+    }
+    function msRec(v) { var r = emptyContribution(); r.dMs = v; return r; }
 
     // --- basic ---
     var basicFamW = catW.basic * 0.5;    // 17.5 each, mainStat / vitality
     if (basicMode === "expected") {
       var ev = basicBandExpected("mainStat", grade);
       push({ key: "basic:mainStat", cat: "basic", family: "basic:mainStat", tier: null, band: null,
-        weight: basicFamW, value: ev, label: "Str / Dex / Int",
-        damage: toD(componentMultiplier("mainStat", ev, profile)) });
+        weight: basicFamW, value: ev, label: "Str / Dex / Int", rec: msRec(ev) });
     } else {
       for (var b = 0; b < DATA.BASIC.bands.length; b++) {
         var bd = DATA.BASIC.bands[b], mv = bandMid(bd[grade].mainStat);
         push({ key: "basic:mainStat:b" + b, cat: "basic", family: "basic:mainStat", tier: null, band: b,
           weight: basicFamW * bd.prob / 100, value: mv,
           label: "Str / Dex / Int " + bd[grade].mainStat[0] + "–" + bd[grade].mainStat[1],
-          damage: toD(componentMultiplier("mainStat", mv, profile)) });
+          rec: msRec(mv) });
       }
     }
     push({ key: "basic:vitality", cat: "basic", family: "basic:vitality", tier: null, band: null,
-      weight: basicFamW, value: basicBandExpected("vitality", grade), label: "Vitality", damage: 0 });
+      weight: basicFamW, value: basicBandExpected("vitality", grade), label: "Vitality",
+      rec: emptyContribution() });
 
-    // --- combat traits: six families, all 0 damage ---
+    // --- combat traits: six families ---
+    //
+    // A DRAWN combat trait is priced, since 0.4.0, at the band-weighted value it
+    // would land on. It used to be flat zero, which said a reroll into Crit +87
+    // was worth exactly as much as a reroll into Vitality — so the solver would
+    // roll a trait away and never towards one, and any bracelet with a trait
+    // place still open had its expected final score reported about 1.17 points
+    // low. Crit goes through the pool and the cap like every other crit source;
+    // Spec and Swiftness take the class's own weight (a support's pair go through
+    // the identity bracket instead); Domination, Endurance and Expertise are the
+    // three that pay nothing, so they stay junk and collapse.
+    //
+    // lineDamage() still answers ZERO for a trait line, and must: the board's
+    // `linesPct` is the effect lines alone, and a bracelet's real trait points
+    // ride in traitValues, not in the band average. This is the DRAW's price, not
+    // a line's score.
     var traitEv = traitBandExpected(grade);
     for (var t = 0; t < DATA.TRAITS.families.length; t++) {
-      var tf = DATA.TRAITS.families[t];
+      var tf = DATA.TRAITS.families[t], tOne = {};
+      tOne[tf.key] = traitEv;                       // traitAlias reads "swiftness" as "swift"
       push({ key: "trait:" + tf.key, cat: "trait", family: "trait:" + tf.key, tier: null, band: null,
-        weight: catW.trait / DATA.TRAITS.families.length, value: traitEv, label: tf.label, damage: 0 });
+        weight: catW.trait / DATA.TRAITS.families.length, value: traitEv, label: tf.label,
+        rec: traitContribution(tOne, profile) });
     }
 
     // --- specials: 30% split by the listed table, renormalised by its own sum ---
     var sum = DATA.GRANTED_LISTED_SUM;
     for (var f = 0; f < DATA.SPECIALS.length; f++) {
       var fam = DATA.SPECIALS[f];
-      var dmg = [], famW = 0, any = false;
+      var recs = [], famW = 0, any = false;
       for (var ti = 0; ti < DATA.TIERS.length; ti++) {
         var tier = DATA.TIERS[ti];
-        var d = toD(specialMultiplier(fam, tier, grade, profile));
-        if (Math.abs(d) > 1e-12) any = true;
-        dmg.push(d);
+        var rec = specialContribution(fam, tier, grade, profile);
+        if (Math.abs(toD(contributionMultiplier(rec, profile))) > 1e-12) any = true;
+        recs.push(rec);
         famW += catW.special * fam.granted[tier] / sum;
       }
       if (!any) {
         // Dead family for this profile: one atom, the family's whole weight.
         push({ key: "special:" + fam.id, cat: "special", family: "special:" + fam.id, tier: null, band: null,
-          weight: famW, value: null, label: fam.label, damage: 0 });
+          weight: famW, value: null, label: fam.label, rec: emptyContribution() });
       } else {
         for (var ti2 = 0; ti2 < DATA.TIERS.length; ti2++) {
           var tr = DATA.TIERS[ti2];
           push({ key: "special:" + fam.id + ":" + tr, cat: "special", family: "special:" + fam.id, tier: tr, band: null,
             weight: catW.special * fam.granted[tr] / sum, value: fam.values[grade][tr],
-            label: fam.label + " (" + tr + ")", damage: dmg[ti2] });
+            label: fam.label + " (" + tr + ")", rec: recs[ti2] });
         }
       }
     }
@@ -1039,6 +1297,21 @@
     if (line.cat === "trait") return "trait:" + line.family;
     var fam = resolveSpecial(line.family);
     return "special:" + (fam ? fam.id : line.family);
+  }
+
+  /**
+   * The official trait-family key a traitValues key names, or null.
+   *
+   * traitValues is written in the profile deck's spelling ("swift"); the draw
+   * table and every trait LINE use the official one ("swiftness"). Both have to
+   * land on the same family or the same trait counts as two places.
+   */
+  function traitFamilyKey(key) {
+    if (key === "swift") key = "swiftness";
+    for (var i = 0; i < DATA.TRAITS.families.length; i++) {
+      if (DATA.TRAITS.families[i].key === key) return key;
+    }
+    return null;
   }
 
   function countCats(lines) {
@@ -1096,7 +1369,7 @@
       var k = atoms[i].stateKey;
       if (map[k] === undefined) {
         map[k] = list.length;
-        list.push({ key: k, cat: atoms[i].cat, damage: atoms[i].damage, junk: atoms[i].junk,
+        list.push({ key: k, cat: atoms[i].cat, damage: atoms[i].damage, rec: atoms[i].rec, junk: atoms[i].junk,
           label: atoms[i].junk ? ("(no-damage " + atoms[i].cat + " line)") : atoms[i].label,
           family: atoms[i].junk ? null : atoms[i].family, tier: atoms[i].tier, band: atoms[i].band });
       }
@@ -1224,12 +1497,12 @@
    *   - `slots` defaults to grantedLines.length, then to TWO. Call this with a
    *     three-slot bracelet under any other key name and you silently solve a
    *     different bracelet.
-   *   - `fixedLines` is what CAPS THE CATEGORIES. Naming the two combat traits
-   *     there is the only thing that stops a granted slot drawing a third trait,
-   *     which the game will not do — the trait category caps at 2 and the
-   *     bracelet arrives with both places filled. Omit it and 35% of every draw
-   *     is a dead trait line, which drags the whole distribution down by about
-   *     eighteen score points and caps the reachable set well under the truth.
+   *   - `fixedLines` is what CAPS THE CATEGORIES for the basic and special
+   *     families. Name every line the bracelet already carries there or the pool
+   *     will offer them again. Since 0.4.0 the two COMBAT TRAITS no longer have to
+   *     be named there as well: `traitValues` counts against the trait cap by
+   *     itself, which is what stops a granted slot drawing a third trait. Both
+   *     spellings still work and naming a trait twice counts once.
    *
    * The tell, if you suspect it: the DP's expectedFinal will come out BELOW a
    * crude threshold heuristic. It cannot — the DP is optimal. tools/roll-sim.mjs
@@ -1255,21 +1528,61 @@
     var caps = DATA.CAPS;
 
     var atoms = options.testPool ? normalizeTestPool(options.testPool) : buildAtoms(grade, profile, options);
-    var sa = makeStateAtoms(atoms);
-    var stateAtoms = sa.list;
 
     var fixedLines = opts.fixedLines || [];
     var grantedLines = opts.grantedLines || [];
     var slots = opts.slots || grantedLines.length || 2;
-    var codec = makeCodec(stateAtoms.length, slots);
 
     var fixedPresent = {}, i, j;
     for (i = 0; i < fixedLines.length; i++) fixedPresent[lineFamilyId(fixedLines[i])] = true;
     var fixedCounts = countCats(fixedLines);
-    // The bracelet's two fixed combat traits are a constant on every reachable
-    // state, so they ride along inside fixedDamage and never reach the DP.
+
+    // THE TWO COMBAT TRAITS OCCUPY TRAIT PLACES, however the caller names them.
+    // Their points arrive in traitValues rather than as lines, and until 0.4.0
+    // nothing counted them: any caller that did not ALSO list them in fixedLines
+    // — which is every caller that reads a bracelet off a character page — left
+    // the trait category wide open, so about 35% of every draw came back a combat
+    // trait the DP then priced at zero. Counting them here is what shuts that
+    // door. A family named both ways is one place, not two.
+    if (opts.traitValues) {
+      for (var tk in opts.traitValues) {
+        if (!Object.prototype.hasOwnProperty.call(opts.traitValues, tk)) continue;
+        if (!opts.traitValues[tk]) continue;
+        var tFam = traitFamilyKey(tk);
+        if (!tFam || fixedPresent["trait:" + tFam]) continue;
+        fixedPresent["trait:" + tFam] = true;
+        fixedCounts.trait++;
+      }
+      // A trait the bracelet ALREADY carries is not a draw it can still make, and
+      // its exact points are in traitValues already. Zero that family's atom so a
+      // caller holding the line in grantedLines — which is where an imported
+      // bracelet's unlocked trait lands — is never paid for it twice.
+      for (i = 0; i < atoms.length; i++) {
+        if (atoms[i].cat !== "trait" || !fixedPresent[atoms[i].family]) continue;
+        atoms[i].rec = emptyContribution();
+        atoms[i].damage = 0;
+        atoms[i].junk = true;
+        atoms[i].stateKey = "junk:trait";
+      }
+    }
+
+    var sa = makeStateAtoms(atoms);
+    var stateAtoms = sa.list;
+    var codec = makeCodec(stateAtoms.length, slots);
+
+    // The bracelet's fixed lines and its two combat traits are a constant on every
+    // reachable state — but a CONSTANT MULTIPLIER, not a constant number of points.
+    // They pool with whatever the granted slots hold (a crit trait and a granted
+    // crit line share one cap), so what rides along is the record, and the score of
+    // a state is the pool applied once.
+    var baseRec = emptyContribution();
+    for (i = 0; i < fixedLines.length; i++) addContribution(baseRec, lineContribution(fixedLines[i], grade, profile));
+    addContribution(baseRec, traitContribution(opts.traitValues, profile));
+    // Reported for the readout and for callers repricing the trait pair. It is the
+    // traits priced on their own, which is what traitDamage() has always meant; the
+    // score below does not simply add it.
     var traitBonus = traitDamage(opts.traitValues, profile);
-    var fixedDamage = setDamage(fixedLines, grade, profile) + traitBonus;
+    var fixedDamage = contributionDamage(baseRec, profile);
 
     // The current granted set, mapped onto draw atoms.
     var startPieces = [];
@@ -1301,9 +1614,14 @@
       var code = codes[i];
       var pc = codec.decode(code);
       pieces[code] = pc;
-      var sc = fixedDamage;
-      for (j = 0; j < pc.length; j++) sc += stateAtoms[pc[j]].damage;
-      score[code] = sc;
+      // The whole bracelet in one pool: the fixed lines, the combat traits and
+      // whatever this state's granted slots hold, with one crit cap, one
+      // additional-damage pool and one attack-power ratio over the lot. The DP
+      // only ever needs score[code], never a per-slot split, so pooling costs the
+      // state space nothing.
+      var rec = copyContribution(baseRec);
+      for (j = 0; j < pc.length; j++) addContribution(rec, stateAtoms[pc[j]].rec);
+      score[code] = contributionDamage(rec, profile);
 
       // Lockable slots — junk lines are excluded unless asked for (see header).
       var lockable = [];
@@ -1607,15 +1925,23 @@
     return best;
   }
 
-  /** Turn a hand-written test pool into the atom shape the solver expects. */
+  /**
+   * Turn a hand-written test pool into the atom shape the solver expects.
+   *
+   * A test atom names its damage outright, with no components behind it, so its
+   * record is that number as a plain multiplier — orthogonal to everything, which
+   * is what a synthetic atom means.
+   */
   function normalizeTestPool(pool) {
     var atoms = [];
     for (var i = 0; i < pool.length; i++) {
       var p = pool[i];
+      var rec = emptyContribution();
+      rec.mult = Math.exp((p.damage || 0) / 100);
       atoms.push({
         idx: i, key: p.key, cat: p.cat || "special", family: p.family || ("test:" + p.key),
         tier: p.tier || null, band: null, weight: p.weight, value: p.value || null,
-        label: p.label || p.key, damage: p.damage || 0
+        label: p.label || p.key, damage: p.damage || 0, rec: rec
       });
     }
     for (var j = 0; j < atoms.length; j++) {
@@ -1645,7 +1971,13 @@
     var fixedPresent = {}, i;
     for (i = 0; i < fixedLines.length; i++) fixedPresent[lineFamilyId(fixedLines[i])] = true;
     var fixedCounts = countCats(fixedLines);
-    var fixedDamage = setDamage(fixedLines, grade, profile) + traitDamage(opts.traitValues, profile);
+    // Same pooled scoring as solve(), or the oracle would be checking a different
+    // model. The trait-place counting is solve()'s alone: this one is only ever
+    // called on the hand-written test pools, which carry no trait atoms.
+    var baseRec = emptyContribution();
+    for (i = 0; i < fixedLines.length; i++) addContribution(baseRec, lineContribution(fixedLines[i], grade, profile));
+    addContribution(baseRec, traitContribution(opts.traitValues, profile));
+    var fixedDamage = contributionDamage(baseRec, profile);
 
     var startPieces = [];
     var grantedLines = opts.grantedLines || [];
@@ -1657,7 +1989,11 @@
       : ((opts.rolls && opts.rolls.normal !== undefined ? opts.rolls.normal : 0) +
          (opts.rolls && opts.rolls.ticket !== undefined ? opts.rolls.ticket : 0));
 
-    function scoreOf(pc) { var s = fixedDamage; for (var k = 0; k < pc.length; k++) s += stateAtoms[pc[k]].damage; return s; }
+    function scoreOf(pc) {
+      var rec = copyContribution(baseRec);
+      for (var k = 0; k < pc.length; k++) addContribution(rec, stateAtoms[pc[k]].rec);
+      return contributionDamage(rec, profile);
+    }
     var allowLockJunk = !!options.allowLockJunk;
 
     function V(pc, r) {
@@ -1952,12 +2288,23 @@
     supportContribution: supportContribution,
     supportGain: supportGain,
     traitDamage: traitDamage,
+    // The pooling layer. jointScore is the honest total for a whole bracelet;
+    // the rest are exported so a caller can pool a set of its own.
+    jointScore: jointScore,
+    emptyContribution: emptyContribution,
+    addContribution: addContribution,
+    lineContribution: lineContribution,
+    specialContribution: specialContribution,
+    traitContribution: traitContribution,
+    contributionMultiplier: contributionMultiplier,
+    contributionDamage: contributionDamage,
     familyGrades: familyGrades,
     FAMILY_GRADE_BANDS: FAMILY_GRADE_BANDS,
     TRAIT_CRIT_PP_PER_POINT: TRAIT_CRIT_PP_PER_POINT,
     lineDamage: lineDamage,
     lineInfo: lineInfo,
     setDamage: setDamage,
+    traitFamilyKey: traitFamilyKey,
     damagePercent: damagePercent,
     buildAtoms: buildAtoms,
     buildPool: buildPool,

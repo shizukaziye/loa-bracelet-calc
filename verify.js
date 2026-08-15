@@ -196,13 +196,28 @@ refs.profileVariants.forEach(function (c, i) {
   // Family 13: undiluted +3% damage, plus +5% inside stagger windows at a 10% share.
   check("analytic.f13.ancient.high", r9(d(13, "high")), r9(D(1.03 * (1 + 0.10 * 0.05))));
   // Families 20/21/22: weapon power at the hard max-stack / full-uptime
-  // assumption. Each component is its own attack-power ratio.
+  // assumption. A family carrying TWO weapon-power components adds them and takes
+  // ONE attack-power ratio — they are the same square root, not two of them.
+  // Multiplying two ratios, which is what this did until 0.4.0, overstated family
+  // 21 by 0.76% and family 22 by 1.19% at the top tier.
   function apWp(dw) { return Math.sqrt(703826 * 1.09 * (241367 + dw) * 1.085 / 6) * 1.125 + 3600; }
   // family 20 stacks 6x(+1% atk/move speed) alongside the weapon power, and log
   // space is additive, so the expected value carries both terms.
   check("analytic.f20.ancient.high", r9(d(20, "high")), r9(D(apWp(1480 * 6) / ap0) + D(1.006)));
-  check("analytic.f21.ancient.high", r9(d(21, "high")), r9(D((apWp(9000) / ap0) * (apWp(2400 * 1.0) / ap0))));
-  check("analytic.f22.ancient.high", r9(d(22, "high")), r9(D((apWp(8700) / ap0) * (apWp(150 * 30) / ap0))));
+  check("analytic.f21.ancient.high", r9(d(21, "high")), r9(D(apWp(9000 + 2400 * 1.0) / ap0)));
+  check("analytic.f22.ancient.high", r9(d(22, "high")), r9(D(apWp(8700 + 150 * 30) / ap0)));
+  // The old form, kept as the thing being ruled out: strictly bigger, because
+  // sqrt(a)·sqrt(b) > sqrt(ab) once the flat attack term breaks the pure ratio.
+  checkTrue("analytic.f21.oneSquareRootIsLower",
+    d(21, "high") < D((apWp(9000) / ap0) * (apWp(2400) / ap0)) - 1e-9);
+  checkTrue("analytic.f22.oneSquareRootIsLower",
+    d(22, "high") < D((apWp(8700) / ap0) * (apWp(4500) / ap0)) - 1e-9);
+  // And a two-component family must price exactly like ONE weapon-power component
+  // carrying the sum: family 22 high is 8,700 + 30 × 150 = 13,200, full stop.
+  check("analytic.f22.equalsOneWeaponPowerComponent", r9(d(22, "high")),
+    r9(D(B.componentMultiplier("weaponPower", 8700 + 150 * 30, P))));
+  check("analytic.f21.equalsOneWeaponPowerComponent", r9(d(21, "high")),
+    r9(D(B.componentMultiplier("weaponPower", 9000 + 2400 * 1.0, P))));
   // Family 14: additional damage plus a demon bucket that is GATED OFF by
   // default, so only the additional-damage half of the line scores. That is
   // what keeps it strictly below family 24, which rolls more of the same stat.
@@ -324,7 +339,8 @@ refs.traits.forEach(function (c, i) {
   checkTrue("analytic.trait.grantedWorthTheSame",
     B.traitDamage({ crit: 120 }, P) > 0);
 
-  // The solve shifts by exactly the constant, and the DP is untouched.
+  // The two fixed traits ride into the solve, where they now do two things: they
+  // pool with whatever the granted slots hold, and they fill their trait places.
   var t = refs.traitSolve;
   var plain = B.solve({ grade: t.grade, profile: {}, slots: t.slots, rollsLeft: t.rollsLeft,
     fixedLines: [], grantedLines: t.granted, goldPer1Pct: t.goldPer1Pct, baselinePct: 0 });
@@ -338,13 +354,31 @@ refs.traits.forEach(function (c, i) {
   check("traitSolve.traitFinal", r9(withT.expectedFinal), t.traitFinal);
   check("traitSolve.valueGold", r9(withT.valueGold), t.traitValueGold);
   check("traitSolve.states", withT.stats.states, t.states, true);
+  // With NO granted line to pool against, the traits are still exactly their own
+  // score: this case is unrolled, so the current score is the fixed term alone.
   checkTrue("analytic.traitSolve.currentShift",
     Math.abs((withT.currentScore - plain.currentScore) - withT.traitDamage) < 1e-9);
-  checkTrue("analytic.traitSolve.finalShift",
-    Math.abs((withT.expectedFinal - plain.expectedFinal) - withT.traitDamage) < 1e-9);
-  checkTrue("analytic.traitSolve.gainUnchanged", Math.abs(withT.gain - plain.gain) < 1e-9);
-  checkTrue("analytic.traitSolve.dpUnchanged", withT.stats.states === plain.stats.states);
-  checkTrue("analytic.traitSolve.pImproveUnchanged", Math.abs(withT.pImprove - plain.pImprove) < 1e-12);
+  // The FINAL score no longer shifts by that same constant, and must not. Every
+  // reachable state carries crit lines, and 120 points of Crit trait is 4.29pp of
+  // crit rate competing with them for one cap, so the pair is worth strictly LESS
+  // on a rolled bracelet than it is on an empty one. Priced apart — which is what
+  // adding traitDamage to a set score does — the bracelet is sold crit twice.
+  var shift = withT.expectedFinal - plain.expectedFinal;
+  checkTrue("analytic.traitSolve.finalShiftIsNotTheConstant",
+    Math.abs(shift - withT.traitDamage) > 1e-6);
+  checkTrue("analytic.traitSolve.finalShiftIsSmaller", shift < withT.traitDamage);
+  // …but not by much, and never the wrong way: the cap only bites at the top.
+  checkTrue("analytic.traitSolve.finalShiftIsClose", shift > withT.traitDamage - 1.5);
+  // NAMING THE TRAITS FILLS THEIR PLACES. traitValues counts against the trait
+  // cap, so `withT` can no longer draw a third combat trait and `plain` still can
+  // — which is the whole difference in the two state counts.
+  checkTrue("analytic.traitSolve.namedTraitsCapTheCategory", withT.stats.states < plain.stats.states);
+  // The same solve run with the traits named as LINES instead of values reaches
+  // exactly the same set of states: one place is one place, spelled either way.
+  var asLines = B.solve({ grade: t.grade, profile: {}, slots: t.slots, rollsLeft: t.rollsLeft,
+    fixedLines: [{ cat: "trait", family: "crit" }, { cat: "trait", family: "spec" }],
+    grantedLines: t.granted, goldPer1Pct: t.goldPer1Pct, baselinePct: 0 });
+  check("analytic.traitSolve.valuesCapLikeLines", asLines.stats.states, withT.stats.states, true);
   // Worth is no longer the log score times gpd — it is E[max(0, final% - baseline%)]
   // x gpd. Recomputed here straight from this live solve's own distribution, which
   // is a stronger check than the old identity: it catches a wrong truncation or a
@@ -357,6 +391,226 @@ refs.traits.forEach(function (c, i) {
   }
   checkTrue("analytic.traitSolve.valueGold",
     Math.abs(withT.valueGold - wExp * t.goldPer1Pct) < 1e-6);
+})();
+
+// ================= 4e. joint scoring across a set =================
+// A bracelet is not the sum of its lines. Crit (capped at 100%), the
+// additional-damage pool and the one square root that flat weapon power and flat
+// main stat both move are shared by the whole item, so the lines feeding one of
+// them pool first and the bucket applies once.
+refs.joint.forEach(function (c, i) {
+  var p = B.normalizeProfile(c.profile);
+  check("joint[" + i + "].setDamage " + c.label, r9(B.setDamage(c.lines, c.grade, p)), c.setDamage);
+  check("joint[" + i + "].traitDamage", r9(B.traitDamage(c.traits, p)), c.traitDamage);
+  check("joint[" + i + "].jointScore", r9(B.jointScore(c.lines, c.traits, c.grade, p)), c.jointScore);
+});
+
+refs.traitAtoms.forEach(function (c) {
+  ["dps", "support"].forEach(function (role) {
+    var atoms = B.buildAtoms(c.grade, B.normalizeProfile(role === "support" ? { role: "support" } : {}), {});
+    var got = {};
+    for (var i = 0; i < atoms.length; i++) if (atoms[i].cat === "trait") got[atoms[i].key] = r9(atoms[i].damage);
+    check("traitAtoms[" + c.grade + "][" + role + "].count",
+      Object.keys(got).length, Object.keys(c[role]).length, true);
+    Object.keys(c[role]).forEach(function (k) {
+      check("traitAtoms[" + c.grade + "][" + role + "]." + k, got[k], c[role][k]);
+    });
+  });
+});
+
+(function () {
+  function D(m) { return 100 * Math.log(m); }
+  var f11h = { cat: "special", family: 11, tier: "high" };     // crit +5%, on crit +1.5%
+  var f31h = { cat: "special", family: 31, tier: "high" };     // crit +5%
+  var f32h = { cat: "special", family: 32, tier: "high" };     // crit damage +10%
+  var f24h = { cat: "special", family: 24, tier: "high" };     // additional damage +4%
+  var f33h = { cat: "special", family: 33, tier: "high" };     // weapon power +9000
+  var f23h = { cat: "special", family: 23, tier: "high" };     // outgoing damage +3%
+
+  // ---- crit, one cap over the whole bracelet ----
+  // The audited case: two crit lines and a 120-point Crit trait on a character
+  // already at 90% crit. 5 + 5 + 4.29 = 14.29pp of crit rate, of which the cap
+  // eats 4.29. Priced line by line it comes to 14.032; it is worth 11.043.
+  var apart = B.lineDamage(f11h, "ancient", P) + B.lineDamage(f31h, "ancient", P) +
+    B.traitDamage({ crit: 120, spec: 120 }, P);
+  var together = B.jointScore([f11h, f31h], { crit: 120, spec: 120 }, "ancient", P);
+  check("analytic.joint.critCap.apart", r9(apart), 14.03181578);
+  check("analytic.joint.critCap.together", r9(together), 11.042771190);
+  // …and the joint answer is exactly one capped crit factor plus the Spec weight.
+  check("analytic.joint.critCap.closedForm", r9(together),
+    r9(D((1 + 1.0 * (2.8 * 1.015 - 1)) / (1 + 0.9 * 1.8)) + 120 * 0.024245));
+  checkTrue("analytic.joint.critCap.overstatement", apart / together - 1 > 0.27);
+
+  // A SATURATED set gains nothing from more crit rate. Family 31 high is worth
+  // 3.377 on its own and about nothing once the bracelet is already at the cap.
+  var satur = [f11h, f31h];
+  var satBase = B.jointScore(satur, { crit: 120 }, "ancient", P);
+  var satPlus = B.jointScore(satur.concat([{ cat: "special", family: 17, tier: "high" }]),
+    { crit: 120 }, "ancient", P);
+  // Family 17's crit-resist shred is a party multiplier, not a crit-rate source,
+  // so it still pays at the cap — the cap only eats the crit-RATE channel.
+  checkTrue("analytic.joint.saturated.otherBucketsStillPay", satPlus > satBase + 1);
+  // The marginal worth of one more crit-rate line at 98.93% crit, which is what
+  // the advisor was quoting at 3.377: the cap leaves it 1.07pp, worth 0.690.
+  var atCap = B.normalizeProfile({ skills: [{ share: 1, critRate: 0.9893, critDamage: 2.8 }] });
+  var marginal = B.jointScore([f31h], {}, "ancient", atCap);
+  check("analytic.joint.marginalCritAtCap", r9(marginal),
+    r9(D((1 + 1.0 * 1.8) / (1 + 0.9893 * 1.8))));
+  checkTrue("analytic.joint.marginalCritIsFarUnderStandalone",
+    B.lineDamage(f31h, "ancient", P) / marginal > 4.8);
+  // Crit DAMAGE has no cap, so two crit lines of different kinds do not fight.
+  check("analytic.joint.critDamageIsNotCapped",
+    r9(B.setDamage([f31h, f32h], "ancient", P)),
+    r9(D((1 + 0.95 * (2.9 - 1)) / (1 + 0.9 * 1.8))));
+
+  // ---- the additional-damage pool ----
+  // Two lines feeding one pool dilute each other: 4% then 3.5% on a 38.44% base
+  // is (1.3844+0.075)/1.3844, not the product of two separate ratios.
+  var f14h = { cat: "special", family: 14, tier: "high" };     // additional damage +3.5%
+  check("analytic.joint.addPool", r9(B.setDamage([f24h, f14h], "ancient", P)),
+    r9(D((1.3844 + 0.04 + 0.035) / 1.3844)));
+  checkTrue("analytic.joint.addPoolIsLessThanApart",
+    B.setDamage([f24h, f14h], "ancient", P) <
+    B.lineDamage(f24h, "ancient", P) + B.lineDamage(f14h, "ancient", P) - 1e-9);
+
+  // ---- one square root ----
+  // Flat weapon power and flat main stat move the SAME attack-power figure, so a
+  // set carrying several of them takes one ratio, not one each.
+  var ms = { cat: "basic", family: "mainStat", value: 13888 };
+  function ap(dMs, dWp) { return Math.sqrt((703826 + dMs) * 1.09 * (241367 + dWp) * 1.085 / 6) * 1.125 + 3600; }
+  check("analytic.joint.oneSquareRoot", r9(B.setDamage([f33h, ms], "ancient", P)),
+    r9(D(ap(13888, 9000) / ap(0, 0))));
+  // Two sources on the SAME side of the root dilute each other — 9,000 weapon
+  // power is worth less when 11,400 is already there — so pooling scores strictly
+  // lower than pricing them apart. That is the 0.4.0 fix to families 21 and 22.
+  var f21h = { cat: "special", family: 21, tier: "high" };
+  checkTrue("analytic.joint.sameSideDilutes",
+    B.setDamage([f33h, f21h], "ancient", P) <
+    B.lineDamage(f33h, "ancient", P) + B.lineDamage(f21h, "ancient", P) - 0.07);
+  // Main stat and weapon power sit on OPPOSITE sides, where the two ratios would
+  // multiply cleanly if attack power were a pure square root. It is not — the flat
+  // attack term sits outside it — so pooling is a hair HIGHER, not lower. Tiny,
+  // and in the direction the algebra says: 0.0003 points on 2.76.
+  checkTrue("analytic.joint.oppositeSidesBarelyMove",
+    B.setDamage([f33h, ms], "ancient", P) >
+    B.lineDamage(f33h, "ancient", P) + B.lineDamage(ms, "ancient", P));
+  checkTrue("analytic.joint.oppositeSidesMoveLittle",
+    B.setDamage([f33h, ms], "ancient", P) -
+    (B.lineDamage(f33h, "ancient", P) + B.lineDamage(ms, "ancient", P)) < 0.001);
+  // With no flat attack power at all it collapses to the pure sqrt and the two
+  // are exactly equal, which is what says the flat term is the whole cause.
+  var pNoFlat = B.normalizeProfile({ flatAP: 0 });
+  check("analytic.joint.oppositeSidesExactWithoutFlatAP",
+    r9(B.setDamage([f33h, ms], "ancient", pNoFlat)),
+    r9(B.lineDamage(f33h, "ancient", pNoFlat) + B.lineDamage(ms, "ancient", pNoFlat)));
+
+  // ---- what pooling must NOT touch ----
+  // Orthogonal lines still add exactly, so a bracelet made of them is unmoved.
+  check("analytic.joint.orthogonalStillAdds",
+    r9(B.setDamage([f23h, { cat: "special", family: 25, tier: "high" }], "ancient", P)),
+    r9(B.lineDamage(f23h, "ancient", P) +
+       B.lineDamage({ cat: "special", family: 25, tier: "high" }, "ancient", P)));
+  // ONE line is unchanged in meaning: a set of one is that line.
+  check("analytic.joint.oneLineIsItself", r9(B.setDamage([f11h], "ancient", P)),
+    r9(B.lineDamage(f11h, "ancient", P)));
+  check("analytic.joint.emptySetIsZero", r9(B.setDamage([], "ancient", P)), 0);
+  check("analytic.joint.noTraitsIsSetDamage", r9(B.jointScore([f11h, f23h], {}, "ancient", P)),
+    r9(B.setDamage([f11h, f23h], "ancient", P)));
+  // A trait line among the effect lines still scores zero — `linesPct` depends on
+  // it, and so does the family picker.
+  check("analytic.joint.traitLineScoresZero",
+    r9(B.setDamage([{ cat: "trait", family: "crit", value: 120 }, f23h], "ancient", P)),
+    r9(B.lineDamage(f23h, "ancient", P)));
+  // Order cannot matter.
+  check("analytic.joint.orderFree", r9(B.setDamage([f11h, f24h, f33h], "ancient", P)),
+    r9(B.setDamage([f33h, f24h, f11h], "ancient", P)));
+  // A support pools too, through its own channel: the same two weapon-power
+  // sources take one supportGain, not two.
+  var S2 = B.normalizeProfile({ role: "support" });
+  check("analytic.joint.supportPoolsWeaponPower",
+    r9(B.setDamage([f33h, { cat: "special", family: 21, tier: "high" }], "ancient", S2)),
+    r9(D(B.supportGain(S2, null, 0, 9000 + 9000 + 2400))));
+
+  // THE PYTHON SEAM, checked from this side too. lineDamage() normalises a
+  // partial profile — it always has here, and the mirror raised KeyError: 'role'
+  // on {master: true} until 0.4.0. Both sides now answer, and answer the same.
+  check("analytic.joint.partialProfileNormalises",
+    r9(B.lineDamage(f31h, "ancient", { master: true })), r9(B.lineDamage(f31h, "ancient", P)));
+  check("analytic.joint.emptyProfileNormalises",
+    r9(B.lineDamage(f31h, "ancient", {})), r9(B.lineDamage(f31h, "ancient", P)));
+  check("analytic.joint.partialProfileIsUsed",
+    r9(B.lineDamage(f24h, "ancient", { master: true })),
+    r9(B.lineDamage(f24h, "ancient", B.normalizeProfile({ master: true }))));
+  checkTrue("analytic.joint.partialProfileMasterMoves",
+    B.lineDamage(f24h, "ancient", { master: true }) < B.lineDamage(f24h, "ancient", P));
+})();
+
+// ================= 4f. the combat-trait draw =================
+// A trait DRAW is priced now; a trait LINE still is not. The two live together
+// because they answer different questions: what a reroll into a trait is worth,
+// against what the trait line already on the bracelet scores.
+(function () {
+  var TRAIT_LINES = [{ cat: "trait", family: "crit" }, { cat: "trait", family: "spec" }];
+  var base = { grade: "ancient", profile: {}, slots: 3, rollsLeft: 2,
+    grantedLines: [], goldPer1Pct: 0, baselinePct: 0 };
+  function solveWith(o) {
+    var m = {}, k;
+    for (k in base) if (Object.prototype.hasOwnProperty.call(base, k)) m[k] = base[k];
+    for (k in o) if (Object.prototype.hasOwnProperty.call(o, k)) m[k] = o[k];
+    return B.solve(m);
+  }
+
+  // TWO PLACES FILLED: the trait atoms cannot be drawn, so what they are priced
+  // at cannot move the answer. Repricing them wildly — a Spec weight sixty times
+  // the shipped one — must leave the DP bit for bit where it was.
+  var two = solveWith({ fixedLines: TRAIT_LINES });
+  var twoReprice = solveWith({ fixedLines: TRAIT_LINES, profile: { traitWeights: { spec: 1.5, swift: 1.5 } } });
+  checkTrue("analytic.traitDraw.cappedIsInvariant",
+    Math.abs(two.expectedFinal - twoReprice.expectedFinal) < 1e-12);
+  check("analytic.traitDraw.cappedStatesInvariant", twoReprice.stats.states, two.stats.states, true);
+  // Same thing said through traitValues rather than lines.
+  var twoV = solveWith({ traitValues: { crit: 110, spec: 100 } });
+  var twoVReprice = solveWith({ traitValues: { crit: 110, spec: 100 },
+    profile: { traitWeights: { spec: 0.024245, swift: 1.5 } } });     // swift is the free place
+  checkTrue("analytic.traitDraw.cappedByValuesIsInvariant",
+    Math.abs(twoV.expectedFinal - twoVReprice.expectedFinal) < 1e-12);
+
+  // ONE PLACE OPEN: the draw is real, so its price must reach the answer. With
+  // the shipped weights a trait draw is worth about two points, and a bracelet
+  // that can still catch one is worth more than one that cannot.
+  var one = solveWith({ traitValues: { crit: 110 } });
+  var oneReprice = solveWith({ traitValues: { crit: 110 },
+    profile: { traitWeights: { spec: 1.5, swift: 1.5 } } });
+  checkTrue("analytic.traitDraw.openPlacePaysMore", oneReprice.expectedFinal > one.expectedFinal + 1);
+  // And the open place is worth something at the shipped weights too, against the
+  // same solve with every trait draw priced at nothing.
+  var oneDead = solveWith({ traitValues: { crit: 110 },
+    profile: { traitWeights: { spec: 0, swift: 0 } } });
+  checkTrue("analytic.traitDraw.openPlaceIsWorthSomething", one.expectedFinal > oneDead.expectedFinal);
+
+  // The three traits that pay nothing are still junk and still collapse together.
+  var atoms = B.buildAtoms("ancient", P, {});
+  var priced = 0, junk = 0;
+  for (var i = 0; i < atoms.length; i++) {
+    if (atoms[i].cat !== "trait") continue;
+    if (atoms[i].junk) junk++; else priced++;
+  }
+  check("analytic.traitDraw.pricedFamilies", priced, 3, true);      // crit, spec, swiftness
+  check("analytic.traitDraw.deadFamilies", junk, 3, true);          // domination, endurance, expertise
+  // A trait LINE is still worth zero, whatever the draw is priced at. The board's
+  // linesPct is the effect lines alone and reads this.
+  check("analytic.traitDraw.lineStillScoresZero",
+    r9(B.lineDamage({ cat: "trait", family: "crit", value: 120 }, "ancient", P)), 0);
+  check("analytic.traitDraw.familyLetterStillF", B.familyGrades("ancient").trait.crit.letter, "F", true);
+  // A trait the bracelet already carries is not a draw it can still make: its
+  // atom is zeroed, so a caller holding the line in grantedLines — which is where
+  // an imported bracelet's unlocked trait lands — is not paid for it twice.
+  var held = B.solve({ grade: "ancient", profile: {}, slots: 2, rollsLeft: 1,
+    fixedLines: [], traitValues: { crit: 110, spec: 100 },
+    grantedLines: [{ cat: "trait", family: "crit" }, { cat: "special", family: 23, tier: "high" }],
+    goldPer1Pct: 0, baselinePct: 0 });
+  check("analytic.traitDraw.heldTraitIsNotPaidTwice", r9(held.currentScore),
+    r9(B.jointScore([{ cat: "special", family: 23, tier: "high" }], { crit: 110, spec: 100 }, "ancient", P)));
 })();
 
 // ================= 4d. the support channel =================
@@ -380,7 +634,10 @@ refs.traits.forEach(function (c, i) {
     // The support's own base attack power: no flat attack term, because the buff
     // reads the base figure and not the total.
     var supAtk = Math.sqrt(((703826 + (dMs || 0)) * 1.09) * ((241367 + (dWp || 0)) * 1.085) / 6) * 1.125;
-    var dpsAtk = Math.sqrt(260918 * 767170 / 6);
+    // The dealer being buffed is OUR OWN default dealer since 0.4.0: weapon power
+    // 241,367 × 1.085 and main stat 703,826 × 1.09, the same two figures the
+    // profile above carries, instead of the accessory calculator's inherited pair.
+    var dpsAtk = Math.sqrt(261883.195 * 767170 / 6);
     var mults = 1 + 0.2948;
     var apMult = ((dpsAtk + supAtk * 0.22 * (1 + atkEnh)) * mults + 3600) / (dpsAtk * mults + 3600);
     var ap = 1 + 0.95 * (apMult - 1);
@@ -389,7 +646,7 @@ refs.traits.forEach(function (c, i) {
     // damage, so they share one bracket and the dealer's own base dilutes them.
     var identity = 1 + (0.70 * (0.15 * (1 + allyDmg) * (1 + specEff)) +
                         0.70 * (0.02 * (1 + allyDmg) * (1 + specEff)) +
-                        0.40 * (0.10 * (1 + allyDmgT))) / (1 + 0.3585);
+                        0.40 * (0.10 * (1 + allyDmgT))) / (1 + 0.3844);
     return ap * brand * identity;
   }
   function gain(lines, dMs, dWp) { return contribution(lines, dMs, dWp) / contribution(null, 0, 0); }
@@ -398,8 +655,21 @@ refs.traits.forEach(function (c, i) {
   // What a naked support is already worth to one dealer. Every other number in
   // this block is a ratio against it, so pin it outright — twice: the model's own
   // figure, and the re-derivation above landing on the same one.
-  check("analytic.support.contribution", r9(B.supportContribution(S, null, 0, 0)), 1.935042758);
-  check("analytic.support.contributionRederived", r9(contribution(null, 0, 0)), 1.935042758);
+  check("analytic.support.contribution", r9(B.supportContribution(S, null, 0, 0)), 1.927654588);
+  check("analytic.support.contributionRederived", r9(contribution(null, 0, 0)), 1.927654588);
+  // THE DEALER IS OUR OWN. Two of the four figures describing the damage dealer a
+  // support is scored against were the accessory calculator's, and named a
+  // slightly different character than this model's own defaults do: 2.1% karma
+  // against our 2.5%, and a 35.85% additional-damage pool against our 38.44%.
+  // Both are now read off the profile, so one reference build stands behind both
+  // roles. dpsMS keeps the rounded integer it always had, which is our own figure
+  // to a third of a point.
+  check("analytic.support.dealerIsOurWeaponPower", B.DEFAULT_PROFILE.support.dpsWP, 241367 * 1.085);
+  check("analytic.support.dealerIsOurMainStat", B.DEFAULT_PROFILE.support.dpsMS, Math.round(703826 * 1.09), true);
+  check("analytic.support.dealerCarriesOurAddPool", B.DEFAULT_PROFILE.support.baseAdd, B.addDamagePool(P));
+  check("analytic.support.dealerCarriesOurFlatAP", B.DEFAULT_PROFILE.support.dpsFlatAtk, P.flatAP, true);
+  checkTrue("analytic.support.dealerMainStatIsWithinAPoint",
+    Math.abs(B.DEFAULT_PROFILE.support.dpsMS - 703826 * 1.09) < 1);
   // A gain is that contribution with the line over the contribution without.
   check("analytic.support.gainIsARatio", r9(B.supportGain(S, { allyDmg: 0.09 }, 0, 0)),
     r9(B.supportContribution(S, { allyDmg: 0.09 }, 0, 0) / B.supportContribution(S, null, 0, 0)));

@@ -19,6 +19,13 @@
  *     remaining: V(n) = E[max(X, V(n-1))], sampled once up front
  *
  * The two combat traits are drawn from Stove's weighted bands.
+ *
+ * SCORING CAVEAT since model 0.4.x: the DP pools crit, flats and additional
+ * damage across the whole set before converting; this simulator still sums
+ * line damages. So a DP-vs-simulator comparison now mixes a policy difference
+ * with a scoring one, and near the crit cap the simulator reads slightly high.
+ * Fine for what it is for — catching a DP whose distribution is impossibly
+ * BAD — but do not read small gaps as meaningful.
  */
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);

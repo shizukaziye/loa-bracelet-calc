@@ -159,59 +159,25 @@
   // bracelet, so the arithmetic is app.js's and this file only asks for it.
   // ------------------------------------------------------------------
 
+  /**
+   * app.js's worth object, and there is no second copy of it anywhere.
+   *
+   * There used to be a LOCAL_WORTH mirror of the same four functions here,
+   * carrying its own note to delete it the moment app.js exported `worth`.
+   * app.js does — BraceletApp.worth, beside .solver — and it could never have
+   * been reached anyway: app.js is an EAGER script in index.html and this file
+   * is lazy, loaded only when someone opens the Advisor tab, so the export is
+   * always already there. Two copies of one formula is exactly the drift this
+   * seam exists to prevent, so the copy is gone and these are through-calls.
+   */
   function W() {
     var A = window.BraceletApp;
-    return (A && A.worth && typeof A.worth.of === "function") ? A.worth : LOCAL_WORTH;
+    return (A && A.worth) || null;
   }
   /** { gold, p } — what it is worth, and the odds of clearing the baseline at all. */
-  function worthOf(res, shift) { return W().of(res, shift); }
-  function worthNote(w) { return W().note(w); }
-  function worthGloss(w) { return W().gloss(w); }
-
-  // ---- FALLBACK, and nothing else ----------------------------------------
-  // A mirror of app.js's four worth functions, used only while app.js has no
-  // `worth` export. Delete this whole block the moment it does: two copies of one
-  // formula is exactly the drift this seam exists to prevent.
-  var LOCAL_WORTH = {
-    of: function (res, shift) {
-      if (!res || !res.finalScore || !res.finalScore.cdf || !res.finalScore.cdf.length) return null;
-      var cdf = res.finalScore.cdf, base = num(S.econ.baseline, 0), off = num(shift, 0);
-      var acc = 0, p = 0, prev = 0, prevS = null, i, m, s, over;
-      for (i = 0; i < cdf.length; i++) {
-        m = cdf[i].cum - prev;
-        prev = cdf[i].cum;
-        // The cdf arrives THINNED to ~400 rungs, so each rung stands for the whole
-        // interval below it — charge it at that interval's MIDPOINT, not its top
-        // end, or the answer prices several percent high.
-        s = prevS === null ? cdf[i].score : (prevS + cdf[i].score) / 2;
-        prevS = cdf[i].score;
-        if (m <= 0) continue;
-        over = pct(s + off) - base;
-        if (over > 0) { acc += m * over; p += m; }
-      }
-      return { gold: acc * gpd(), p: p };
-    },
-    odds: function (p) {
-      var v = clamp(num(p, 0), 0, 1) * 100;
-      if (v < 0.1) return "under 0.1%";
-      if (v < 1) return fx(v, 2) + "%";
-      if (v >= 99.95) return "very nearly all";
-      return fx(v, v < 10 ? 1 : 0) + "%";
-    },
-    note: function (w) {
-      if (!w) return "";
-      var base = fx(num(S.econ.baseline, 0), 2) + "% baseline";
-      if (w.p <= 0) return "Nothing this bracelet can roll beats your " + base + ", so it is worth nothing.";
-      return LOCAL_WORTH.odds(w.p) + " of the outcomes beat your " + base +
-        ". Worth is how far they clear it, on average, at " + gold(gpd()) + " gold per 1%.";
-    },
-    gloss: function (w) {
-      if (!w) return "What the bracelet is worth over the one you would wear instead. It needs a solve first.";
-      return "What this bracelet is worth over the one you would wear instead. " + LOCAL_WORTH.note(w) +
-        " It is never negative — a bracelet you would not equip is worth nothing, not a debt.";
-    }
-  };
-  // ---- end fallback -------------------------------------------------------
+  function worthOf(res, shift) { var w = W(); return w ? w.of(res, shift) : null; }
+  function worthNote(w) { var x = W(); return x ? x.note(w) : ""; }
+  function worthGloss(w) { var x = W(); return x ? x.gloss(w) : ""; }
 
   /** The one profile every tab scores on: whatever the deck holds. */
   function buildProfile() { return P.profile(); }
@@ -1108,7 +1074,10 @@
       return '<div class="av-empty"><b>The bracelet has not been opened yet.</b><br>' +
         "An unrolled " + esc(S.grade) + " bracelet with " + S.slots + " granted slots and " + S.rollsLeft +
         " rolls lands at <b>" + fx(pct(res.expectedFinal), 2) + "%</b> expected, and is worth <b>" +
-        (wu ? gold(wu.gold) : "—") + "</b> gold — " + esc(sentenceTail(worthNote(wu))) +
+        (wu ? gold(wu.gold) : "—") + "</b> gold" +
+        // worthNote() is empty at a 0% baseline — a comparison against nothing —
+        // so the joining dash must go with it or the sentence trails off mid-air.
+        (worthNote(wu) ? " — " + esc(sentenceTail(worthNote(wu))) : ".") +
         " Type its granted lines into the Calculator's Bracelet panel and this tab will name the lines to lock.</div>" +
         '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Where an unrolled one can land</h2>' +
         quantileStrip(res.finalScore.quantiles, res.currentScore) +
@@ -1134,11 +1103,59 @@
     return cardsHtml(res) + locksHtml(res, profile, lines) + spreadHtml(res) + cutHtml(res, profile, lines);
   }
 
+  /**
+   * The methodology block: LAST element in the pane, collapsed, one per tab —
+   * the shape the Tier List set and docs/design/copy-rules.md fixes. The Method
+   * tab's own header promises every tab carries one; this tab had none.
+   *
+   * STATIC, and appended to whatever bodyHtml() returns, so it is there in every
+   * state the tab can be in — including the three that print nothing else. It
+   * quotes the model, never the solve: a live figure here would go stale the
+   * moment the deck moved.
+   */
+  function methodHtml() {
+    return '<details class="method">' +
+      "<summary>How the numbers on this tab are worked out</summary>" +
+
+      "<p><b>The lock table ranks lock masks, not lines.</b> One attempt rerolls every unlocked slot at once, " +
+      "so the decision is which SET to freeze. For each legal mask the solver reports <b>expected final</b>: " +
+      "what the bracelet is worth after you lock exactly those slots and then play every remaining roll the way " +
+      "it would play them. The <b>vs best</b> column prices the gap against the top mask at your gold rate.</p>" +
+
+      "<p><b>The verdict never compares today&rsquo;s scores.</b> It compares <b>continuation values</b> &mdash; " +
+      "<code>V(s, n)</code>, what a set is worth with n rolls still to come, solved backwards from the last roll. " +
+      "A weaker set can genuinely be worth more, because the families it holds are out of the pool and the next " +
+      "draw comes from a better one. That is why KEEP sometimes lands on the lower number.</p>" +
+
+      "<p><b>Expected final is an average</b>, over every way the remaining rolls can land under that best play. " +
+      "Every outcome is enumerated and the recursion solved exactly &mdash; no simulation &mdash; so it is the " +
+      "model&rsquo;s own expectation rather than a sample of it. It is not a promise: half of all bracelets finish " +
+      "below the median.</p>" +
+
+      "<p><b>The strip is that spread drawn out.</b> Whisker p10 to p90, box the middle half, blue line the " +
+      "median, orange line where the bracelet sits today. One bracelet in ten ends below p10 and one in ten " +
+      "above p90, so the distance from the box to the whisker is the risk the average hides.</p>" +
+
+      "<p><b>Worth</b> is <code>E[max(0, final% &minus; baseline%)] &times; gold per 1%</code>. Only the outcomes " +
+      "that beat the bracelet you would wear instead pay, weighted by how often they land and by how far they " +
+      "clear it &mdash; so it is never negative: a bracelet you would not equip is worth nothing, not a debt. " +
+      "Both inputs are yours, and the truncation sits inside the expectation, which is the whole argument.</p>" +
+
+      "<p><b>A support is scored on one damage dealer.</b> Every figure on this tab &mdash; the score, the " +
+      "expected final, the strip, the gold &mdash; is what a single dealer standing next to you gains, not the " +
+      "party total. It is the one unit that compares directly against a damage dealer&rsquo;s own bracelet.</p>" +
+
+      "<p>Rolls cost silver, not gold, and this tool treats them as free. That settles a lot: rolling always beats " +
+      "stopping, so there is no should-I-stop question and the value of a state is simply its best-play " +
+      "expectation. Where the character baseline comes from and how each bucket is scored: the <b>Method</b> tab.</p>" +
+      "</details>";
+  }
+
   function render() {
     var body = $("av-body"), lead = $("av-lead");
     if (!body) return;
     if (lead) lead.innerHTML = leadHtml();
-    body.innerHTML = bodyHtml();
+    body.innerHTML = bodyHtml() + methodHtml();
     if (typeof P.mountCharControls === "function") P.mountCharControls($("av-hdrctl"));
   }
 

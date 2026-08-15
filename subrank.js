@@ -37,16 +37,25 @@
  *             (Epic) tier, plus two combat traits at 110 (Ancient) / 92 (Relic).
  *             A REACHABLE good bracelet, not a theoretical maximum — so scores
  *             run past 100 and S+ means you beat it.
- *   floor   = two combat traits at 40 and three lines worth nothing — i.e. just
- *             traitDamage({crit:40, spec:40}). Shizu's rule: an empty bracelet
- *             with 40/40 and three junk lines scores 0.
+ *   floor   = both combat traits at the BOTTOM of the grade's band (61 Ancient,
+ *             41 Relic) and three lines worth nothing — i.e. just traitDamage()
+ *             on that pair. Shizu's rule: the worst bracelet the game can hand
+ *             you scores 0.
+ *   ceiling = the literal maximum: the three best distinct families at their
+ *             HIGH (Legendary) roll plus both traits at the top of the band.
+ *             Nothing to do with the scale — it is what isPerfect tests, and it
+ *             is the only thing that earns the rainbow.
  *
  * Everything is in LOG SPACE (the model's D units), not in converted
  * percentages: the model adds in log space, so the scale has to.
  *
- * On the canonical default profile, Ancient: perfect = 22.87% damage,
- * floor = 2.00% damage. Those two numbers are the anchors — check them before
- * believing anything else this file says.
+ * THE ANCHORS, read off model VERSION 0.4.0 on 2026-08-14. Ancient, damage
+ * dealer: perfect = 19.97% damage, floor = 3.01%, ceiling = 22.76% (score 115.1).
+ * Ancient, support: perfect = 6.44%, floor = 0.60%, ceiling = 7.54% (score 118.1).
+ * They move whenever the model moves — this file computes them, it does not
+ * carry them, and the version stamp is here so a reader can tell a stale quote
+ * from a wrong one. Print anchorsFor("ancient") before believing anything else
+ * this file says.
  *
  * NO NETWORK, no state, no DOM. Pure arithmetic over window.Bracelet.
  */
@@ -159,7 +168,7 @@
   // `background:`, and the `rank-rainbow` class adds the tiling and the seamless
   // slide. 90deg, so the two ends are the same red and the tile has no seam; a
   // diagonal gradient seams when tiled, which is the loa-tierlist lesson.
-  // This is gated on a PERFECT SCORE, never on the band: an S+ bracelet is not a
+  // This is gated on THE CEILING, never on the band: an S+ bracelet is not a
   // perfect one, and the rainbow has to mean the ceiling and nothing else.
   var RAINBOW = {
     bg: "linear-gradient(90deg,#FF8A80,#FFC46B,#F8E081,#8CE99A,#7FD0FF,#C9A2FF,#FF8A80)",
@@ -277,6 +286,16 @@
   // 2026-08-14). Raising the floor to the real band end lifts every Ancient
   // score's zero point and compresses the scale onto what a player can change.
   var TRAIT_FLOOR = { relic: 41, ancient: 61 };
+  // The TOP of Stove's own band — the highest a combat trait can roll. Not the
+  // yardstick (that is TRAIT_ANCHOR, deliberately under it): this is what the
+  // literal best bracelet in the game carries, and it is only ever used to work
+  // out where the ceiling is.
+  var TRAIT_CEILING = { relic: 100, ancient: 120 };
+  // How close to the ceiling still counts as reaching it. The ceiling is built
+  // out of the same lineDamage() calls the score is, so an exact hit is exact to
+  // the last bit — but a total assembled in a different order can land an ulp
+  // out, and a rainbow that flickers on floating-point noise is worse than none.
+  var PERFECT_EPS = 1e-6;
 
   var canonCache = {};       // grade -> anchors on the canonical default profile
 
@@ -312,13 +331,18 @@
     // The three highest DISTINCT families, not the three highest rolls: a single
     // family cannot fill three slots, so "three of the best line" is not a
     // bracelet anyone can own.
-    var S = B.DATA.SPECIALS, byFam = [], i;
+    var S = B.DATA.SPECIALS, byFam = [], byFamTop = [], i;
     for (i = 0; i < S.length; i++) {
-      byFam.push(B.lineDamage({ cat: "special", family: S[i].id, tier: "mid" }, grade, profile));
+      byFam.push({ id: S[i].id, d: B.lineDamage({ cat: "special", family: S[i].id, tier: "mid" }, grade, profile) });
+      // The same three slots at their LEGENDARY roll — the other end of the same
+      // bracelet, and the only thing `ceiling` is built from.
+      byFamTop.push({ id: S[i].id, d: B.lineDamage({ cat: "special", family: S[i].id, tier: "high" }, grade, profile) });
     }
-    byFam.sort(function (a, b) { return b - a; });
+    byFam.sort(function (a, b) { return b.d - a.d; });
+    byFamTop.sort(function (a, b) { return b.d - a.d; });
     var cap = TRAIT_ANCHOR[grade] || TRAIT_ANCHOR.ancient;
     var bottom = TRAIT_FLOOR[grade] || TRAIT_FLOOR.ancient;
+    var top = TRAIT_CEILING[grade] || TRAIT_CEILING.ancient;
     // THE PAIR THE ROLE ACTUALLY RUNS. A damage dealer's yardstick bracelet
     // carries Crit and Specialization; a support's carries Specialization and
     // Swiftness, because crit does nothing for a support and scores zero. Using
@@ -331,17 +355,48 @@
       t[pair[0]] = v; t[pair[1]] = v;
       return B.traitDamage(t, profile);
     }
+    // THE ANCHORS ARE BRACELETS, SO THEY ARE SCORED AS BRACELETS. Since 0.4.1
+    // a set pools its crit, its flats and its additional damage across every
+    // line and trait before converting (jointScore) — summing the three line
+    // damages and the trait pair here would rebuild the pre-pooling arithmetic
+    // and put the yardstick above anything a real bracelet can score, so a
+    // maximal bracelet could sit under its own ceiling and never rainbow, and
+    // 100 would quietly stop being reachable. The three families are still
+    // CHOSEN by their individual line scores — the selection rule is part of
+    // the anchor's meaning — but the chosen trio is priced jointly.
+    function pairTraits(v) {
+      var t = {};
+      t[pair[0]] = v; t[pair[1]] = v;
+      return t;
+    }
+    function trio(list, tier) {
+      return [
+        { cat: "special", family: list[0].id, tier: tier },
+        { cat: "special", family: list[1].id, tier: tier },
+        { cat: "special", family: list[2].id, tier: tier }
+      ];
+    }
     return {
       best: d.length ? d[0] : 0,
-      perfect: byFam[0] + byFam[1] + byFam[2] + traitPair(cap),
-      floor: traitPair(bottom)
+      perfect: B.jointScore(trio(byFam, "mid"), pairTraits(cap), grade, p),
+      floor: B.jointScore([], pairTraits(bottom), grade, p),
+      // THE CEILING, and the whole reason it is here: the rainbow used to be
+      // gated on `s > 100.1`, which is exactly the DPS ladder's S+ cut — so
+      // every S+ bracelet took it, and on the support ladder (S+ opens at 100)
+      // the gate did not even line up with the band it was pretending to be.
+      // A bracelet cannot be improved past this, so this is what "perfect"
+      // means.
+      ceiling: B.jointScore(trio(byFamTop, "high"), pairTraits(top), grade, p)
     };
   }
 
   /**
    * Anchors for a grade. The canonical default profile is cached — it is a
    * constant and the Leaderboard asks for it once per row; anything else is
-   * computed on the spot, which costs 99 lineDamage() calls and no one notices.
+   * computed on the spot, which costs about 165 lineDamage() calls — the 99 of
+   * rollScores plus a mid and a high pass over the families — and no one
+   * notices. A caller that hands the same non-default profile in row after row
+   * should memoise it: the Leaderboard does, for the support profile.
    */
   function anchorsFor(grade, profile) {
     if (!profile) {
@@ -353,7 +408,7 @@
 
   /**
    * braceletScore({lines, traits, grade, profile}) ->
-   *   { score, band, total, floor, perfect, damagePct }
+   *   { score, band, isPerfect, total, floor, perfect, ceiling, damagePct }
    *
    * `lines` are the effect lines — granted AND locked, but NOT the two combat
    * traits the bracelet came with; those are `traits`, as {crit, spec, swift}
@@ -366,7 +421,9 @@
     var prof = opts.profile || null;
     var a = anchorsFor(grade, prof);
     var p = prof || canonProfile();
-    var total = B.setDamage(opts.lines || [], grade, p) + B.traitDamage(opts.traits || {}, p);
+    // One pool for the whole bracelet — see computeAnchors. setDamage + traitDamage
+    // summed was the 0.4.0 scoring and paid crit twice across the two halves.
+    var total = B.jointScore(opts.lines || [], opts.traits || {}, grade, p);
     var span = a.perfect - a.floor;
     var s = span > 0 ? 100 * (total - a.floor) / span : 0;
     if (!isFinite(s)) s = 0;
@@ -375,14 +432,17 @@
     return {
       score: s,
       band: of(s, p.role),
-      // The rainbow's one gate. A flat 100 means three of the best distinct
-      // families at their best roll with both traits capped — not "very good".
+      // The rainbow's one gate: the bracelet reached the CEILING — the three
+      // best distinct families at Legendary with both traits at the top of the
+      // band, on this grade and this role. Nothing else earns it, and an S+ is
+      // not it: an ordinary S+ scores about 103, the ceiling about 115.
       // Named isPerfect, not perfect: `perfect` below is the ANCHOR, and one
       // object cannot carry both spellings without the flag silently losing.
-      isPerfect: s > 100.1,
+      isPerfect: total >= a.ceiling - PERFECT_EPS,
       total: total,
       floor: a.floor,
       perfect: a.perfect,
+      ceiling: a.ceiling,
       damagePct: B.damagePercent(total)
     };
   }
@@ -396,6 +456,7 @@
     bandsFor: bandsFor,
     TRAIT_ANCHOR: TRAIT_ANCHOR,
     TRAIT_FLOOR: TRAIT_FLOOR,
+    TRAIT_CEILING: TRAIT_CEILING,
     of: of,
     colorOf: colorOf,
     bestRoll: bestRoll,

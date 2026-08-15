@@ -428,6 +428,16 @@ debuff and one for the rider — which is the bug named in §10.
 The party-wide figure is simply three times what is shown. Anyone who wants it can
 multiply.
 
+## 10c. Family 28 converts shields to damage on purpose
+
+**SETTLED, Shizu, 2026-08-14: "it provides damage when you shield — this is
+correct."** The 0.1-points-per-percent conversion on the party shield/heal family
+is a deliberate modelling choice, not a stub awaiting calibration. The mechanism:
+a support with bigger shields keeps the party shielded longer, and shielded allies
+deal more damage through the shielded-target effects, so shield strength reaches
+the damage column through uptime. A review recommended zeroing it alongside the
+other utility families and was overruled. Do not zero it.
+
 ## 11. Base attack power % is not attack power %
 
 **SETTLED, Shizu, 2026-08-14: base AP% and AP% are different stats. Do not merge them.**
@@ -454,6 +464,11 @@ figure.
 **Do not "fix" this.** It has been raised and ruled on twice.
 
 ## 12. Still open
+
+> **Pruned 2026-08-14:** the two dealer-side constants (`baseAdd`, `dpsWP`) were
+> corrected to our own reference dealer in model 0.4.0, and the exports claim
+> below it was already stale — `supportBaseAtk`, `supportContribution` and
+> `supportGain` are all exported. What remains open is what reads below.
 
 - **Three constants that disagree with our own profile.** `support.baseAdd` 0.3585 against
   this profile's own additional-damage pool of 0.3844; `support.dpsWP` built on 2.1% karma

@@ -243,6 +243,15 @@ to 3.2pp. There were **two** independent causes, not one, and the seed was right
 | Kayamix | 12.258 | 9.461 | −2.797 | granted trait scored zero |
 | Komyosanzo | 11.764 | 9.557 | −2.207 | granted trait scored zero |
 
+> **2026-08-14, closed differently than proposed.** Two things changed since this
+> section was written. The scorers stopped summing halves at all — since model
+> 0.4.1 the worker and subrank price the whole bracelet through `jointScore`,
+> which pools crit and the flats across trait lines and effect lines before
+> converting, so "split the lines in two and add" no longer describes the code.
+> And the solver's draw pool now prices a combat-trait draw from the profile
+> (model 0.4.0), so the advisor's expected-final stopped under-reading brackets
+> with an open trait place. The history below stands as written.
+
 ## 7.1 Bug A — a combat trait in a granted slot scored nothing
 
 Four bracelets carry a combat trait that rolled into a **granted** slot rather than arriving

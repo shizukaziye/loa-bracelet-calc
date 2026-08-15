@@ -274,16 +274,31 @@
     // accessories rolled. adv.flatAP is now the accessories alone and the core is
     // added on top, so restoring such a blob unchanged would count the core
     // twice. The core fields are the marker: absent means old, and the old total
-    // has the default core's 2,700 taken back out of it.
+    // has the 2,700 taken back out of it and given to a core row that says
+    // exactly what was folded in.
     //
     // 2,700 IS STILL THE RIGHT NUMBER, even though the default ancient attack
     // core now gives 3,600 (its point thresholds ADD: 900 at ten points plus
     // 2,700 at seventeen). What comes out has to be what the old build FOLDED
     // IN, and that was 2,700 — the figure the tool shipped when those saves were
-    // written. Raising it to 3,600 would take 900 of flat attack power off a
-    // character who never had it.
+    // written. So the migrated core is the RELIC attack core at 17 points, which
+    // is 2,700 exactly (data/gear-data.js ARK_CORE). Leaving the core on its new
+    // ancient default handed every restored save 900 flat attack power it never
+    // had (Shizu, 2026-08-14): 3,090 in, 3,990 out.
+    //
+    // Under 2,700 the save cannot have been carrying the default core at all —
+    // somebody typed the whole figure themselves — so it keeps its number and
+    // gets no core, and the total still comes out where the old save left it.
     if (got.adv && got.adv.coreType === undefined) {
-      d.adv.flatAP = Math.max(0, num(d.adv.flatAP, 0) - 2700);
+      var oldFlat = num(d.adv.flatAP, 0);
+      if (oldFlat >= 2700) {
+        d.adv.flatAP = oldFlat - 2700;
+        d.adv.coreType = "attack";
+        d.adv.coreGrade = "relic";
+        d.adv.corePoints = 17;
+      } else {
+        d.adv.coreType = "none";
+      }
     }
     // THE TRAIT WEIGHTS ARE NOT MIGRATED. A v2 blob carries 2.5% per 100 points,
     // the old default; a fresh one starts at 2.4245%, which is what a crit point
@@ -292,6 +307,9 @@
     // 120-point line by 0.09 points of damage. Rewriting a stored number for that
     // would take a setting away and buy nothing, so an old save keeps its 2.5.
     assignInto(S, d);
+    // The one place the junk collapse touches stored rows: a save written before
+    // the picker had a "Junk Line" option, folded once on the way in.
+    migrateJunkRows();
   }
 
   // Slot count and grade drive how many rows exist and which are legal.
@@ -311,7 +329,6 @@
     if (!S.provNote) S.provNote = {};
     normalizeShares();
     fitTraits();
-    migrateJunkRows();
   }
 
   /**
@@ -343,31 +360,58 @@
   // letters. A crit-rate line reads "S" to a dealer and is worth exactly 0.000 to
   // a support; one cache key for both served the wrong one.
   var famGradeCache = {};
-  function famGrades(grade) {
-    var role = S.fight && S.fight.role === "support" ? "support" : "dps";
+  /** The letters for one grade under one named role. Cached by the pair. */
+  function famGradesFor(grade, role) {
+    role = role === "support" ? "support" : "dps";
     var key = grade + "|" + role;
     if (!famGradeCache[key]) famGradeCache[key] = B.familyGrades(grade, role);
     return famGradeCache[key];
   }
+  function famGrades(grade) { return famGradesFor(grade, S.fight && S.fight.role); }
 
-  /** The letter the picker shows for a stored family value. */
-  function letterOf(val, grade) {
+  /** The letter a stored family value earns under a named role. */
+  function letterOfFor(val, grade, role) {
     if (!val || val === "none") return null;
     if (val === JUNK) return "F";
-    var fg = famGrades(grade);
+    var fg = famGradesFor(grade, role);
     if (val.indexOf("basic:") === 0) return (fg.basic[val.slice(6)] || {}).letter || "F";
     if (val.indexOf("trait:") === 0) return (fg.trait[val.slice(6)] || {}).letter || "F";
     if (val.indexOf("sp:") === 0) return (fg.special[Number(val.slice(3))] || {}).letter || "F";
     return null;
   }
 
-  /** True for a stored family value the granted picker now folds into JUNK. */
-  function isJunkFam(val, grade) {
-    if (!val || val === "none" || val === JUNK) return false;
-    return letterOf(val, grade) === "F";
+  /** The letter the picker shows for a stored family value, on the role in force. */
+  function letterOf(val, grade) {
+    return letterOfFor(val, grade, S.fight && S.fight.role);
   }
 
-  /** Rewrite granted / rolled rows saved before the collapse existed. */
+  /**
+   * A family worth nothing to EITHER role — the only kind safe to fold away for
+   * good.
+   *
+   * Role-neutral on purpose. Whether a family scores at all depends on who is
+   * wearing the bracelet: crit rate is an S line to a damage dealer and exactly
+   * 0.000 to a support, and families 28-30 are the other way round. A rule that
+   * read the CURRENT role would rewrite the user's typed lines every time they
+   * pressed the other Role pill.
+   */
+  function isJunkFam(val, grade) {
+    if (!val || val === "none" || val === JUNK) return false;
+    return letterOfFor(val, grade, "dps") === "F" && letterOfFor(val, grade, "support") === "F";
+  }
+
+  /**
+   * Rewrite granted / rolled rows saved before the collapse existed. ONE-SHOT,
+   * from load() and nowhere else.
+   *
+   * It used to run inside fitRows() — on every change — against the CURRENT
+   * role, which turned every Role flip into a one-way rewrite of the user's own
+   * bracelet: type sp:29 / sp:30 as a support, press DPS, and two typed lines
+   * became junk with no way back (Shizu, 2026-08-14). The collapse belongs to
+   * the PICKER, not to the state: app.js's familyOptions folds the worthless
+   * families into one option and shows the stored one beside them, so nothing
+   * on screen is lost and nothing in the state is rewritten.
+   */
   function migrateJunkRows() {
     var sets = [S.rows, S.rolled], s, i, rows;
     for (s = 0; s < sets.length; s++) {
@@ -653,6 +697,12 @@
    * button fires no mouse events and would swallow the tooltip that says WHY it
    * is dead. Clicks are caught by one delegated listener on the document.
    */
+  // One sentence, both copies of the button: what it puts back, and what it does
+  // not touch. Role is on that list because a support who resets their gear is
+  // still a support (see resetCharacter).
+  var RESET_GLOSS = "Puts every setting back to the calculator's defaults. Your role, the character, " +
+    "the bracelet, the gold rate and the baseline are left alone.";
+
   function charControlsHtml() {
     var loaded = hasCharacter();
     var who = loaded ? esc(S.char.name) : "", can = loaded && canImportStats();
@@ -662,11 +712,8 @@
         '<button type="button" class="mbtn" aria-disabled="true" data-bcimport="1"' +
         ' data-gloss="No character is loaded. Look one up above and this fills the panel with their own honing,' +
         ' accessories, gems, karma and the rest.">Import Character Stats</button>' +
-        '<button type="button" class="mbtn" data-bcreset="defaults"' +
-        ' data-gloss="Puts the settings back to the calculator\'s defaults — gear, accessories, gems and the two' +
-        ' nodes on the left, the fight, trait, skill and Advanced settings on the right. The bracelet — its lines,' +
-        ' its traits, its grade, its slots and its padlocks — and the gold rate and baseline in the Grader are' +
-        ' all left exactly as they are.">Reset to Default</button></div>';
+        '<button type="button" class="mbtn" data-bcreset="defaults" data-gloss="' + esc(RESET_GLOSS) +
+        '">Reset to Default</button></div>';
     }
     h += '<button type="button" class="mbtn"' + (can ? "" : ' aria-disabled="true"') +
       ' data-bcimport="1" data-gloss="' + (can
@@ -676,11 +723,8 @@
         : "Nothing to import: this record carries no gear from " + who +
           "'s character page. Re-pull them and the button comes back.") +
       '">Import Character Stats</button>';
-    h += '<button type="button" class="mbtn" data-bcreset="defaults"' +
-      ' data-gloss="Puts the settings back to the calculator\'s defaults — gear, accessories, gems and the two' +
-      ' nodes on the left, the fight, trait, skill and Advanced settings on the right. ' + who +
-      ' stays loaded, and the bracelet — its lines, its traits, its grade, its slots and its padlocks — is left' +
-      ' exactly as it is, and so are the gold rate and baseline in the Grader.">Reset to Default</button>';
+    h += '<button type="button" class="mbtn" data-bcreset="defaults" data-gloss="' + esc(RESET_GLOSS) +
+      '">Reset to Default</button>';
     return h + "</div>";
   }
 
@@ -872,6 +916,19 @@
           : "all " + (pr.gemLevels ? pr.gemLevels.length : 11) + " gems are level " + lv
       };
     }
+    // THE GEMS THE PAGE DID NOT CARRY. The Worker falls back to eleven level
+    // nines when it can read no gem at all — a missing reading is not an empty
+    // gem page — and that assumption was confessed only on adv.baseApPct, a
+    // field the deck disables and greys out. Nobody reads a disabled field. The
+    // mark belongs on the gem slider, which is where somebody would go to
+    // disagree with us.
+    if (raw.gemsAssumed && pr.gemLevel == null) {
+      var lvGuess = /lv(\d+)/i.exec(String(raw.gemsAssumed));
+      vals["kit.gems"] = {
+        value: lvGuess ? clamp(Number(lvGuess[1]), 6, 10) : num(S.kit.gems, 9),
+        note: "the page carries no readable gems, so " + raw.gemsAssumed + " is assumed"
+      };
+    }
     // THE REAL DISTRIBUTION. Ten at 9 and one at 10 is 11.2% of attack power, and
     // the deck can hold that now, so the spread stops being a note on a rounding.
     if (pr.gemCounts && pr.gemCounts.length === GEM_LEVELS.length) {
@@ -992,11 +1049,21 @@
     }
     if (pr.arkCore) {
       var nCores = raw.arkGridCores ? raw.arkGridCores.length : 0;
+      // THE POINTS ARE SNAPPED TO THE CONTROL. Real pages carry 18, 19 or 20 —
+      // all 59 seed characters do — while the pill row offers 17 / 10 / under 10,
+      // because those are the only rungs that pay anything. An unsnapped 20
+      // matched no pill, so importing a character lit none of them and the row
+      // read as untouched (Shizu, 2026-08-14). Points above 17 buy a percentage
+      // and no more flat power (data/gear-data.js ARK_CORE), so 20 IS the
+      // 17-point rung; the note still quotes what the page actually said.
+      var pts = num(pr.arkCore.points, 0);
+      var snapped = pts >= 17 ? 17 : (pts >= 10 ? 10 : 0);
       var coreNote = "the best of " + (nCores || "the") + " ark-grid cores is " + pr.arkCore.grade +
-        " at " + pr.arkCore.points + " points; the page never says which effect a core carries, " +
-        "so attack-or-weapon stays as you set it";
+        " at " + pr.arkCore.points + " points" +
+        (snapped !== pts ? ", which pays at the " + snapped + "-point step" : "") +
+        "; the page never says which effect a core carries, so attack-or-weapon stays as you set it";
       vals["adv.coreGrade"] = { value: pr.arkCore.grade, note: coreNote };
-      vals["adv.corePoints"] = { value: pr.arkCore.points, note: coreNote };
+      vals["adv.corePoints"] = { value: snapped, note: coreNote };
     }
 
     return vals;
@@ -1028,20 +1095,19 @@
    * What a record says about the character's gear, before the §1.1 profile
    * block is merged over it.
    *
-   * ITEM LEVEL is always there: the roster and the page both carry an average,
+   * ITEM LEVEL, and nothing else. The roster and the page both carry an average,
    * and the six honing sliders are what the model reads. An average maps to a
    * uniform honing level (Serca 0 is 1675, every level is +5), which is a
    * derivation and not a measurement — so profileValues' exact per-piece
    * numbers overwrite it wherever the page carried them.
    *
-   * THE REST arrives only when the Worker read the character page directly:
-   *
-   *   weaponPower + mainStat  -> the raw override pair, and the override switch
-   *                              with them, because a raw main stat that the
-   *                              honing sliders then overwrite would be worse
-   *                              than none
-   *   gemLevels               -> the one gem-level control
-   *   critRate / critDamage   -> the first skill row's crit numbers
+   * This used to read four more fields off the record — weaponPower and mainStat
+   * into the raw override pair, critRate and critDamage into the first skill row
+   * — and the Worker emits none of them: the page's main stat and weapon power
+   * are TOTALS after the percentage buckets, not the raw pair the override wants,
+   * and lostark.bible prints no crit numbers for a character at all
+   * (worker/bracelet.js, "NOT ON THE PAGE, and therefore never emitted"). All
+   * four were absent from every one of the 59 seed profiles.
    *
    * Everything else the deck holds — fight shares, weights, the economy knobs —
    * is judgment, not data, and is never imported. Nothing about the bracelet
@@ -1054,25 +1120,6 @@
     if (G && c.itemLevel != null) {
       var lvl = clamp(Math.round((num(c.itemLevel, NaN) - G.ILVL0) / G.ILVL_STEP), 0, 25);
       if (isFinite(lvl)) for (i = 0; i < PIECES.length; i++) vals["gear." + PIECES[i][0]] = lvl;
-    }
-
-    var pr = c.profile;
-    if (pr) {
-      var wp = num(pr.weaponPower, NaN), ms = num(pr.mainStat, NaN);
-      // Both or neither: the override pair is one setting, and half of it is
-      // worse than none — the model would then read one raw number and one
-      // derived one.
-      if (isFinite(wp) && wp > 0 && isFinite(ms) && ms > 0) {
-        vals["ov.weaponPowerRaw"] = Math.round(wp);
-        vals["ov.mainStatRaw"] = Math.round(ms);
-        vals.useOverride = true;
-      }
-      var gl = num(pr.gemLevels, NaN);
-      if (isFinite(gl) && gl >= 6 && gl <= 10) vals["kit.gems"] = Math.round(gl);
-      var cr = num(pr.critRate, NaN);
-      if (isFinite(cr) && cr > 0 && cr <= 100) vals["skills.0.cr"] = cr;
-      var cd = num(pr.critDamage, NaN);
-      if (isFinite(cd) && cd > 0) vals["skills.0.cd"] = cd;
     }
     return vals;
   }
@@ -1166,7 +1213,7 @@
     // The two resets are NOT here any more: they moved up to the character
     // header's control row, which is on screen whether or not the deck is open.
     box.innerHTML = '<span class="bc-provtxt" data-gloss="Marked fields hold a number read off the character page rather than one you chose. Editing a field drops its mark for good; the label then says what the page had, as a suggestion.">' +
-      txt + " Only the left column ever comes from a character page.</span>";
+      txt + "</span>";
   }
 
   // ------------------------------------------------------------------
@@ -1192,18 +1239,25 @@
    * survive with them, so a reset cannot make the next change re-seed over a
    * hand-typed rate either.
    *
-   * `fight` carries the ROLE, so "Reset to Default" puts a support back to DPS
-   * along with everything else on the left and the right. `support` is the whole
-   * support channel's inputs and resets with it.
+   * `fight` carries the ROLE, which is the one field in these blocks the reset
+   * puts back afterwards — see resetCharacter. `support` is the whole support
+   * channel's inputs and resets with it.
    */
   var CHARACTER_BLOCKS = ["gear", "ov", "kit", "fight", "adv", "support"];
 
   function resetCharacter() {
     var d = defaults(), i, k;
+    // Who you are is not a setting. The role rides in `fight` with the shares
+    // and the weights, and resetting it put every support back to DPS — which
+    // rescores the whole bracelet and, until 2026-08-14, rewrote the lines a
+    // support had typed into junk. This button's own tooltip promises the
+    // bracelet is left exactly as it is.
+    var role = S.fight.role;
     for (i = 0; i < CHARACTER_BLOCKS.length; i++) {
       k = CHARACTER_BLOCKS[i];
       S[k] = d[k];
     }
+    S.fight.role = role;
     S.useOverride = d.useOverride;
     S.skills = d.skills;
     // THE BRACELET IS NOT A SETTING EITHER. Grade, granted slots and rolls left
@@ -1736,7 +1790,7 @@
     var pc = function (v) { return v + "%"; };
     var h = "";
     h += segmented("kit.neck", "Neck dmg", [0, 0.7, 1.6, 2.6], pc,
-      "Your necklace's additional-damage line. It joins one additive pool with the weapon, pet and astrogem grid, and a bracelet line worth +3% is diluted against that whole pool. 0.7% is the low tier, 2.6% a high roll, 0% no line at all.");
+      "Your necklace's additional-damage line. It joins one additive pool with the weapon, pet and astrogem grid, and a bracelet line worth +3% is diluted against that whole pool.");
     h += segmented("kit.ear1", "Earring 1 WP", [0, 0.8, 1.8, 3], pc,
       "The first earring's weapon-power line. Both earrings plus karma make the weapon-power percentage bucket, which multiplies your raw weapon power and every flat weapon-power line the bracelet gives you.");
     h += segmented("kit.ear2", "Earring 2 WP", [0, 0.8, 1.8, 3], pc,
@@ -1876,9 +1930,9 @@
     }
     var h = "";
     h += slider("fight.wSpec", "Spec weight", 0, 4, 0.1, "pct1",
-      { gloss: "What 100 points of Specialization is worth to your class, in % damage. It ships at what a crit point is worth, 2.42%, so all three combat traits start out priced alike — there is no class table behind anything above or below that, it is your call. A 120-point Spec line then scores value × weight ÷ 100." });
+      { gloss: "What 100 points of Specialization is worth to your class, in % damage. A 120-point line scores value × weight ÷ 100." });
     h += slider("fight.wSwift", "Swift weight", 0, 4, 0.1, "pct1",
-      { gloss: "What 100 points of Swiftness is worth to your class, in % damage. Same shipped 2.42% as Spec. Crit needs no weight: it converts exactly, at 25 points of crit rate per 699 trait points, and is worth whatever that is to your skills." });
+      { gloss: "What 100 points of Swiftness is worth to your class, in % damage. A 120-point line scores value × weight ÷ 100." });
     $("bc-traitw").innerHTML = h;
   }
 
@@ -2037,7 +2091,9 @@
     h += gpdNoteHtml();
     h += slider("econ.baseline", "Baseline %", 0, 25, 0.5, "pct1", {
       edit: true,
-      gloss: "The bracelet you would wear instead. Worth counts only the rolls that BEAT it — how often they land, times how far they clear it, times gold per 1% — so leaving it at 0 prices this bracelet against no bracelet at all, and a bracelet that cannot clear the baseline is worth nothing rather than a negative number. Importing a character sets it to the bracelet that character is already wearing, which is the comparison that answers \"is upgrading worth it\". Click the number to type an exact one."
+      // Where the baseline comes from and why worth is truncated at it belong to
+      // the Method tab, not to a slider's tooltip (docs/design/copy-rules.md §3).
+      gloss: "The bracelet you would wear instead. Worth counts only the rolls that beat it."
     });
     h += baselineNoteHtml();
     return h;
@@ -2068,9 +2124,11 @@
     h += segmented("adv.coreGrade", "Core grade", ["ancient", "relic"], function (v) {
       return v === "ancient" ? "Ancient" : "Relic";
     }, "Relic or ancient. It only changes the 17-point step: an attack core totals 2,700 relic against 3,600 ancient, a weapon core 3,900 against 5,200.");
+    // The #bc-coreflat read-out under these three rows says what the core comes
+    // to, so the label does not have to carry the table (copy-rules.md §1).
     h += segmented("adv.corePoints", "Core points", [17, 10, 0], function (v) {
       return v ? v + "P" : "Under 10";
-    }, "What your four core gems total. A core pays nothing under 10 points, its 10-point step at 10, and both steps at 17 because they add — an attack core gives 900 then 2,700 relic or 3,600 ancient, a weapon core 1,300 then 3,900 or 5,200.");
+    }, "What your four core gems total.");
     h += '<div class="note" id="bc-coreflat"></div>';
     h += "</div>";
 
@@ -2084,7 +2142,6 @@
     h += fldNum("adv.addPet", "Pet %", "0.1", "Pet additional damage.");
     h += fldNum("adv.addAstrogem", "Astrogem grid %", "0.01", "60 grid levels × 0.080667% per level.");
     h += "</div>";
-    h += '<div class="note">The necklace line and the Master node are in the Gear column.</div>';
 
     h += '<div class="subh">Fight assumptions</div><div class="ig">';
     h += fldNum("adv.staggerShare", "Stagger windows %", "1", "Share of your damage dealt while the boss is staggered.");
@@ -2097,7 +2154,6 @@
       gloss: "What 10% attack speed is worth in damage, through the extra casts it buys. Default 1%. It drives the Attack & Move Speed line and the speed half of the stacking weapon-power line."
     });
     h += "</div>";
-    h += '<div class="note">The conditional weapon-power families (20, 21 and 22) are no longer knobs: they are scored at max stacks and full uptime.</div>';
 
     // ---- the support channel, shown only to a support ----
     // Seventeen numbers, so they are grouped: what you give, how long you give
@@ -2134,11 +2190,15 @@
    * model's own formula: Q = 100 · ln(ap · brand · identity), each channel
    * scaled by its uptime, the identity bracket diluted by the dealer's own
    * additional damage. Nothing here is invented.
+   *
+   * BRAND POWER AND ITS UPTIME ARE NOT HERE. Every support score is a RATIO —
+   * the contribution with a line over the contribution without it — and no
+   * bracelet family feeds the brand term, so the whole brand factor divides out
+   * and the two controls moved nothing at all. The model keeps its constants
+   * and the state keeps its two keys, so an old save still loads.
    */
   function supportAdvancedHtml() {
     var h = '<div class="subh">Support — what you give</div><div class="ig">';
-    h += fldNum("support.brandPower", "Brand power %", "0.01",
-      "Your brand power, at level-9 gems. Brand is 10% damage scaled by it, so 45% brand power makes the channel 14.5%.");
     h += fldNum("support.allyAtkEnh", "Ally atk power buff %", "0.01",
       "Your Ally Attack Power Enhancement. Each ally gets a share of your own base attack power, times 1 plus this — the only channel your own gear reaches.");
     h += fldNum("support.allyDmg", "Ally damage buff %", "0.01",
@@ -2154,8 +2214,6 @@
     h += "</div>";
 
     h += '<div class="subh">Support — uptimes</div><div class="ig">';
-    h += fldNum("support.upBrand", "Brand %", "1",
-      "How much of the fight your brand is on the boss. It scales the whole brand channel.");
     h += fldNum("support.upAp", "Atk power buff %", "1",
       "How much of the fight your ally attack-power buff is up. It scales the whole attack-power channel.");
     h += fldNum("support.upSeren", "Serenade %", "1",

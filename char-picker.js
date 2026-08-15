@@ -267,8 +267,9 @@
     var F = favs();
     var list = (F && F.list()) || [];
     if (!list.length) {
-      inst.favs.innerHTML = '<span class="cp-favnone">&#9733; Saved characters land here — star one in the ' +
-        "Calculator's character panel.</span>";
+      // The same sentence the Calculator's own saved-character grid uses. One
+      // empty state, one wording: two of them and they drift.
+      inst.favs.innerHTML = '<span class="cp-favnone">No saved characters yet &mdash; grade one and tap its &#9733;.</span>';
       return;
     }
     inst.favs.innerHTML = list.map(function (f, i) {
@@ -423,8 +424,7 @@
 
     var BI = imp();
     if (!BI || typeof BI.loadCharacter !== "function") {
-      broadcast("The character loader (bible-import.js) is not on this page, so nothing can be looked up. " +
-        "The Calculator's Bracelet panel still takes a bracelet typed by hand.", "err");
+      broadcast("Character lookup is not loaded. You can still type a bracelet by hand in the Calculator.", "err");
       return;
     }
     if (!document.getElementById("bi-name") || !document.getElementById("bi-region")) {
@@ -452,7 +452,7 @@
     close(inst);
     inst.search.value = "";
     eachInstance(paintSel);
-    broadcast("Cleared. The bracelet stays exactly as it is — it is simply no longer tied to a character.", "");
+    broadcast("Cleared. The bracelet is untouched.", "");
   }
 
   function broadcast(text, kind) {

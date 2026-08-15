@@ -124,6 +124,57 @@ var traitCases = [
   return { label: c.label, traits: c.traits, profile: c.profile, damage: r9(B.traitDamage(c.traits, p)) };
 });
 
+// ---------------------------------------------------------------- joint scoring
+// A SET is scored in one pool: one crit cap, one additional-damage pool, one
+// attack-power ratio. These cases are the ones where that differs from the old
+// line-by-line sum, so they pin the pooling itself rather than the pieces.
+var jointCases = [
+  { label: "two crit lines + crit trait + spec trait (over the cap)",
+    lines: [{ cat: "special", family: 11, tier: "high" }, { cat: "special", family: 31, tier: "high" }],
+    traits: { crit: 120, spec: 120 }, grade: "ancient", profile: {} },
+  { label: "the same set with no traits",
+    lines: [{ cat: "special", family: 11, tier: "high" }, { cat: "special", family: 31, tier: "high" }],
+    traits: {}, grade: "ancient", profile: {} },
+  { label: "two additional-damage lines (one pool)",
+    lines: [{ cat: "special", family: 24, tier: "high" }, { cat: "special", family: 14, tier: "high" }],
+    traits: {}, grade: "ancient", profile: {} },
+  { label: "three weapon-power sources (one square root)",
+    lines: [{ cat: "special", family: 33, tier: "high" }, { cat: "special", family: 21, tier: "high" },
+      { cat: "basic", family: "mainStat", value: 13888 }],
+    traits: {}, grade: "ancient", profile: {} },
+  { label: "orthogonal lines only (pooling changes nothing)",
+    lines: [{ cat: "special", family: 23, tier: "high" }, { cat: "special", family: 25, tier: "high" }],
+    traits: { spec: 100 }, grade: "ancient", profile: {} },
+  { label: "already at the crit cap",
+    lines: [{ cat: "special", family: 31, tier: "high" }, { cat: "special", family: 32, tier: "high" }],
+    traits: { crit: 120 }, grade: "ancient",
+    profile: { skills: [{ share: 1, critRate: 1.0, critDamage: 2.8 }] } },
+  { label: "relic, a trait line among the effect lines (scores zero)",
+    lines: [{ cat: "trait", family: "crit", value: 100 }, { cat: "special", family: 31, tier: "high" }],
+    traits: {}, grade: "relic", profile: {} },
+  { label: "support: two weapon-power sources and the spec trait",
+    lines: [{ cat: "special", family: 33, tier: "high" }, { cat: "special", family: 30, tier: "high" }],
+    traits: { spec: 120 }, grade: "ancient", profile: { role: "support" } }
+].map(function (c) {
+  var p = B.normalizeProfile(c.profile);
+  return { label: c.label, grade: c.grade, profile: c.profile, lines: c.lines, traits: c.traits,
+    setDamage: r9(B.setDamage(c.lines, c.grade, p)),
+    traitDamage: r9(B.traitDamage(c.traits, p)),
+    jointScore: r9(B.jointScore(c.lines, c.traits, c.grade, p)) };
+});
+
+// The price of a combat-trait DRAW, which used to be a flat zero for all six.
+var traitAtoms = ["relic", "ancient"].map(function (g) {
+  var out = { grade: g, dps: {}, support: {} };
+  [["dps", B.normalizeProfile({})], ["support", B.normalizeProfile({ role: "support" })]].forEach(function (pair) {
+    var atoms = B.buildAtoms(g, pair[1], {});
+    for (var i = 0; i < atoms.length; i++) {
+      if (atoms[i].cat === "trait") out[pair[0]][atoms[i].key] = r9(atoms[i].damage);
+    }
+  });
+  return out;
+});
+
 // A solve carrying the fixed traits: the whole readout shifts by exactly that
 // constant, and nothing about the DP's shape changes.
 var traitSolve = (function () {
@@ -321,6 +372,8 @@ var refs = {
   lines: lines,
   profileVariants: profileVariants,
   traits: traitCases,
+  joint: jointCases,
+  traitAtoms: traitAtoms,
   traitSolve: traitSolve,
   familyGrades: familyGradeCases,
   pools: poolCases,
@@ -334,4 +387,5 @@ var refs = {
 fs.writeFileSync(path.join(__dirname, "..", "refs.json"), JSON.stringify(refs, null, 2) + "\n");
 console.log("wrote refs.json  (" +
   derivation.length + " derivation, " + lines.length + " lines, " + poolCases.length + " pools, " + traitCases.length + " traits, " +
-  decoderCases.length + " decoder, " + tinyCases.length + " tiny DP, " + solveCases.length + " solves)");
+  jointCases.length + " joint, " + decoderCases.length + " decoder, " + tinyCases.length + " tiny DP, " +
+  solveCases.length + " solves)");

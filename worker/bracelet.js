@@ -375,9 +375,18 @@ function score(stats) {
     }
     lines.push(l);
   }
+  // ONE POOL for the whole bracelet. traitDamage() + setDamage() summed was the
+  // scoring until 0.4.1, and it paid crit twice: a bracelet whose trait line and
+  // effect lines both add crit rate was priced as if each started from base crit,
+  // so a build past the 100% cap kept earning. jointScore pools crit rate, crit
+  // damage, the on-crit rider, additional damage and the flats across the trait
+  // lines AND the effect lines, then applies each conversion once. On the seed it
+  // moves two characters materially — Kyulo −8.4%, Heero −5.7% — and nudges most
+  // others. linesPct keeps the lines-only figure (itself pooled across the lines)
+  // so the board's per-line column still excludes the traits.
   const traitD = Bracelet.traitDamage(traits, DEFAULT_PROFILE);
   const linesD = Bracelet.setDamage(lines, dec.grade, DEFAULT_PROFILE);
-  const D = traitD + linesD;
+  const D = Bracelet.jointScore(lines, traits, dec.grade, DEFAULT_PROFILE);
   return {
     grade: dec.grade,
     traits: traitLines,
