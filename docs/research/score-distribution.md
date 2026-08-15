@@ -1,5 +1,13 @@
 # What a rolled bracelet scores
 
+> **Model-version note, 2026-08-14 (late).** Every table below was computed at
+> model 0.3.0, before scoring pooled the whole bracelet (0.4.0–0.4.1) and crit
+> was uncapped (0.4.2). The RANK CUTS those tables informed were then hand-chosen
+> by Shizu and live in `subrank.js` — they stand by ruling and do not move with
+> the distribution. The "1 in N" figures beside them have drifted a few percent.
+> For current figures rerun the tools in §5; do not hand-correct these tables.
+
+
 How often each score comes up, on both axes, and what that says about where the
 rank bands belong. Written 2026-08-14.
 
