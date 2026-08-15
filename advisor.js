@@ -643,6 +643,9 @@
       "#tab-advisor .av-card .v.gold{color:var(--high)}" +
       "#tab-advisor .av-card .v.good{color:var(--good)}" +
       // ---- locks ----
+      "#av-workgrid{display:grid;grid-template-columns:minmax(340px,5fr) minmax(420px,7fr);gap:14px;align-items:start}" +
+      "#av-workgrid > #av-brhost > .panel{margin-top:0}" +
+      "@media (max-width:1020px){#av-workgrid{grid-template-columns:1fr}}" +
       "#tab-advisor .av-lockline{font-size:14px;line-height:1.6;margin:2px 0 8px}" +
       "#tab-advisor .av-pill{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:700;" +
         "background:var(--panel2);border:1px solid var(--border);margin:0 4px 4px 0}" +
@@ -777,7 +780,7 @@
     if (!capture) {
       hint.innerHTML = "<b>Reading a bracelet off the screen is not wired up yet.</b> " +
         "The reader (advisor-capture.js) has not loaded. Everything else here works &mdash; " +
-        "type the lines into the Calculator's Bracelet panel and come back.";
+        "type the lines into the Bracelet panel above.";
       btns.innerHTML = "";
     } else {
       hint.innerHTML = "<b>Drop or paste</b> a bracelet screenshot and the reader fills the lines in for you." +
@@ -806,7 +809,7 @@
         "</div>";
     }
     h += '<div class="note">' + (open
-      ? "<b>" + open + (open === 1 ? " field needs" : " fields need") + " a look</b> — the marked ones. Fix anything wrong in the Calculator's Bracelet panel; the numbers here follow."
+      ? "<b>" + open + (open === 1 ? " field needs" : " fields need") + " a look</b> — the marked ones. Fix anything wrong in the Bracelet panel above; the numbers here follow."
       : "Every field read cleanly.") + "</div></div>";
     box.innerHTML = h;
   }
@@ -1054,7 +1057,7 @@
     }
     if (isPartial()) {
       return '<div class="av-empty"><b>Half a bracelet is not a state the game can be in.</b><br>' +
-        "Fill every granted slot in the Calculator's Bracelet panel, or clear them all for an unrolled bracelet. " +
+        "Fill every granted slot in the Bracelet panel above, or clear them all for an unrolled bracelet. " +
         "The solver refuses the in-between, and so does this tab.</div>";
     }
     if (lastErr) {
@@ -1078,7 +1081,7 @@
         // worthNote() is empty at a 0% baseline — a comparison against nothing —
         // so the joining dash must go with it or the sentence trails off mid-air.
         (worthNote(wu) ? " — " + esc(sentenceTail(worthNote(wu))) : ".") +
-        " Type its granted lines into the Calculator's Bracelet panel and this tab will name the lines to lock.</div>" +
+        " Fill the granted slots in the Bracelet panel above and this tab will name the lines to lock.</div>" +
         '<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Where an unrolled one can land</h2>' +
         quantileStrip(res.finalScore.quantiles, res.currentScore) +
         '<p class="note">Every way the ' + S.rollsLeft + " rolls can go, played the way the solver would play them.</p></div>";
@@ -1506,7 +1509,17 @@
       '<div class="av-hdr" id="av-hdrctl"></div>' +
       '<div id="av-lead"></div>' +
       intakeMarkup() +
-      '<div id="av-body"></div>';
+      // THE WORK AREA IS TWO COLUMNS on a wide screen: the bracelet editor on
+      // the left, this tab's answers on the right, so editing a line and
+      // watching the advice move happens without scrolling. One column again
+      // under 1020px. #av-brhost holds app.js's #bc-braceletpanel — one LIVE
+      // element that moves between tabs like the deck. Static shell, never
+      // rewritten: render() only touches av-lead and av-body, so the panel
+      // survives every repaint.
+      '<div id="av-workgrid">' +
+      '<div id="av-brhost"></div>' +
+      '<div id="av-body"></div>' +
+      '</div>';
     bind(pane);
     claimDeck();
     renderIntake();
@@ -1535,7 +1548,22 @@
   function claimDeck() {
     var host = $(DECK_HOST);
     if (host) P.mount(host);
+    // Full manual editing on this tab (Shizu, 2026-08-15): the Advisor is
+    // self-contained, so the bracelet panel comes with the deck.
+    var A = window.BraceletApp;
+    if (A && A.mountBracelet) A.mountBracelet("av-brhost");
   }
+
+  // Row edits do not go through Profile; app.js announces them instead. Only
+  // the ACTIVE advisor reacts — on activation the tabselected handler below
+  // re-solves anyway, so a parked tab stays quiet.
+  document.addEventListener("braceletedited", function () {
+    var pane = $(PANE_ID);
+    if (!pane || !pane.classList.contains("active")) return;
+    dropStaleVerdict();
+    render();
+    schedule(true);
+  });
 
   document.addEventListener("tabselected", function (e) {
     if (!e || !e.detail || e.detail.tab !== "advisor") return;

@@ -1072,7 +1072,7 @@
   }
 
   function tabMarkup() {
-    return styleBlock() + hostsMarkup() + braceletMarkup() +
+    return styleBlock() + hostsMarkup() + '<div id="bc-brhome">' + braceletMarkup() + '</div>' +
       '<section id="bc-results"></section>' + methodHtml();
   }
 
@@ -1755,10 +1755,11 @@
       if ((e.target.id || "").slice(0, 4) === "bc-f") keepFocus(renderFixedRows);
       else redrawSlots();
       schedule();
+      announceBracelet();
     });
     root.addEventListener("input", function (e) {
       var id = e.target.id || "", tr;
-      if (/^bc-[rf]-val-\d+$/.test(id)) { handleRowEvent(e.target); save(); schedule(); return; }
+      if (/^bc-[rf]-val-\d+$/.test(id)) { handleRowEvent(e.target); save(); schedule(); announceBracelet(); return; }
       // The unrolled card's combat-trait slider. It changes NOTHING in the state
       // and needs no solve — it reprices the distribution already in hand — so
       // it repaints three numbers and stops there.
@@ -1795,6 +1796,7 @@
         // described the one being cleared.
         S.rows = []; P.fit(); S.locks = null; S.rolled = null;
         save(); redrawSlots(); recompute();
+        announceBracelet();
       }
     });
   }
@@ -2021,10 +2023,36 @@
   // claims it back whenever it is the tab on screen. P.mount also claims the
   // bracelet's three settings back into the Grader, in case another tab borrowed
   // them while it held the cluster.
+  /**
+   * THE BRACELET PANEL IS ONE ELEMENT THAT MOVES, exactly like the character
+   * deck. The Advisor needs full manual editing — lines, traits, padlocks, the
+   * granted-slot controls, "Mark as unrolled" — and duplicating the panel would
+   * mean duplicated ids and two states to keep honest. Every handler the panel
+   * relies on is delegated to document.body (bindBody), so the LIVE node keeps
+   * working wherever it is parented. The Advisor claims it on activation;
+   * the Calculator claims it back here.
+   */
+  function mountBraceletPanel(hostId) {
+    var panel = $("bc-braceletpanel"), host = $(hostId);
+    if (panel && host && panel.parentNode !== host) host.appendChild(panel);
+  }
+
+  /**
+   * ROW EDITS DO NOT GO THROUGH PROFILE, so the Advisor cannot hear them the way
+   * it hears a deck change. While the panel lived on the Calculator only, that
+   * never mattered — you could not edit rows while the Advisor was on screen.
+   * Now you can, so every bracelet edit announces itself and the active Advisor
+   * re-solves.
+   */
+  function announceBracelet() {
+    try { document.dispatchEvent(new CustomEvent("braceletedited")); } catch (e) {}
+  }
+
   document.addEventListener("tabselected", function (e) {
     if (!e || !e.detail || e.detail.tab !== "calculator") return;
     var host = $("bc-deckhost");
     if (host) P.mount(host);
+    mountBraceletPanel("bc-brhome");
   });
 
   /**
@@ -2091,6 +2119,7 @@
      * E[max(0, final% - baseline%)] x gpd — to the returned distribution.
      */
     worth: { of: worthOf, odds: oddsTxt, note: worthNote, gloss: worthGloss },
+    mountBracelet: mountBraceletPanel,
 
     solver: {
       solveState: solveState,                        // (profile, granted, rolls, opts) -> Promise
