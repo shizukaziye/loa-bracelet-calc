@@ -64,7 +64,10 @@ and 375px, both verify batteries green, then push to GitHub Pages and confirm li
 4. `node verify.js` and `python verify.py` must both end green (1601+).
 5. Plain ES5-flavoured IIFEs, zero dependencies, no build step, dark-only house style.
 6. Bump `?v=` on every touched file — the loseii zone edge-caches JS for four hours.
-7. Commit at the end of each phase; do not push (I handle the deploy).
+7. Commit at the end of each phase, **and push** (rule changed 2026-08-15: Shizu
+   expected pushes to be happening — "have you not been pushing for me" — so
+   the old do-not-push rule is dead. Run `npm run check` first; a push deploys
+   the live site through Pages).
 8. Never invent data. A missing character is missing.
 
 ## Decisions made on Shizu's behalf (flag at wake-up)
