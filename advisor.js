@@ -15,8 +15,10 @@
  *              on this tab works without it.
  *   HEADLINE   play all the remaining rolls and you land here: expected final,
  *              what that is worth, and how often it beats what you hold.
- *   LOCKS      the recommended lock mask as slot pills, then every mask ranked
- *              by expected final with the gold it costs against the best one.
+ *   LOCKS      the recommended set of locks as slot pills and one sentence. The
+ *              full ranking is ONE table, under the bracelet panel: every lock
+ *              set with its odds, its worth and the gold it gives up against
+ *              the pick.
  *   SPREAD     P(improve) and the p10-p90 quantile strip.
  *   CUT        type the set the roll gave you, get KEEP or REPLACE with the
  *              delta in % and gold, apply it (advances rolls, appends to the
@@ -123,16 +125,38 @@
     if (a >= 1e3) return Math.round(g / 1e3) + "k";
     return String(Math.round(g));
   }
-  function signPct(d) { return (d >= 0 ? "+" : "") + fx(d, 2) + "%"; }
   /** D (log-space score) -> the exact combined damage percentage. */
   function pct(D) { return B.damagePercent(D); }
+
+  // ------------------------------------------------------------------
+  // the shared formatters and the one tier vocabulary
+  //
+  // app.js owns both (BraceletApp.fmt, BraceletApp.tierWord) for the same reason
+  // it owns the worth arithmetic: two copies of one rule is two rules. Damage
+  // percentages read to two decimals and odds to one, in every card, chip,
+  // sentence and cell on this tab — this file used to format at the call site
+  // and printed the same figure as "17%" in a card and "17.4%" in the table
+  // under it (Shizu, 2026-08-15).
+  //
+  // The one-line fallbacks are there so a stale cached app.js degrades to the
+  // same rule rather than throwing; they are not a second implementation.
+  // ------------------------------------------------------------------
+  function FMT() { var A = window.BraceletApp; return (A && A.fmt) || null; }
+  /** A damage percentage: two decimals. */
+  function dmg(v) { var f = FMT(); return f ? f.dmg(v) : fx(num(v, 0), 2) + "%"; }
+  /** The same, signed. */
+  function signPct(d) { var f = FMT(); return f ? f.signDmg(d) : (d >= 0 ? "+" : "") + fx(d, 2) + "%"; }
+  /** Odds from a 0..1 probability: one decimal, floored and capped. */
+  function odds(p) { var f = FMT(); return f ? f.odds(p) : fx(clamp(num(p, 0), 0, 1) * 100, 1) + "%"; }
+  /** Heroic / Epic / Legendary — never "low", "mid", "high", never "Rare". */
+  function tierWord(t) { var A = window.BraceletApp; return (A && A.tierWord) ? A.tierWord(t) : String(t); }
 
   // Gold always converts the EXACT damage percentage, never the log-space score,
   // so the arithmetic on screen matches the percentages printed beside it.
   function gpd() { return num(S.econ.gpd, 0); }
-  // A DIFFERENCE between two options — lock mask A against lock mask B, the new
-  // set against the old one. Both are futures you could still choose, so this one
-  // is signed on purpose. WORTH is not a difference of that kind; see below.
+  // A DIFFERENCE between two options — the new set against the old one in the
+  // verdict. Both are futures you could still choose, so this one is signed on
+  // purpose. WORTH is not a difference of that kind; see below.
   function deltaGold(Da, Db) { return (pct(Da) - pct(Db)) * gpd(); }
 
   // ------------------------------------------------------------------
@@ -174,10 +198,23 @@
     var A = window.BraceletApp;
     return (A && A.worth) || null;
   }
-  /** { gold, p } — what it is worth, and the odds of clearing the baseline at all. */
+  /** { gold, p, mean } — what a whole solve is worth against the user's baseline. */
   function worthOf(res, shift) { var w = W(); return w ? w.of(res, shift) : null; }
+  /**
+   * The same arithmetic for ONE lock's own outcome curve, against whatever bar
+   * the table is measuring on. This is the only worth on the tab that is not a
+   * whole solve, and it is the same function: the per-mask reading this file
+   * used to carry itself disagreed with the card above it by eight thousand
+   * gold and half a point of odds.
+   */
+  function worthFrom(cdf, bar) { var w = W(); return (w && w.fromCdf) ? w.fromCdf(cdf, bar, 0) : null; }
   function worthNote(w) { var x = W(); return x ? x.note(w) : ""; }
   function worthGloss(w) { var x = W(); return x ? x.gloss(w) : ""; }
+  /** A gold DIFFERENCE, signed, for the vs-pick column and the sentence that quotes it. */
+  function signGold(g) {
+    if (!g) return "0";
+    return (g >= 0 ? "+" : "−") + gold(Math.abs(g));
+  }
 
   /** The one profile every tab scores on: whatever the deck holds. */
   function buildProfile() { return P.profile(); }
@@ -303,11 +340,8 @@
   // the family / rarity pickers for the rolled set
   // ------------------------------------------------------------------
 
-  var TIER_META = {
-    low: { label: "Rare", color: "#5aa9e6" },
-    mid: { label: "Epic", color: "#c78cff" },
-    high: { label: "Legendary", color: "#ffb86b" }
-  };
+  // The colours only. The WORDS come from app.js's one map (tierWord above).
+  var TIER_COLOR = { low: "#5aa9e6", mid: "#c78cff", high: "#ffb86b" };
 
   function famGroupOf(fam) {
     if (PARTY_IDS[fam.id]) return "Party";
@@ -332,6 +366,7 @@
       .replace(/[;,]$/, "");
   }
 
+  /** app.js's, tight join and all: this text has to fit the same 208px box. */
   function tierValueText(fam, grade, tier) {
     var vals = fam.values[grade][tier], parts = [], i, j, c;
     for (i = 0; i < vals.length; i++) {
@@ -340,7 +375,7 @@
       var flat = c && (c.k === "weaponPower" || c.k === "mainStat");
       parts.push("+" + (flat ? nf(vals[i]) : vals[i] + "%"));
     }
-    return parts.join(" / ");
+    return parts.join("/");
   }
 
   /** Every family a rolled slot can hold, grouped, letter-graded, F folded to one. */
@@ -389,7 +424,12 @@
     var shut = letter ? GRADE_COLOR[letter] : "var(--text)";
     var h = '<select id="' + id + '" class="bc-fam" style="color:' + shut + ';font-weight:700" title="' +
       esc(full) + '" data-gloss="' + esc(gloss) + '">';
-    h += '<option value="none" style="color:var(--dim);font-weight:400"' + (selected === "none" ? " selected" : "") + ">&mdash; empty &mdash;</option>";
+    // A PROMPT, not an empty box. These are the rolled-set pickers, and an
+    // untouched one showed "— empty —", which says what the box is rather than
+    // what to do with it (Shizu, 2026-08-15). Disabled, so it cannot be chosen
+    // back: the flow needs a line in every unlocked slot before it can judge.
+    h += '<option value="none" disabled style="color:var(--dim);font-weight:400"' +
+      (selected === "none" ? " selected" : "") + ">&mdash; the line the roll gave &mdash;</option>";
     for (i = 0; i < groups.length; i++) {
       if (!groups[i].items.length) continue;
       h += '<optgroup label="' + esc(groups[i].label) + '">';
@@ -407,12 +447,12 @@
     var order = ["high", "mid", "low"], h = "", i, t;
     for (i = 0; i < order.length; i++) {
       t = order[i];
-      h += '<option value="' + t + '" style="color:' + TIER_META[t].color + '"' +
-        (selected === t ? " selected" : "") + ">" + esc(TIER_META[t].label + " · " + tierValueText(fam, grade, t)) + "</option>";
+      h += '<option value="' + t + '" style="color:' + TIER_COLOR[t] + '"' +
+        (selected === t ? " selected" : "") + ">" + esc(tierWord(t) + " · " + tierValueText(fam, grade, t)) + "</option>";
     }
-    var cur = TIER_META[selected] ? TIER_META[selected].color : "var(--text)";
+    var cur = TIER_COLOR[selected] || "var(--text)";
     return '<select id="' + id + '" style="color:' + cur + ';font-weight:700" data-gloss="' +
-      "The rarity this line rolled at, and what it is worth. Legendary is the family's best roll, Epic the middle one, Rare the weakest; the numbers are the actual values for the family on the left." +
+      "The rarity this line rolled at, and what it is worth. Legendary is the family's best roll, Epic the middle one, Heroic the weakest; the numbers are the actual values for the family on the left." +
       '">' + h + "</select>";
   }
 
@@ -430,20 +470,23 @@
     var groups = familyOptions(grade);
     var rg = msRange(grade, famKey);
 
+    // Family first and stretching, rarity second and fixed — app.js's row shape,
+    // and the same cell classes, because this row is drawn with app.js's
+    // stylesheet (profile.js's .bc-slot).
     var h = '<div class="bc-slot"><div class="sn">' + esc(label) + "</div>";
+    h += '<div class="fld bc-famcell">' + pickerHtml("av-n-fam-" + idx, groups, row.fam, grade) + "</div>";
     if (isSpecial) {
       var fam = DATA.SPECIAL_BY_ID[Number(row.fam.slice(3))];
-      h += '<div class="fld">' + (fam ? tierHtml("av-n-tier-" + idx, fam, grade, row.tier || "mid") : "") + "</div>";
+      h += '<div class="fld bc-tiercell">' + (fam ? tierHtml("av-n-tier-" + idx, fam, grade, row.tier || "mid") : "") + "</div>";
     } else {
-      h += "<div></div>";
+      h += '<div class="bc-tiercell"></div>';
     }
-    h += '<div class="fld">' + pickerHtml("av-n-fam-" + idx, groups, row.fam, grade) + "</div>";
     if (isBasic) {
-      h += '<div class="fld"><input type="number" id="av-n-val-' + idx + '" step="1" min="' + rg[0] + '" max="' + rg[1] +
+      h += '<div class="fld bc-valcell"><input type="number" id="av-n-val-' + idx + '" step="1" min="' + rg[0] + '" max="' + rg[1] +
         '" value="' + msValue + '" data-gloss="The number this stat line actually rolled. The official bands run ' +
         rg[0] + "–" + rg[1] + " on " + (grade === "relic" ? "Relic" : "Ancient") + '."></div>';
     } else {
-      h += "<div></div>";
+      h += '<div class="bc-valcell"></div>';
     }
     return h + "</div>";
   }
@@ -463,7 +506,7 @@
     }
     var fam = DATA.SPECIAL_BY_ID[line.family];
     if (!fam) return "unknown";
-    return fam.label + " · " + line.tier + " (" + fam.values[grade][line.tier].join(" / ") + ")";
+    return fam.label + " · " + tierWord(line.tier) + " (" + fam.values[grade][line.tier].join(" / ") + ")";
   }
 
   /** A pill-sized name: the placeholders and the value list stripped, tier kept. */
@@ -476,7 +519,7 @@
     if (!fam) return "unknown";
     var s = cleanFamLabel(fam);
     if (s.length > 40) s = s.slice(0, 38).replace(/[\s,;]+$/, "") + "…";
-    return s + " · " + line.tier;
+    return s + " · " + tierWord(line.tier);
   }
 
   /**
@@ -633,7 +676,14 @@
         "font:inherit;font-size:10.5px;font-weight:700;padding:1px 9px;cursor:pointer;margin-left:auto}" +
       "#tab-advisor .av-okbtn:hover{color:var(--text);border-color:var(--accent)}" +
       // ---- headline cards ----
-      "#tab-advisor .av-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:14px}" +
+      // FOUR CARDS, ONE ROW. Worth belongs with the other three — it is the
+      // fourth reading of the same solve, not a footnote to them. auto-fit put
+      // it wherever the arithmetic landed: three across and one orphan on its
+      // own row, with the dead space beside it (Shizu, 2026-08-15). Four, then
+      // two by two, then one; the counts are fixed so no width can orphan one.
+      "#tab-advisor .av-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}" +
+      "@media(max-width:1020px){#tab-advisor .av-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}" +
+      "@media(max-width:560px){#tab-advisor .av-cards{grid-template-columns:minmax(0,1fr)}}" +
       "#tab-advisor .av-card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 14px}" +
       "#tab-advisor .av-card .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);font-weight:700}" +
       "#tab-advisor .av-card .v{font-size:25px;font-weight:800;letter-spacing:-.02em;margin-top:5px;line-height:1.1}" +
@@ -662,12 +712,15 @@
       // +1.5% · high" pushed the table 37px past the card and put a scrollbar
       // under a desktop table that had room to spare. Fixed columns, and the
       // lock cell ellipsises instead, which is what it is built to do.
-      "#tab-advisor .av-lk table{font-size:12px;table-layout:fixed}" +
-      "#tab-advisor .av-lk th:first-child,#tab-advisor .av-lk td:first-child{width:40%}" +
-      // On a phone 40% leaves the figure columns at 48px and the widest figure a
-      // row can hold — ">99.9%", "20.46M" — needs 52. The lock cell gives the
-      // width up: it truncates, and the whole label is in its gloss anyway.
-      "@media(max-width:700px){#tab-advisor .av-lk th:first-child,#tab-advisor .av-lk td:first-child{width:30%}}" +
+      // SIX columns since the merge: lock, expected, beats, if it beats, worth,
+      // vs pick. min-width, so the five figure columns keep a readable width and
+      // the table scrolls inside its own wrapper rather than squeezing "over
+      // 99.9%" into 40px.
+      "#tab-advisor .av-lk table{font-size:12px;table-layout:fixed;min-width:430px}" +
+      "#tab-advisor .av-lk th:first-child,#tab-advisor .av-lk td:first-child{width:34%}" +
+      // On a phone the lock cell gives more of the width up: it truncates, and
+      // the whole label is in its gloss anyway.
+      "@media(max-width:700px){#tab-advisor .av-lk th:first-child,#tab-advisor .av-lk td:first-child{width:26%}}" +
       "#tab-advisor .av-lk th,#tab-advisor .av-lk td{padding:5px 6px;vertical-align:top}" +
       "#tab-advisor .av-lk th{white-space:normal;line-height:1.25}" +
       "#tab-advisor .av-lk td.num{white-space:nowrap}" +
@@ -692,15 +745,29 @@
       "#tab-advisor .av-strip .box{position:absolute;top:9px;height:16px;border-radius:4px;background:rgba(102,199,255,.22);border:1px solid var(--accent)}" +
       "#tab-advisor .av-strip .med{position:absolute;top:5px;width:2px;height:24px;background:var(--accent)}" +
       "#tab-advisor .av-strip .cur{position:absolute;top:2px;width:2px;height:30px;background:var(--high)}" +
-      "#tab-advisor .av-qlab{display:flex;justify-content:space-between;gap:4px;flex-wrap:wrap;font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}" +
+      // THE LABELS ARE ANCHORED, not spread. They were a flex row with
+      // space-between under a box that is positioned by value, so "p10" sat at
+      // the far left whatever p10 was — five labels evenly spaced under five
+      // marks that are not (Shizu, 2026-08-15). Each label is now placed at its
+      // own value's x on the strip's own scale, and labelStrip() merges any that
+      // would collide. position:relative on the row, so a label's left % means
+      // the same thing as the box's.
+      "#tab-advisor .av-qlab{position:relative;height:16px;font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}" +
+      "#tab-advisor .av-qmk{position:absolute;top:0;white-space:nowrap;line-height:1.45}" +
       // ---- the cut flow ----
+      // ONE COLUMN. The padlock list and the rolled lines used to sit side by
+      // side, which halved the width available to a row that is mostly one long
+      // family name: at 830px the family box came out 77px wide. This tab's
+      // widest column is under 800px and its narrowest is 340px, so two columns
+      // of pickers never had the room — the list of padlocks is three short
+      // lines and loses nothing by sitting above them.
+      //
       // minmax(0,1fr), never a bare 1fr. A bare 1fr is minmax(AUTO,1fr), and auto
       // is the widest thing inside — here a <select> whose longest option name is
       // half a sentence. That pushed the column past the phone and scrolled the
       // whole page sideways. minmax(0,…) lets the column be narrower than its
       // contents, which is what the ellipsis and the scroll wrappers are for.
-      "#tab-advisor .av-cutgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}" +
-      "@media(max-width:760px){#tab-advisor .av-cutgrid{grid-template-columns:minmax(0,1fr)}}" +
+      "#tab-advisor .av-cutgrid{display:grid;grid-template-columns:minmax(0,1fr);gap:16px}" +
       // The rolled-set rows are app.js's .bc-slot widget, borrowed. Its phone
       // layout (profile.js, max-width 640) has the same bare 1fr, so cap it here
       // rather than reach into profile.js's sheet: on this tab the row sits inside
@@ -733,8 +800,7 @@
       // Phones: the tables scroll inside their own wrapper, never the page.
       "@media(max-width:420px){" +
       "#tab-advisor .av-card .v{font-size:21px}" +
-      "#tab-advisor .av-qlab{font-size:10px}" +
-      "#tab-advisor .av-qlab span{white-space:nowrap}}";
+      "#tab-advisor .av-qlab{font-size:10px}}";
     var st = document.createElement("style");
     st.id = "av-style";
     st.appendChild(document.createTextNode(css));
@@ -756,7 +822,7 @@
   //
   // It loads nothing itself (BraceletImport.loadCharacter is the one load path —
   // see the module header). A pick lands in the shared state, Profile notifies,
-  // and onProfileChange re-renders and re-solves, so the headline cards, the mask
+  // and onProfileChange re-renders and re-solves, so the headline cards, the lock
   // table and the cut flow all follow.
   //
   // It leaves the SCORING MODE alone, deliberately. On this tab that costs
@@ -879,6 +945,17 @@
   // markup — the advice itself
   // ------------------------------------------------------------------
 
+  /**
+   * The quantile strip, and its labels UNDER THE MARKS THEY NAME.
+   *
+   * The bars have always been positioned by value. The labels were a flex row
+   * spread with space-between, so "p10" sat hard left and "p90" hard right
+   * whatever the numbers were — and when four of the five quantiles are the same
+   * score, which is the ordinary case for a bracelet that mostly stands pat, the
+   * row read as five separate outcomes spread across the strip (Shizu,
+   * 2026-08-15). Each label now carries its own fraction of the scale; the
+   * measured merge is labelStrip() below, run after the paint.
+   */
   function quantileStrip(q, cur) {
     var lo = Math.min(pct(q.p10), pct(cur)), hi = Math.max(pct(q.p90), pct(cur));
     var pad = Math.max(0.3, (hi - lo) * 0.12);
@@ -886,6 +963,7 @@
     var span = hi - lo || 1;
     function x(v) { return ((pct(v) - lo) / span * 100).toFixed(2) + "%"; }
     function w(a, b) { return ((pct(b) - pct(a)) / span * 100).toFixed(2) + "%"; }
+    var marks = [["p10", pct(q.p10)], ["p25", pct(q.p25)], ["median", pct(q.p50)], ["p75", pct(q.p75)], ["p90", pct(q.p90)]];
     return '<div class="av-strip">' +
       '<div class="track"></div>' +
       '<div class="whisk" style="left:' + x(q.p10) + ";width:" + w(q.p10, q.p90) + '"></div>' +
@@ -893,34 +971,152 @@
       '<div class="med" style="left:' + x(q.p50) + '"></div>' +
       '<div class="cur" style="left:' + x(cur) + '" data-gloss="Where the bracelet sits right now."></div>' +
       "</div>" +
-      '<div class="av-qlab" data-gloss="The spread of where this bracelet finishes, over every way the remaining rolls can land under the best play. p10 means one bracelet in ten ends below this; p90, one in ten ends above. The blue box is the middle half, the blue line the median, the orange line where you are today.">' +
-      "<span>p10 " + fx(pct(q.p10), 2) + "%</span><span>p25 " + fx(pct(q.p25), 2) +
-      "%</span><span>median " + fx(pct(q.p50), 2) + "%</span><span>p75 " + fx(pct(q.p75), 2) +
-      "%</span><span>p90 " + fx(pct(q.p90), 2) + "%</span></div>";
+      '<div class="av-qlab" data-lo="' + lo + '" data-span="' + span + '" data-marks="' + esc(JSON.stringify(marks)) +
+      '" data-gloss="The spread of where this bracelet finishes, over every way the remaining rolls can land under the best play. Each label sits under its own mark on the strip above. p10 means one bracelet in ten ends below this; p90, one in ten ends above. The blue box is the middle half, the blue line the median, the orange line where you are today. Two labels join up when they land on the same score.">' +
+      labelMarkup(marks, lo, span) + "</div>";
   }
 
-  /** The advice framing: play every remaining roll and this is where you land. */
+  /**
+   * The labels as HTML: grouped by EQUAL VALUE only, each parked at its own x.
+   * Everything measured — labels that merely collide — is labelStrip()'s, after
+   * the browser has had a chance to size them.
+   */
+  function labelMarkup(marks, lo, span) {
+    var groups = [], i, g;
+    for (i = 0; i < marks.length; i++) {
+      g = groups.length ? groups[groups.length - 1] : null;
+      if (g && dmg(g.hi) === dmg(marks[i][1])) { g.keys.push(marks[i][0]); g.hi = marks[i][1]; }
+      else groups.push({ keys: [marks[i][0]], lo: marks[i][1], hi: marks[i][1] });
+    }
+    var h = "";
+    for (i = 0; i < groups.length; i++) h += markHtml(groups[i], lo, span);
+    return h;
+  }
+
+  /**
+   * One label: the percentile names it covers, then the score they land on.
+   *
+   * Three or more names run first…last rather than all of them — a merged label
+   * that spells out "p10·p25·median·p75·p90" is half a phone wide, which is the
+   * very crowding the merge is answering. Values are a range whenever the ends
+   * differ at the precision they are printed to, so a merge never claims two
+   * different scores are one.
+   */
+  function markHtml(g, lo, span) {
+    var mid = (g.lo + g.hi) / 2;
+    var fr = clamp((mid - lo) / span, 0, 1);
+    var names = g.keys.length > 2 ? (g.keys[0] + "…" + g.keys[g.keys.length - 1]) : g.keys.join("·");
+    var txt = names + " " + (dmg(g.lo) === dmg(g.hi) ? dmg(g.hi) : fx(g.lo, 2) + "–" + dmg(g.hi));
+    return '<span class="av-qmk" data-fr="' + fr.toFixed(4) + '" style="left:' + (fr * 100).toFixed(2) + '%">' +
+      esc(txt) + "</span>";
+  }
+
+  /**
+   * Anchor every label to its own value, and merge the ones that collide.
+   *
+   * Run after the paint, because both halves of the question — how wide is this
+   * label, how wide is the strip — are answers only the browser has. A label is
+   * centred on its mark and pulled back inside the strip at the two ends;
+   * anything still overlapping its left-hand neighbour is folded into it, which
+   * is how p10 and p25 on the same score end up as one "p10·p25 11.34%".
+   */
+  function labelStrip() {
+    var boxes = document.querySelectorAll("#" + PANE_ID + " .av-qlab"), b;
+    for (b = 0; b < boxes.length; b++) layoutOneStrip(boxes[b]);
+  }
+
+  function layoutOneStrip(box) {
+    var W = box.clientWidth, marks, lo, span;
+    if (!W) return;
+    try { marks = JSON.parse(box.getAttribute("data-marks") || "[]"); } catch (e) { return; }
+    lo = num(box.getAttribute("data-lo"), 0); span = num(box.getAttribute("data-span"), 1);
+    if (!marks.length || !(span > 0)) return;
+
+    var groups = [], i;
+    for (i = 0; i < marks.length; i++) groups.push({ keys: [marks[i][0]], lo: marks[i][1], hi: marks[i][1] });
+
+    // Merge until nothing overlaps. Each pass writes the labels, measures them
+    // where they would sit, and folds the first collision; five marks, so it
+    // settles in at most four passes.
+    var guard = 0;
+    while (guard++ < 6) {
+      var h = "", j;
+      for (j = 0; j < groups.length; j++) h += markHtml(groups[j], lo, span);
+      box.innerHTML = h;
+      var els = box.getElementsByClassName("av-qmk"), hit = -1, prevRight = -1e9;
+      for (j = 0; j < els.length; j++) {
+        var w = els[j].offsetWidth;
+        var c = clamp(num(els[j].getAttribute("data-fr"), 0) * W, w / 2, Math.max(w / 2, W - w / 2));
+        els[j].style.left = (c - w / 2) + "px";
+        if (c - w / 2 < prevRight + 6) hit = j;                 // 6px is the least gap that still reads as two labels
+        prevRight = c + w / 2;
+        if (hit >= 0) break;
+      }
+      if (hit < 1) return;
+      groups[hit - 1].keys = groups[hit - 1].keys.concat(groups[hit].keys);
+      groups[hit - 1].hi = groups[hit].hi;
+      groups.splice(hit, 1);
+    }
+  }
+
+  /**
+   * The advice framing: play every remaining roll and this is where you land.
+   *
+   * FOUR CARDS, ONE ROW — worth is the fourth reading of this solve, not an
+   * afterthought under the other three (see .av-cards in the sheet). No
+   * asterisks: they pointed at no footnote, so the qualifier each one carried is
+   * written into the sentence instead (Shizu, 2026-08-15).
+   */
   function cardsHtml(res) {
     var curPct = pct(res.currentScore), finPct = pct(res.expectedFinal);
     var w = worthOf(res, 0);
     var n = S.rollsLeft, plural = n === 1 ? "" : "s";
     var h = '<div class="av-cards">';
     h += '<div class="av-card hero"><div class="k">Play all ' + n + " roll" + plural + " and you land at</div>" +
-      '<div class="v acc">' + fx(finPct, 2) + "%</div>" +
-      '<div class="s">The average finish under the best lock-and-keep play<span data-gloss="Rolls are free, so rolling always beats stopping. This is the expected final score if every remaining decision is the one the solver names — not a promise, an expectation.">*</span>, ' +
-      "up from " + fx(curPct, 2) + "% today.</div></div>";
+      '<div class="v acc">' + dmg(finPct) + "</div>" +
+      '<div class="s">The <span data-gloss="Rolls cost silver, not gold, so this tool treats them as free — which is why rolling always beats stopping and there is no when-to-stop question to answer.">average finish</span> ' +
+      "if every lock is the one this tab names, not a promise. Up from " + dmg(curPct) + " today.</div></div>";
     h += '<div class="av-card"><div class="k">Still to gain</div><div class="v good">' +
       signPct(finPct - curPct) + "</div>" +
       '<div class="s">What the ' + n + " remaining roll" + plural + " are expected to add to the bracelet you hold.</div></div>";
-    h += '<div class="av-card"><div class="k">Chance it improves</div><div class="v">' + fx(res.pImprove * 100, 1) + "%</div>" +
+    h += '<div class="av-card"><div class="k">Chance it improves</div><div class="v">' + odds(res.pImprove) + "</div>" +
       '<div class="s"><span data-gloss="Not the chance any single roll comes out better. You keep the old set whenever the new one is worse, so the only way to finish below where you started is to never take a roll.">How often</span> the bracelet you end with beats the ' +
-      fx(curPct, 2) + "% you hold.</div></div>";
+      dmg(curPct) + " you hold.</div></div>";
     h += '<div class="av-card"><div class="k" data-gloss="' + esc(worthGloss(w)) + '">Worth playing out</div>' +
       '<div class="v gold">' + (w ? gold(w.gold) : "—") + "</div>" +
       '<div class="s">' + esc(worthNote(w)) + "</div></div>";
     return h + "</div>";
   }
 
+  /**
+   * The bar every lock is measured against, and what to call it in a sentence.
+   *
+   * A baseline of 0 is the shipped default and a comparison against nothing, so
+   * the fallback is the bracelet on the wrist — always a meaningful question. A
+   * baseline that is set wins. Both cards read this, so the sentence in the
+   * panel and the column in the table can never be answering different
+   * questions.
+   */
+  function lockBar(res) {
+    var base = num(S.econ.baseline, 0), vsCur = !(base > 0);
+    return {
+      bar: vsCur ? pct(res.currentScore) : base,
+      vsCur: vsCur,
+      name: vsCur ? "the bracelet you hold" : "your baseline"
+    };
+  }
+
+  /**
+   * THE CHIPS AND ONE SENTENCE. What to lock before the next roll, and what that
+   * choice is worth over the next best one.
+   *
+   * The three-column table that used to sit here — lock, expected final, vs best
+   * — is gone (Shizu, 2026-08-15). It ranked the same lock sets as the table
+   * beside the Grader, in different words, with a "vs best" column that priced
+   * the gap between two AVERAGES while the other table priced the gap between
+   * two worths. Two tables, two answers, one question. The worth deltas won, and
+   * the sentence below quotes the same figure the table's vs-pick column does.
+   */
   function locksHtml(res, profile, lines) {
     var h = '<div class="panel"><h2 style="margin-top:0">Best locks for the next roll</h2>';
     if (!res.maskEV.length) {
@@ -942,28 +1138,18 @@
     h += "</div>";
 
     var second = res.maskEV.length > 1 ? res.maskEV[1] : null;
-    h += '<p class="note">Expected final ' + fx(pct(best.ev), 3) + "%" +
-      (second ? ", worth " + gold(deltaGold(best.ev, second.ev)) + " gold more than the next best mask" : "") +
-      ". A lock is only worth it when the line it holds is scarcer than what a fresh draw would give you — the solver weighs both, over every remaining roll.</p>";
-
-    h += '<div class="av-tabwrap"><table><thead><tr>' +
-      '<th><span data-gloss="Which slots you pay to keep before pressing reroll. Everything not listed is rerolled together — one attempt rerolls every unlocked slot at once.">Lock</span></th>' +
-      '<th class="num"><span data-gloss="The average score this bracelet finishes at if you lock exactly these slots now and then play the remaining rolls perfectly. Rolls are free, so rolling always beats stopping.">Expected final</span></th>' +
-      '<th class="num"><span data-gloss="What choosing this mask instead of the best one costs you, in gold, at your gold-per-1% rate.">vs best</span></th>' +
-      "</tr></thead><tbody>";
-    var n = Math.min(res.maskEV.length, 6), k;
-    for (k = 0; k < n; k++) {
-      var m = res.maskEV[k], fl = locksFromKeys(m.lockedKeys, lines, S.grade, profile), names = [], j;
-      for (j = 0; j < fl.length; j++) if (fl[j]) names.push("slot " + (j + 1));
-      h += "<tr" + (k === 0 ? ' class="accent"' : "") + "><td>" + (names.length ? esc(names.join(" + ")) : "nothing — reroll everything") +
-        '</td><td class="num">' + fx(pct(m.ev), 3) + '%</td><td class="num">' +
-        (k === 0 ? "—" : gold(deltaGold(m.ev, best.ev))) + "</td></tr>";
+    var bar = lockBar(res);
+    var w0 = worthFrom(best.cdf, bar.bar), w1 = second ? worthFrom(second.cdf, bar.bar) : null;
+    var d = (w0 && w1) ? w0.gold - w1.gold : null;
+    var say = "";
+    if (d !== null) {
+      say = Math.round(d) === 0
+        ? ", worth the same as the next best lock"
+        : ", worth " + gold(Math.abs(d)) + " gold " + (d > 0 ? "more" : "less") + " than the next best lock";
     }
-    h += "</tbody></table></div>";
-    if (res.maskCount > n) {
-      var rest = res.maskCount - n;
-      h += '<div class="note">' + rest + (rest === 1 ? " weaker mask" : " weaker masks") + " not shown.</div>";
-    }
+    h += '<p class="note">Expected final ' + dmg(pct(best.ev)) + say +
+      ". A lock is only worth it when the line it holds is scarcer than what a fresh draw would give you — the solver weighs both, over every remaining roll. " +
+      "Every other lock, its odds and what it costs against this one: the lock table under the bracelet panel.</p>";
     return h + "</div>";
   }
 
@@ -972,96 +1158,33 @@
       quantileStrip(res.finalScore.quantiles, res.currentScore) +
       '<p class="note">Box = the middle half of the outcomes, whisker = p10 to p90, orange = where the bracelet sits today. ' +
       "Every ending is counted over all " + S.rollsLeft + " remaining roll" + (S.rollsLeft === 1 ? "" : "s") +
-      " played the way the lock table says.</p></div>";
+      " played the way the lock chips above say.</p></div>";
   }
 
   // ------------------------------------------------------------------
-  // LOCKS AGAINST THE BASELINE — the left column's second card
+  // THE LOCK TABLE — one table, under the bracelet it describes
   //
-  // The lock table above ranks masks by expected final and stops there. Shizu,
-  // 2026-08-15: "the baseline is very important and i need to know % odds of
-  // beating baseline on all my locks and the expected damage if i do beat it".
-  // That is a different question from the average, and the two answers do not
-  // always agree — a mask can hold the higher average and the worse odds of
-  // clearing a bar, because the average is paid by a tail the odds are not.
+  // Shizu, 2026-08-15: "the baseline is very important and i need to know %
+  // odds of beating baseline on all my locks and the expected damage if i do
+  // beat it". That is a different question from the average, and the two
+  // answers do not always agree — a lock can hold the higher average and the
+  // worse odds of clearing a bar, because the average is paid by a tail the
+  // odds are not.
   //
   // Every row reads ONE distribution: maskEV[j].cdf, where the bracelet finishes
-  // if that mask is locked for the next roll and every roll after it is played
-  // the way the solver would (model/bracelet.js, maskDistribution). So the odds,
-  // the conditional average and the gold on a row cannot contradict each other
-  // — they are three readings of the same curve.
+  // if those slots are locked for the next roll and every roll after it is
+  // played the way the solver would (model/bracelet.js, maskDistribution). The
+  // odds, the conditional average, the gold and the vs-pick gap on a row are
+  // four readings of that one curve, through app.js's one worth function — so
+  // they cannot contradict each other, or the card above them.
+  //
+  // THIS IS THE ONLY LOCK TABLE. The advice panel used to carry a second one
+  // ranking the same lock sets by expected final, with a "vs best" column
+  // priced off the gap between two averages; that table is gone and its
+  // comparison lives here as VS PICK, in worth.
   // ------------------------------------------------------------------
 
-  /**
-   * One mask's three figures, off its own cdf, against a bar in damage %.
-   *
-   * THE INTERVAL MODEL IS app.js's worthOf (BraceletApp.worth.of). The cdf
-   * arrives THINNED: distToCdf keeps ~160 rungs and merges every skipped rung's
-   * probability into the next kept one, so a rung's mass is not AT its score —
-   * it is spread through the interval that ends there, and its cum is exact
-   * only at the rung itself. worthOf answers that by scoring the mass at the
-   * interval's MIDPOINT rather than its top end, and the midpoint is right:
-   * summed back, it reproduces each mask's exact mean (maskEV[j].mean) five to
-   * twenty times closer than the top end does — measured, on a real solve.
-   *
-   * WHAT IS NOT COPIED is where the bar cuts. worthOf takes an interval whole
-   * or not at all, which is fine for a mean and wrong for a threshold: on a
-   * live bracelet one rung carried 75% of the mass across an interval a tenth
-   * of a point wide, and the bar landed inside it. All-or-nothing put the
-   * answer at 24% or 99% depending on which side of the midpoint the bar fell,
-   * from a one-hundredth nudge of the baseline. So a split interval is split:
-   * the same uniform spread worthOf assumes, applied at the bar instead of at
-   * the edge. Whole intervals still score exactly as worthOf scores them, so
-   * with a bar under the whole support this returns worthOf's gold to the
-   * floating point.
-   *
-   * Mass is a difference of cum, not rung.p, for worthOf's reason: cum is exact
-   * under both of the thinners these cdfs come from.
-   *
-   *   p      P(final% > bar)
-   *   mean   E[final% | final% > bar]
-   *   gold   p x (mean - bar) x gold per 1%, which is identically
-   *          E[max(0, final% - bar)] x gold per 1% — the house worth, never
-   *          negative, and never a difference of means.
-   */
-  function maskOdds(cdf, bar) {
-    if (!cdf || !cdf.length) return null;
-    var acc = 0, p = 0, prev = 0, prevS = null, i, m, loS, hiS, lo, hi, f, rep;
-    for (i = 0; i < cdf.length; i++) {
-      m = cdf[i].cum - prev;
-      prev = cdf[i].cum;
-      hiS = cdf[i].score;
-      loS = prevS === null ? hiS : prevS;        // the first rung is a point, not an interval
-      prevS = hiS;
-      if (m <= 0) continue;
-      lo = pct(loS); hi = pct(hiS);
-      // At or below the bar, whole. Strict on purpose: standing pat is a real
-      // outcome with real mass sitting exactly on the bar in the vs-current
-      // reading, and a bracelet does not beat itself.
-      if (hi <= bar) continue;
-      if (lo >= bar || hi <= lo) {
-        f = 1;
-        rep = pct((loS + hiS) / 2);              // worthOf's own midpoint, in log space
-      } else {
-        f = (hi - bar) / (hi - lo);              // the share of this interval above the bar
-        rep = (bar + hi) / 2;                    // and the middle of that share
-      }
-      acc += m * f * rep;
-      p += m * f;
-    }
-    return { p: p, mean: p > 0 ? acc / p : 0, gold: p > 0 ? (acc - p * bar) * gpd() : 0 };
-  }
-
-  /** Odds read as odds, to a hundredth while they are long — a real chance never rounds to 0%. */
-  function oddsCell(p) {
-    var v = clamp(num(p, 0), 0, 1) * 100;
-    if (v <= 0) return "0%";
-    if (v < 0.1) return "&lt;0.1%";
-    if (v >= 99.95 && v < 100) return "&gt;99.9%";
-    return fx(v, v < 10 ? 2 : 1) + "%";
-  }
-
-  /** The locked lines of one mask, one per line, slot number first. */
+  /** The locked lines of one lock set, one per line, slot number first. */
   function lockCell(m, lines, profile) {
     if (!m.lockedKeys.length) return '<span class="av-lkl none">lock nothing</span>';
     var fl = locksFromKeys(m.lockedKeys, lines, S.grade, profile), h = "", i, lab;
@@ -1082,7 +1205,7 @@
    * The card itself, or "" when there is nothing to compare: no solve, a
    * bracelet that has not been opened, or no rolls left. Zero rolls prints
    * nothing on purpose — the tab already says "there is no decision in front of
-   * you", and a table repeating it in five columns is commentary.
+   * you", and a table repeating it in six columns is commentary.
    */
   function locksTableHtml() {
     var res = lastSolve;
@@ -1091,24 +1214,22 @@
     if (S.rollsLeft <= 0 || !res.maskEV || !res.maskEV.length) return "";
 
     var profile = buildProfile(), lines = grantedLines();
-    // The bar. A baseline of 0 is the shipped default and a comparison against
-    // nothing, so the table falls back to the bracelet on the wrist — always a
-    // meaningful question. A baseline that is set wins.
-    var base = num(S.econ.baseline, 0), vsCur = !(base > 0);
-    var bar = vsCur ? pct(res.currentScore) : base;
-    var barName = vsCur ? "the bracelet you hold" : "your baseline";
+    var bb = lockBar(res), bar = bb.bar, vsCur = bb.vsCur, barName = bb.name;
 
     var rows = [], best = -1, i;
     for (i = 0; i < res.maskEV.length; i++) {
-      rows.push(maskOdds(res.maskEV[i].cdf, bar));
+      rows.push(worthFrom(res.maskEV[i].cdf, bar));
       if (rows[i] && (best < 0 || rows[i].p > rows[best].p + 1e-12)) best = i;
     }
+    // Every gap is measured against the PICK's worth — row one, the solver's own
+    // choice — because that is the row a player is deciding whether to leave.
+    var pickWorth = rows[0] ? rows[0].gold : null;
 
     var h = '<h2 style="margin-top:0">' + (vsCur ? "Locks against what you hold" : "Locks against your baseline") + "</h2>";
     h += '<p class="note">' + (vsCur
-      ? "No baseline set, so every row is measured against the <b>" + fx(bar, 2) +
-        "%</b> bracelet you wear now. Set one in <b>Economy</b> to compare against the bracelet you would wear instead."
-      : "Every row against your <b>" + fx(bar, 2) + "%</b> baseline, at " + gold(gpd()) + " gold per 1%.") + "</p>";
+      ? "No baseline set, so every row is measured against the <b>" + dmg(bar) +
+        "</b> bracelet you wear now. Set one in <b>Economy</b> just above to compare against the bracelet you would wear instead."
+      : "Every row against your <b>" + dmg(bar) + "</b> baseline, at " + gold(gpd()) + " gold per 1%.") + "</p>";
 
     h += '<div class="av-tabwrap"><table><thead><tr>' +
       '<th><span data-gloss="Which slots you pay to keep before pressing reroll. Everything not listed rerolls together — one attempt rerolls every unlocked slot at once.">Lock</span></th>' +
@@ -1118,33 +1239,35 @@
       '<th class="num"><span data-gloss="Where it lands in the runs that do beat ' + barName +
         ' — the average of those finishes alone, not of all of them.">If it beats</span></th>' +
       '<th class="num"><span data-gloss="The odds times how far those finishes clear ' + barName +
-        ', at your gold per 1%. Never negative: a bracelet you would not wear is worth nothing, not a debt.">Worth</span></th>' +
+        ', at your gold per 1%. Never negative: a bracelet you would not wear is worth nothing, not a debt. The same figure, and the same arithmetic, as the Worth playing out card.">Worth</span></th>' +
+      '<th class="num"><span data-gloss="What this lock is worth next to the pick — the top row — in gold. Negative means it gives that much up; the pick itself has nothing to compare against.">vs pick</span></th>' +
       "</tr></thead><tbody>";
 
     for (i = 0; i < res.maskEV.length; i++) {
       var m = res.maskEV[i], o = rows[i], mk = "";
-      if (i === 0) mk += '<b class="av-mk" data-gloss="The solver&#39;s pick: the highest expected finish of every legal mask.">pick</b> ';
-      if (i === best && best !== 0) mk += '<b class="av-mk odds" data-gloss="The best odds of clearing the bar, which is not always the mask with the highest average.">odds</b> ';
+      if (i === 0) mk += '<b class="av-mk" data-gloss="The solver&#39;s pick: the highest expected finish of every legal set of locks.">pick</b> ';
+      if (i === best && best !== 0) mk += '<b class="av-mk odds" data-gloss="The best odds of clearing the bar, which is not always the lock with the highest average.">odds</b> ';
       h += "<tr" + (i === 0 ? ' class="rec"' : "") + "><td>" + mk + lockCell(m, lines, profile) +
-        '</td><td class="num">' + fx(pct(m.ev), 2) + "%</td>" +
+        '</td><td class="num">' + dmg(pct(m.ev)) + "</td>" +
         (o
-          ? '<td class="num">' + oddsCell(o.p) + '</td><td class="num">' + (o.p > 0 ? fx(o.mean, 2) + "%" : "—") +
-            '</td><td class="num">' + (o.p > 0 ? gold(o.gold) : "0") + "</td>"
-          // The model attaches a distribution to every mask it returns. No cdf
-          // means the page is running an older model/bracelet.js than the one on
-          // disk — say so rather than draw three dashes and let it pass.
-          : '<td class="num" colspan="3">no distribution</td>') +
+          ? '<td class="num">' + odds(o.p) + '</td><td class="num">' + (o.p > 0 ? dmg(o.mean) : "—") +
+            '</td><td class="num">' + (o.p > 0 ? gold(o.gold) : "0") + '</td><td class="num">' +
+            (i === 0 || pickWorth === null ? "—" : signGold(o.gold - pickWorth)) + "</td>"
+          // The model attaches a distribution to every lock set it returns. No
+          // cdf means the page is running an older model/bracelet.js than the
+          // one on disk — say so rather than draw four dashes and let it pass.
+          : '<td class="num" colspan="4">no distribution</td>') +
         "</tr>";
     }
     h += "</tbody></table></div>";
 
     if (best !== 0 && rows[best] && rows[0]) {
-      h += '<p class="note">Best odds and best average are different masks here: the <b>odds</b> row clears ' +
+      h += '<p class="note">Best odds and best average are different locks here: the <b>odds</b> row clears ' +
         barName + " more often, the <b>pick</b> row has the higher average finish.</p>";
     }
     if (res.maskCount > res.maskEV.length) {
       var rest = res.maskCount - res.maskEV.length;
-      h += '<p class="note">' + rest + (rest === 1 ? " weaker mask" : " weaker masks") + " not shown.</p>";
+      h += '<p class="note">' + rest + (rest === 1 ? " weaker lock" : " weaker locks") + " not shown.</p>";
     }
     return h;
   }
@@ -1192,6 +1315,21 @@
 
   var traitObs = null;
 
+  /**
+   * One trait row's chip. The figure comes from app.js (BraceletApp.traits.one)
+   * — the same call its read-out line sums for "fixed traits", so the chips
+   * always add up to the line above them. They did not: the line converted the
+   * combined log-space score and read +4.80% over chips of +2.83% and +1.92%
+   * (Shizu, 2026-08-15).
+   */
+  function traitOnePct(k) {
+    var A = window.BraceletApp;
+    if (A && A.traits && A.traits.one) return A.traits.one(k);
+    var one = {};
+    one[k] = traitValues()[k];
+    return pct(B.traitDamage(one, buildProfile()));
+  }
+
   function paintTraitChip(chip, k) {
     var tv = traitValues();
     if (!tv[k]) {
@@ -1200,13 +1338,12 @@
       chip.setAttribute("data-gloss", "Switched off, so this line adds nothing to any score on the page.");
       return;
     }
-    var one = {};
-    one[k] = tv[k];
-    var d = B.traitDamage(one, buildProfile());
+    var d = traitOnePct(k);
     chip.className = "bc-trw";
-    chip.textContent = signPct(pct(d));
+    chip.textContent = signPct(d);
     chip.setAttribute("data-gloss", tv[k] + " points of " + ((P.TRAIT_LABELS && P.TRAIT_LABELS[k]) || k) +
-      " is worth " + signPct(pct(d)) + " on the character being scored. It never rerolls, so every score on the page carries it.");
+      " is worth " + signPct(d) + " on the character being scored. It never rerolls, so every score on the page carries it. " +
+      "The three chips add up to the fixed-traits figure in the line under the panel header.");
   }
 
   function decorateTraits() {
@@ -1255,18 +1392,31 @@
     return S.rolled;
   }
 
+  /**
+   * The keep-or-replace flow, or "" when there is no roll to judge.
+   *
+   * IT DRAWS ONLY WHEN IT CAN ACT (Shizu, 2026-08-15): a full bracelet and at
+   * least one roll left. bodyHtml already turns back on an unrolled or half
+   * filled bracelet, so the guard here is the rolls — and it is a guard now
+   * rather than a panel saying "No rolls left", which is the one thing the
+   * screen above it has already said twice.
+   *
+   * KEEP is the right word HERE and nowhere else on the tab. This is the only
+   * question on the page that is genuinely keep-or-replace: the old set against
+   * the new one. The lock advice is lock-or-reroll, and it says so.
+   */
   function cutHtml(res, profile, lines) {
+    if (S.rollsLeft <= 0 || isUnrolled() || isPartial()) return "";
     var h = '<div class="panel" id="av-cut"><h2 style="margin-top:0">I rolled — keep or replace?</h2>';
-    if (S.rollsLeft <= 0) return h + "<p>No rolls left.</p>" + historyHtml() + "</div>";
 
     var locks = cutLocks(res, lines, profile);
     ensureRolled();
 
     h += '<p class="note">Lock what you locked in game, type the lines the roll gave you, and the tool compares the two sets by what they are worth with ' +
       (S.rollsLeft - 1) + " roll" + (S.rollsLeft - 1 === 1 ? "" : "s") +
-      ' still to come<span data-gloss="Not by which set scores more today. A weaker set can be worth more because of what it clears out of the pool for the rolls that follow.">*</span>.</p>';
+      " still to come — not by which of them scores more today. A weaker set can be worth more, because of what it clears out of the pool for the rolls that follow.</p>";
 
-    h += '<div class="av-cutgrid"><div><div class="subh">Locked for this roll</div>';
+    h += '<div class="av-cutgrid"><div><div class="subh"><span data-gloss="Pre-filled from the pick above. Change them if you locked something else in game — what you actually locked is what the roll answers to, not what the solver would have chosen.">Locked for this roll</span></div>';
     var i;
     for (i = 0; i < S.slots; i++) {
       h += '<div class="av-lockrow"><input type="checkbox" data-avlock="' + i + '"' + (locks[i] ? " checked" : "") +
@@ -1294,12 +1444,20 @@
     if (v.error) return '<div class="av-warn">' + esc(v.error) + "</div>";
     var take = v.verdict === "replace";
     var dGold = deltaGold(v.vNew, v.vKeep);
+    var dPct = pct(v.vNew) - pct(v.vKeep);
+    // Two decimals is the house rule for a damage percentage, and two
+    // continuation values can genuinely be level at that precision — so when
+    // the difference rounds away, the sentence says so rather than printing
+    // "+0.00%" beside a verdict and leaving it looking arbitrary.
+    var level = Math.abs(dPct) < 0.005;
     return '<div class="av-verdict ' + (take ? "replace" : "keep") + '">' +
       '<div class="hd">' + (take ? "TAKE THE NEW SET" : "KEEP WHAT YOU HAVE") + "</div>" +
-      '<div class="bd">New set is worth ' + fx(pct(v.vNew), 3) + "% against " + fx(pct(v.vKeep), 3) +
-      "% for the old one, both counting the " + v.rollsLeft + " roll" + (v.rollsLeft === 1 ? "" : "s") + " still to come. " +
-      "That is " + signPct(pct(v.vNew) - pct(v.vKeep)) + ", or " + (dGold >= 0 ? "+" : "−") + gold(Math.abs(dGold)) + " gold. " +
-      "On today's score alone it would be " + fx(pct(v.scoreNew), 2) + "% against " + fx(pct(v.scoreKeep), 2) + "%.</div>" +
+      '<div class="bd">New set is worth ' + dmg(pct(v.vNew)) + " against " + dmg(pct(v.vKeep)) +
+      " for the old one, both counting the " + v.rollsLeft + " roll" + (v.rollsLeft === 1 ? "" : "s") + " still to come. " +
+      (level
+        ? "The two are level to a hundredth of a point; " + signGold(dGold) + " gold is what separates them. "
+        : "That is " + signPct(dPct) + ", or " + signGold(dGold) + " gold. ") +
+      "On today's score alone it would be " + dmg(pct(v.scoreNew)) + " against " + dmg(pct(v.scoreKeep)) + ".</div>" +
       '<div class="barrow"><button class="' + (take ? "primary" : "mbtn") + '" id="av-apply-new" type="button">Apply — take the new set</button>' +
       '<button class="' + (take ? "mbtn" : "primary") + '" id="av-apply-keep" type="button">Apply — keep the old set</button></div>' +
       "</div>";
@@ -1371,7 +1529,7 @@
       var wu = worthOf(res, 0);
       return '<div class="av-empty"><b>The bracelet has not been opened yet.</b><br>' +
         "An unrolled " + esc(S.grade) + " bracelet with " + S.slots + " granted slots and " + S.rollsLeft +
-        " rolls lands at <b>" + fx(pct(res.expectedFinal), 2) + "%</b> expected, and is worth <b>" +
+        " rolls lands at <b>" + dmg(pct(res.expectedFinal)) + "</b> expected, and is worth <b>" +
         (wu ? gold(wu.gold) : "—") + "</b> gold" +
         // worthNote() is empty at a 0% baseline — a comparison against nothing —
         // so the joining dash must go with it or the sentence trails off mid-air.
@@ -1386,13 +1544,13 @@
       // A finished bracelet has one outcome, so its worth is simply how far that
       // one outcome clears the baseline — and nothing if it does not clear it.
       // Say so in those words: "worth 0" with no explanation reads as a bug.
-      var wf = worthOf(res, 0), baseF = fx(num(S.econ.baseline, 0), 2) + "%";
+      var wf = worthOf(res, 0), baseF = dmg(num(S.econ.baseline, 0));
       var tail = (wf && wf.gold > 0)
-        ? "It clears your " + baseF + " baseline by " + fx(pct(res.currentScore) - num(S.econ.baseline, 0), 2) +
-          "%, so it is worth <b>" + gold(wf.gold) + "</b> gold at " + gold(gpd()) + " gold per 1%."
+        ? "It clears your " + baseF + " baseline by " + dmg(pct(res.currentScore) - num(S.econ.baseline, 0)) +
+          ", so it is worth <b>" + gold(wf.gold) + "</b> gold at " + gold(gpd()) + " gold per 1%."
         : "It does not beat your " + baseF + " baseline, so it is worth <b>0</b> to you — " +
           "the bracelet you already wear is the better one, and worth is never a debt.";
-      return '<div class="av-empty"><b>No rolls left — this bracelet is final at ' + fx(pct(res.currentScore), 2) + "%.</b><br>" +
+      return '<div class="av-empty"><b>No rolls left — this bracelet is final at ' + dmg(pct(res.currentScore)) + ".</b><br>" +
         "Nothing to advise: there is no decision in front of you. The Calculator has the line-by-line breakdown. " +
         tail + "</div>" +
         (S.history.length ? '<div class="panel" style="margin-top:12px">' + historyHtml() + "</div>" : "");
@@ -1415,19 +1573,21 @@
     return '<details class="method">' +
       "<summary>How the numbers on this tab are worked out</summary>" +
 
-      "<p><b>The lock table ranks lock masks, not lines.</b> One attempt rerolls every unlocked slot at once, " +
-      "so the decision is which SET to freeze. For each legal mask the solver reports <b>expected final</b>: " +
-      "what the bracelet is worth after you lock exactly those slots and then play every remaining roll the way " +
-      "it would play them. The <b>vs best</b> column prices the gap against the top mask at your gold rate.</p>" +
+      "<p><b>The lock table ranks sets of locks, not lines.</b> One attempt rerolls every unlocked slot at once, " +
+      "so the decision is which SET to freeze. For each legal set the solver reports <b>expected</b>: what the " +
+      "bracelet is worth after you lock exactly those slots and then play every remaining roll the way it would " +
+      "play them.</p>" +
 
-      "<p><b>Every lock carries its own distribution.</b> The table beside the bracelet reads one curve per mask: " +
-      "where the bracelet finishes with exactly those slots locked for the NEXT roll and every roll after it played " +
-      "the way the solver would. <b>Beats</b> is how much of that curve sits above your baseline &mdash; above the " +
-      "bracelet you hold, when no baseline is set &mdash; and <b>if it beats</b> averages only the finishes that do. " +
-      "The highest average is not always the best odds: the average is paid by a long tail the odds are not, and " +
-      "when they part the table marks both rows. <b>Worth</b> is the same formula as the card above, per mask: " +
-      "odds &times; how far those finishes clear the bar &times; your gold per 1%. Each curve is carried at about " +
-      "160 rungs, so where one heavy outcome straddles the bar the odds are read across it rather than counted " +
+      "<p><b>Every lock carries its own distribution.</b> The table under the bracelet reads one curve per lock " +
+      "set: where the bracelet finishes with exactly those slots locked for the NEXT roll and every roll after it " +
+      "played the way the solver would. <b>Beats</b> is how much of that curve sits above your baseline &mdash; " +
+      "above the bracelet you hold, when no baseline is set &mdash; and <b>if it beats</b> averages only the " +
+      "finishes that do. The highest average is not always the best odds: the average is paid by a long tail the " +
+      "odds are not, and when they part the table marks both rows. <b>Worth</b> is the same formula as the card " +
+      "above, and the same function: odds &times; how far those finishes clear the bar &times; your gold per 1%. " +
+      "<b>Vs pick</b> is that worth against the top row's, which is what leaving the solver's choice actually " +
+      "costs &mdash; the sentence in the advice panel quotes the same figure. Each curve is carried at about 160 " +
+      "rungs, so where one heavy outcome straddles the bar the odds are read across it rather than counted " +
       "exactly.</p>" +
 
       "<p><b>The verdict never compares today&rsquo;s scores.</b> It compares <b>continuation values</b> &mdash; " +
@@ -1464,6 +1624,9 @@
     if (!body) return;
     if (lead) lead.innerHTML = leadHtml();
     body.innerHTML = bodyHtml() + methodHtml();
+    // The quantile labels can only be placed once the browser has sized them —
+    // straight after the paint, so nothing is ever seen in the wrong place.
+    labelStrip();
     // The left column, which render() otherwise never touches: the bracelet
     // panel is a live element and the locks table hangs under it.
     renderLocksCard();

@@ -34,7 +34,7 @@
 importScripts(
   "data/bracelet-data.js?v=2",
   "data/gear-data.js?v=4",
-  "model/bracelet.js?v=12"
+  "model/bracelet.js?v=13"
 );
 
 var lastCtx = null;
@@ -79,16 +79,29 @@ function solveCmd(p) {
     finalScore: {
       mean: r.finalScore.mean,
       quantiles: r.finalScore.quantiles,
-      cdf: thinCdf(r.finalScore.cdf)
+      // The model's own thinner, at the SAME 160 rungs the per-mask cdfs use.
+      // This worker used to thin to ~400 with a different algorithm, so the
+      // headline Worth and the locks table's PICK row read one distribution
+      // through two thinnings and disagreed by up to 0.4% of the gold on a
+      // wide-support bracelet. Quantiles are read off the full cdf above,
+      // model-side, so they lose nothing.
+      cdf: Bracelet.distToCdf ? cdfToDist(r.finalScore.cdf) : thinCdf(r.finalScore.cdf)
     },
     ctxKey: p.ctxKey || null,
     stats: r.stats
   };
 }
 
-// The exact cdf can run to tens of thousands of points; the UI draws a strip and
-// asks P(≥x) a handful of times. Keep at most ~400 rungs, each the cumulative
-// probability at that score — quantiles are read off the full cdf before this.
+// Rebuild the model's finalDist map from its full cdf and hand it to the
+// model's own thinner, so the headline and the per-mask curves are thinned
+// identically. The map is score -> probability; p on the full cdf is exact.
+function cdfToDist(cdf) {
+  var d = {};
+  for (var i = 0; i < cdf.length; i++) d[cdf[i].score] = (d[cdf[i].score] || 0) + cdf[i].p;
+  return Bracelet.distToCdf(d, 160);
+}
+
+// FALLBACK ONLY (a cached model without distToCdf): the old ~400-rung thinner.
 function thinCdf(cdf) {
   var max = 400;
   if (cdf.length <= max) return cdf;

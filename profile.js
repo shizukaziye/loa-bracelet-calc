@@ -21,6 +21,9 @@
  *                         Advanced fold's support inputs.
  *   set(patch)         -> merge (one level deep for the nested blocks), persist, notify
  *   mount(hostEl)      -> put the control deck inside hostEl and render it
+ *   adoptPanel()       -> the Grader panel has just moved between tabs: put its own
+ *                         three controls (grade + rolls, granted slots, economy) back
+ *                         into its hosts. app.js calls it as it moves the panel.
  *   onChange(cb)       -> unsubscribe fn; cb(detail) after every change the deck makes
  *   reset()            -> back to defaults, wiping the stored state
  *   resetCharacter()   -> the gear / accessory / fight / skill / economy half only
@@ -1468,17 +1471,33 @@
       // ---- bracelet line rows (the Advanced fold's fixed-line editor lives in
       //      this deck; the Bracelet panel's granted rows use the same shape) ----
       ".bc-fam{width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
-      // The family box carries the longest text on the row, so it gets the
-      // room: 430px fits nearly every label outright (the shrink last round
-      // went too far — Shizu, 2026-08-11).
-      ".bc-slot{display:grid;grid-template-columns:44px 168px minmax(0,430px) 120px;gap:8px;align-items:end;margin-bottom:8px;justify-content:start}" +
-      ".bc-slot .sn{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;padding-bottom:7px}" +
-      // KEEP / ROLL beside the slot number (app.js's slotAdvice). It rides IN
-      // the label cell rather than taking a column of its own, so the grid is
-      // the same four columns it was — including the phone breakpoint below,
-      // where the whole row becomes one column and the label loses its padding.
-      // inline-block, so a narrow cell wraps the badge under the number instead
-      // of stretching the row.
+      // ---- one bracelet line: label, family, rarity, value ----
+      //
+      // THE FAMILY TAKES WHATEVER IS LEFT. It carries the longest text on the
+      // row by far — "On-hit enemy Crit DMG Resist −4.8%; ally AP buff +3%" —
+      // and it is the thing being chosen. It used to sit third, behind a fixed
+      // 168px rarity box, in a grid whose own tracks added up to more than the
+      // Advisor's left column: the family got 124px and read "C · W…", while
+      // the rarity box it was paying for clipped its own text to "+9,000 /"
+      // (Shizu, 2026-08-15).
+      //
+      // Flex, not a grid, for the empty cells: a row with no rarity box and no
+      // value box (a basic-stat line has no rarity; a special has no value) can
+      // give that room to the family instead of holding it open. The rarity
+      // cell is FIXED at 208px because that is what its longest option needs —
+      // "Legendary · +9,000/+2,400" measures 203px in this select's own font,
+      // and a box that cannot show its own selection is the bug being fixed.
+      // (150px was the first guess and cannot hold it: the word alone is 69px.)
+      ".bc-slot{display:flex;align-items:flex-end;gap:8px;margin-bottom:8px}" +
+      ".bc-slot>.sn{flex:0 0 64px;font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;padding-bottom:7px}" +
+      ".bc-slot>.bc-famcell{flex:1 1 auto;min-width:0}" +
+      ".bc-slot>.bc-tiercell{flex:0 0 208px;min-width:0}" +
+      ".bc-slot>.bc-valcell{flex:0 0 118px;min-width:0}" +
+      ".bc-slot>.bc-tiercell:empty,.bc-slot>.bc-valcell:empty{display:none}" +
+      // LOCK / REROLL beside the slot number (app.js's slotAdvice). It rides IN
+      // the label cell rather than taking a column of its own — inline-block, so
+      // a narrow cell wraps the badge under the number instead of stretching the
+      // row. 64px holds "REROLL" on one line.
       ".bc-slot .sn .bc-adv{display:inline-block;margin-left:5px;padding:1px 6px;border-radius:99px;" +
         "font-size:9px;font-weight:800;letter-spacing:.06em;line-height:1.6;vertical-align:baseline;" +
         "border:1px solid transparent}" +
@@ -1503,8 +1522,13 @@
       // Phones: the cluster's two columns become one, full width.
       "@media(max-width:560px){.bc-hdrctl{gap:12px}" +
       ".bc-hdrctl .bc-ctlstack,.bc-hdrctl .bc-brachdr{flex:1 1 100%;min-width:0}}" +
-      "@media(max-width:640px){.bc-slot{grid-template-columns:1fr;gap:5px}.bc-slot .sn{padding-bottom:0}}" +
-      "@media(max-width:900px) and (min-width:641px){.bc-slot{grid-template-columns:44px 150px minmax(0,1fr) 110px}}";
+      // Phones: one control per line, each full width. Every flex basis has to
+      // be reset one selector at a time, at the same specificity as the rule it
+      // undoes — in a column flex container the basis is a HEIGHT, so a stray
+      // `flex:0 0 64px` on the label reads as a 64px TALL slot number.
+      "@media(max-width:640px){.bc-slot{flex-direction:column;align-items:stretch;gap:5px}" +
+      ".bc-slot>.sn,.bc-slot>.bc-famcell,.bc-slot>.bc-tiercell,.bc-slot>.bc-valcell{flex:0 0 auto;width:auto}" +
+      ".bc-slot>.sn{padding-bottom:0}}";
   }
 
   function injectStyle() {
@@ -2312,14 +2336,45 @@
     for (i = 0; i < ctlHosts.length; i++) if (ctlHosts[i].host === hostEl) { e = ctlHosts[i]; break; }
     if (!e) { e = { host: hostEl }; ctlHosts.push(e); }
     paintCtlHost(e);
-    if ((!opts || opts.withTop !== false) && onScreen(hostEl)) {
-      var els = movableEls(), moved = false, j;
-      for (j = 0; j < els.length; j++) {
-        if (els[j].parentNode !== hostEl) { hostEl.appendChild(els[j]); moved = true; }
-      }
-      if (moved) renderTop();
+    if (!opts || opts.withTop !== false) {
+      borrowHost = hostEl;
+      placeMovables();
     }
     return hostEl;
+  }
+
+  /**
+   * WHERE THE THREE MOVABLE CONTROLS GO. The Grader panel's own hosts first, the
+   * borrowing cluster only as a fallback.
+   *
+   * The panel is one live element that MOVES between the Calculator and the
+   * Advisor, and it carries #bc-tophost, #bc-slotshost and #bc-econhost with it
+   * — so whichever tab is on screen has somewhere to put all three, beside the
+   * lines they describe. The Advisor used to drag them into its own control
+   * cluster instead, which left the ECONOMY heading in the panel printed over an
+   * empty box on both tabs (Shizu, 2026-08-15) and, coming back to the
+   * Calculator, left grade, rolls and the granted-slot count stranded in a
+   * hidden pane. The cluster is still the fallback: a tab that shows no panel
+   * host on screen keeps them.
+   *
+   * Re-parenting is safe by construction — every one of the three carries its
+   * own delegated listeners (buildMovable calls bindDeck on the element itself),
+   * which is the same principle the whole panel moves on.
+   */
+  var borrowHost = null;
+  function placeMovables() {
+    var spots = [["bc-tophost", buildTop], ["bc-slotshost", buildSlotsCtl], ["bc-econhost", buildEconCtl]];
+    var fallback = (borrowHost && borrowHost.parentNode && onScreen(borrowHost)) ? borrowHost : null;
+    var moved = false, i, host, el;
+    for (i = 0; i < spots.length; i++) {
+      host = document.getElementById(spots[i][0]);
+      if (!host || !onScreen(host)) host = fallback;
+      if (!host) continue;
+      el = spots[i][1]();
+      if (el.parentNode !== host) { host.appendChild(el); moved = true; }
+    }
+    if (moved) renderTop();
+    return moved;
   }
 
   /**
@@ -2606,21 +2661,7 @@
     // drawn at all until a character is loaded. Another tab may have borrowed
     // them (see mountCharControls); this claims them back, so it runs before the
     // early return below rather than after it.
-    //
-    // Three hosts, three elements, each in the place it belongs: grade and rolls
-    // under the panel header, the granted-slot count beside the combat traits,
-    // and the economy at the foot of the panel, immediately above the results it
-    // prices.
-    var placed = false, i;
-    var spots = [["bc-tophost", buildTop], ["bc-slotshost", buildSlotsCtl], ["bc-econhost", buildEconCtl]];
-    for (i = 0; i < spots.length; i++) {
-      var host = document.getElementById(spots[i][0]);
-      if (!host || !onScreen(host)) continue;
-      var el = spots[i][1]();
-      if (el.parentNode !== host) host.appendChild(el);
-      placed = true;
-    }
-    if (placed) renderTop();
+    placeMovables();
     var hdr = panel.getElementsByClassName("bc-hdrow")[0];
     if (!hdr) return;
     var h2 = hdr.getElementsByTagName("h2")[0];
@@ -2675,8 +2716,6 @@
   function buildSlotsCtl() { return buildMovable("slots", "bc-slotsctl", "bc-brachdr"); }
   /** Gold per 1% and the baseline. */
   function buildEconCtl() { return buildMovable("econ", "bc-econctl", ""); }
-  /** All three, in the order a borrowing tab should stack them. */
-  function movableEls() { return [buildTop(), buildSlotsCtl(), buildEconCtl()]; }
 
   var deckEl = null;
   function buildDeck() {
@@ -2751,6 +2790,14 @@
     },
     /** Where the deck is right now, or null before the first mount. */
     host: function () { return deckEl ? deckEl.parentNode : null; },
+
+    /**
+     * The Grader panel has just been re-parented into another tab: put its own
+     * controls back in it. app.js calls this the moment it moves the panel,
+     * because until then "is this host on screen" is a question about the tab
+     * the panel is leaving.
+     */
+    adoptPanel: adoptBraceletPanel,
 
     onChange: function (cb) {
       if (typeof cb !== "function") return function () {};

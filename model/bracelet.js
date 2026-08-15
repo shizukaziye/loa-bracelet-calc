@@ -2379,6 +2379,10 @@
     supportBaseAtk: supportBaseAtk,
     supportContribution: supportContribution,
     supportGain: supportGain,
+    // Exported for solver-worker.js, which must thin the headline cdf with the
+    // SAME algorithm the per-mask cdfs use — two thinnings of one distribution
+    // made the Worth card and the PICK row disagree by up to 0.4% of the gold.
+    distToCdf: distToCdf,
     traitDamage: traitDamage,
     // The pooling layer. jointScore is the honest total for a whole bracelet;
     // the rest are exported so a caller can pool a set of its own.

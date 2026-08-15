@@ -60,9 +60,52 @@
     if (a >= 1e3) return Math.round(g / 1e3) + "k";
     return String(Math.round(g));
   }
-  function signPct(d) { return (d >= 0 ? "+" : "") + fx(d, 2) + "%"; }
   // D (log-space score) -> the exact combined damage percentage.
   function pct(D) { return B.damagePercent(D); }
+
+  // ------------------------------------------------------------------
+  // THE TWO FORMATTERS. One rule per kind of number, on every tab.
+  //
+  // Damage percentages read to two decimals and odds to one — in every card,
+  // chip, sentence and table cell either file draws. They used to be formatted
+  // at the call site, so the same figure came out "17%" in a card and "17.4%"
+  // in the table under it, and one odds column mixed 17.4 / 12.5 / 9.60 while
+  // the expected-final column ran to three decimals (Shizu, 2026-08-15).
+  // advisor.js reaches these through BraceletApp.fmt, so there is one copy.
+  // ------------------------------------------------------------------
+
+  /** A damage percentage. Always two decimals. */
+  function fmtDmg(v) { return fx(num(v, 0), 2) + "%"; }
+  /** The same, signed — for a difference between two of them. */
+  function signPct(d) { return (d >= 0 ? "+" : "") + fmtDmg(d); }
+  /**
+   * Odds, from a probability in 0..1. Always one decimal, with a floor and a
+   * cap so a real chance never prints as "0%" and a real doubt never prints as
+   * "100%". Exactly zero and exactly one keep their own words: those are
+   * certainties, not roundings, and "under 0.1%" for something that cannot
+   * happen would be the same lie in the other direction.
+   */
+  function fmtOdds(p) {
+    var v = clamp(num(p, 0), 0, 1) * 100;
+    if (v <= 0) return "0%";
+    if (v < 0.1) return "under 0.1%";
+    if (v >= 100) return "100%";
+    if (v > 99.9) return "over 99.9%";
+    return fx(v, 1) + "%";
+  }
+
+  // ------------------------------------------------------------------
+  // ONE TIER VOCABULARY: Heroic / Epic / Legendary.
+  //
+  // low / mid / high are the internal keys and stay that way — they are in the
+  // state, the official tables and the solver's atom keys. These three words are
+  // the only ones the user ever sees for them. "Rare" sat here for low until
+  // 2026-08-15 and was simply wrong: the picker offered "Rare · +6.8%" for a
+  // rarity the game calls Heroic, beside a "Legendary · +9,000" that was right.
+  // advisor.js prints the same three words through BraceletApp.tierWord.
+  // ------------------------------------------------------------------
+  var TIER_WORD = { low: "Heroic", mid: "Epic", high: "Legendary" };
+  function tierWord(t) { return TIER_WORD[t] || String(t); }
 
   // Gold always converts the EXACT damage percentage, never the log-space score,
   // so the arithmetic on screen matches the percentages printed beside it.
@@ -94,15 +137,27 @@
    * interval below it — take that interval's MIDPOINT rather than its top end,
    * or the answer prices several percent high.
    *
-   * `shift` moves every outcome by a constant log-space offset: how the unrolled
-   * card reprices one solved distribution at a different combat-trait total.
+   * `shiftD` moves every outcome by a constant log-space offset: how the
+   * unrolled card reprices one solved distribution at a different combat-trait
+   * total.
    *
-   * Returns { gold, p } — the worth, and the odds of clearing the baseline at
-   * all — or null before a solve has landed.
+   * ONE IMPLEMENTATION, and this is it (Shizu, 2026-08-15). The Advisor used to
+   * carry a second reading of the same formula for its per-lock rows — same
+   * intent, different treatment of the interval the bar lands inside — and the
+   * two disagreed on screen: 868k in the card over 876k in the row beneath it,
+   * 17% against 17.4%. The per-mask rows now call this through
+   * BraceletApp.worth.fromCdf with their own cdf, so a disagreement is not
+   * something the code can express any more.
+   *
+   * Returns, for the distribution and the bar it is given:
+   *   gold  E[max(0, final% - bar)] x gold per 1%
+   *   p     P(final% > bar)
+   *   mean  E[final% | final% > bar] — where it lands in the runs that clear it
+   * or null when there is no distribution to read.
    */
-  function worthOf(res, shift) {
-    if (!res || !res.finalScore || !res.finalScore.cdf || !res.finalScore.cdf.length) return null;
-    var cdf = res.finalScore.cdf, base = num(S.econ.baseline, 0), off = num(shift, 0);
+  function worthFromCdf(cdf, baselinePct, shiftD) {
+    if (!cdf || !cdf.length) return null;
+    var base = num(baselinePct, 0), off = num(shiftD, 0);
     var acc = 0, p = 0, prev = 0, prevS = null, i, m, s, over;
     for (i = 0; i < cdf.length; i++) {
       m = cdf[i].cum - prev;
@@ -129,16 +184,19 @@
       }
       prevS = cdf[i].score;
     }
-    return { gold: acc * gpd(), p: p };
+    // acc is the EXCESS over the bar, weighted by mass, so the conditional mean
+    // is the bar plus the average excess of the runs that clear it.
+    return { gold: acc * gpd(), p: p, mean: p > 0 ? base + acc / p : 0 };
   }
 
-  /** Odds, read as odds: down to a hundredth when they are long, so a real chance never rounds to "0%". */
-  function oddsTxt(p) {
-    var v = clamp(num(p, 0), 0, 1) * 100;
-    if (v < 0.1) return "under 0.1%";
-    if (v < 1) return fx(v, 2) + "%";
-    if (v >= 99.95) return "very nearly all";
-    return fx(v, v < 10 ? 1 : 0) + "%";
+  /**
+   * The same worth for a whole solve: its final-score distribution, against the
+   * baseline the user has set. A thin wrapper, deliberately — every other caller
+   * (the per-lock rows) hands in its own cdf and its own bar.
+   */
+  function worthOf(res, shift) {
+    if (!res || !res.finalScore) return null;
+    return worthFromCdf(res.finalScore.cdf, num(S.econ.baseline, 0), shift);
   }
 
   /**
@@ -156,17 +214,14 @@
    */
   function worthNote(w) {
     if (!w || num(S.econ.baseline, 0) <= 0) return "";
-    if (w.p <= 0) return "Nothing it can roll beats your " + fx(num(S.econ.baseline, 0), 2) + "% baseline.";
-    // A FIGURE all the way up. oddsTxt's top rung is the words "very nearly all",
-    // which is right in a sentence and reads as a stutter in a pair — "very
-    // nearly all of outcomes".
-    return (w.p >= 0.9995 ? "over 99.9%" : oddsTxt(w.p)) + " of outcomes";
+    if (w.p <= 0) return "Nothing it can roll beats your " + fmtDmg(num(S.econ.baseline, 0)) + " baseline.";
+    return fmtOdds(w.p) + " of outcomes";
   }
   /** The meaning, in the tooltip where meaning belongs. */
   function worthGloss(w) {
     if (!w) return "What this bracelet is worth over the one you would wear instead. It needs a solve first.";
     return "What this bracelet is worth over the one you would wear instead: how far the outcomes that beat your " +
-      fx(num(S.econ.baseline, 0), 2) + "% baseline clear it, averaged over how often they land, at " +
+      fmtDmg(num(S.econ.baseline, 0)) + " baseline clear it, averaged over how often they land, at " +
       gold(gpd()) + " gold per 1%. Never negative — a bracelet you would not equip is worth nothing, not a debt.";
   }
 
@@ -318,12 +373,9 @@
 
   // The letters, their palette and the JUNK sentinel live in profile.js, so the
   // Tier List and this picker can never disagree about a family's grade.
-  // Our low / mid / high are the game's Rare / Epic / Legendary rarities.
-  var TIER_META = {
-    low: { label: "Rare", color: "#5aa9e6" },
-    mid: { label: "Epic", color: "#c78cff" },
-    high: { label: "Legendary", color: "#ffb86b" }
-  };
+  // The WORDS for low / mid / high are TIER_WORD's, at the top of this file;
+  // what is left here is the colour each rarity is painted in.
+  var TIER_COLOR = { low: "#5aa9e6", mid: "#c78cff", high: "#ffb86b" };
 
   // ---- "Junk Line": every F family under one option ----
   //
@@ -426,7 +478,13 @@
     return s;
   }
 
-  /** The tier's actual roll, formatted: percentages as %, stats as a count. */
+  /**
+   * The tier's actual roll, formatted: percentages as %, stats as a count.
+   *
+   * The two-value families join TIGHT — "+9,000/+2,400", not "+9,000 / +2,400".
+   * This text is the closed rarity box's whole line, and the spaced version is
+   * eight pixels wider than the box it has to fit in.
+   */
   function tierValueText(fam, grade, tier) {
     var vals = fam.values[grade][tier], parts = [], i, j, c;
     for (i = 0; i < vals.length; i++) {
@@ -435,7 +493,7 @@
       var flat = c && (c.k === "weaponPower" || c.k === "mainStat");
       parts.push("+" + (flat ? nf(vals[i]) : vals[i] + "%"));
     }
-    return parts.join(" / ");
+    return parts.join("/");
   }
 
   /**
@@ -537,13 +595,13 @@
     var order = ["high", "mid", "low"], h = "", i, t;
     for (i = 0; i < order.length; i++) {
       t = order[i];
-      h += '<option value="' + t + '" style="color:' + TIER_META[t].color + '"' +
+      h += '<option value="' + t + '" style="color:' + TIER_COLOR[t] + '"' +
         (selected === t ? " selected" : "") + ">" +
-        esc(TIER_META[t].label + " · " + tierValueText(fam, grade, t)) + "</option>";
+        esc(tierWord(t) + " · " + tierValueText(fam, grade, t)) + "</option>";
     }
-    var cur = TIER_META[selected] ? TIER_META[selected].color : "var(--text)";
+    var cur = TIER_COLOR[selected] || "var(--text)";
     return '<select id="' + id + '" style="color:' + cur + ';font-weight:700" data-gloss="' +
-      "The rarity this line rolled at, and what it is worth. Legendary is the family's best roll, Epic the middle one, Rare the weakest; the numbers are the actual values for the family on the left." +
+      "The rarity this line rolled at, and what it is worth. Legendary is the family's best roll, Epic the middle one, Heroic the weakest; the numbers are the actual values for the family on the left." +
       '">' + h + "</select>";
   }
 
@@ -582,7 +640,7 @@
       var scaled = c.scaleKey ? x * profile[c.scaleKey] : x;
       parts.push(explainComponent(c, x, scaled, profile, fam));
     }
-    var txt = fam.label + " at " + line.tier + " tier: " + parts.join("  ");
+    var txt = fam.label + " at " + tierWord(line.tier) + ": " + parts.join("  ");
     if (PARTY_IDS[fam.id]) {
       txt += "  Party lines are counted as your own gain plus " + profile.allyDpsCount +
         " × an ally's gain, each ally assumed to deal the same damage as you before the line, at 90% crit / 280% crit damage.";
@@ -705,7 +763,7 @@
   function ensureWorker() {
     if (worker) return worker;
     try {
-      worker = new Worker("solver-worker.js?v=11");
+      worker = new Worker("solver-worker.js?v=12");
     } catch (e) {
       worker = null;
       return null;
@@ -1089,10 +1147,11 @@
       "<p><b>Worth</b> is <code>E[max(0, final% &minus; baseline%)] &times; gold per 1%</code>. You are paid " +
       "only by the outcomes that beat the bracelet you would wear instead, weighted by how often they land and " +
       "by how far they clear it. So it is never negative: a bracelet you would not equip is worth nothing, not " +
-      "a debt. Both inputs are yours &mdash; the gold rate and the baseline sit in the deck above, and an " +
+      "a debt. Both inputs are yours &mdash; the gold rate and the baseline are the <b>Economy</b> pair at the " +
+      "foot of the Grader panel, and an " +
       "import seeds them from the character's own bracelet.</p>" +
 
-      "<p><b>KEEP and ROLL</b> beside a slot come from the solver's best lock mask. A lock is worth buying only " +
+      "<p><b>LOCK and REROLL</b> beside a slot come from the solver's best set of locks. A lock is worth buying only " +
       "when the line it holds is scarcer than what a fresh draw would hand you, so the badge does not say this " +
       "line is good &mdash; it says keeping it beats rerolling it, over every roll you have left. One attempt " +
       "rerolls every unlocked slot at once, which is why the advice comes as a set and not slot by slot.</p>" +
@@ -1127,17 +1186,51 @@
   // and its granted / fixed rows.
   // ------------------------------------------------------------------
 
+  /**
+   * ONE COMBAT-TRAIT LINE, in damage percent, on the profile every tab scores
+   * on. The Advisor's per-row chip prints exactly this figure — through the
+   * export, not a second copy of it.
+   */
+  function traitOnePct(k, profile) {
+    var v = traitValues()[k];
+    if (!v) return 0;
+    var one = {};
+    one[k] = v;
+    return pct(B.traitDamage(one, profile || buildProfile()));
+  }
+
+  /**
+   * THE FIXED-TRAIT TOTAL the panel's read-out line prints.
+   *
+   * It is the SUM OF THE PER-LINE FIGURES, unrounded, rounded once at the end —
+   * so the line is exactly what the chips beside the trait rows add up to. It
+   * used to convert the combined log-space score instead, which is a shade
+   * larger (lines multiply), and the line said "+4.80%" over chips reading
+   * +2.83% and +1.92% (Shizu, 2026-08-15).
+   *
+   * The LINE IS THE AUTHORITATIVE TOTAL: it rounds the sum, the chips round
+   * each, so the two can differ only by the rounding of the parts and never by
+   * a whole hundredth of a point that has no visible source.
+   */
+  function traitTotalPct(profile) {
+    var p = profile || buildProfile(), s = 0, i;
+    for (i = 0; i < TRAIT_KEYS.length; i++) s += traitOnePct(TRAIT_KEYS[i], p);
+    return s;
+  }
+
   // The live read-out under the bracelet header. Split out so a slider drag can
   // refresh it without rebuilding the fields under the cursor.
   function updateBasicsNote() {
     var note = $("bc-slotnote");
     if (!note) return;
     var base = P.baseStats(), p = buildProfile();
+    // Item level to ONE decimal. The second one is noise on a figure that is
+    // read at a glance against a number the game shows whole.
     var msg = S.useOverride
       ? "Main stat " + nf(base.mainStatRaw) + " raw · weapon power " + nf(base.weaponPowerRaw) + " raw"
-      : "Item level " + fx(P.ilvl(), 2) + " · main stat " + nf(base.mainStatRaw) + " raw · weapon power " + nf(base.weaponPowerRaw) + " raw";
+      : "Item level " + fx(P.ilvl(), 1) + " · main stat " + nf(base.mainStatRaw) + " raw · weapon power " + nf(base.weaponPowerRaw) + " raw";
     msg += " · attack power " + nf(B.attackPower(p, 0, 0)) + " · additional damage pool " + fx(B.addDamagePool(p) * 100, 2) + "%";
-    msg += " · fixed traits " + signPct(pct(B.traitDamage(traitValues(), p)));
+    msg += " · fixed traits " + signPct(traitTotalPct(p));
     note.textContent = msg + ".";
   }
 
@@ -1209,34 +1302,47 @@
     var groups = familyOptions(grade, prefix !== "bc-f", row.fam);
     var rg = msRange(grade, famKey);
 
-    // Rarity first, family second: the rarity is the short, high-signal box and
-    // the family name is long, so the eye reads left to right without hopping.
-    // The advice, on the row it applies to. The mask table below says the same
-    // thing in aggregate, but a KEEP/ROLL badge beside the line you are looking
-    // at is what people actually read (Shizu, 2026-08-12).
+    // FAMILY FIRST, and it takes every pixel the row does not need for the rest.
+    // The rarity box led the row until 2026-08-15, on the argument that the eye
+    // should read the short box first — but it is the FAMILY that is being
+    // chosen, and in the Advisor's narrow left column the fixed rarity box left
+    // the family 124px to say "On-hit enemy Crit DMG Resist −4.8%; ally AP buff
+    // +3%" in. It read "C · W…". The rarity box is fixed and second now (see
+    // .bc-slot in profile.js's sheet); the family cell is what stretches.
+    //
+    // The advice, on the row it applies to. The lock table says the same thing
+    // in aggregate, but a LOCK/REROLL badge beside the line you are looking at
+    // is what people actually read (Shizu, 2026-08-12).
     var h = '<div class="bc-slot">' +
       '<div class="sn" id="' + prefix + "-sn-" + idx + '">' + esc(label) +
       (prefix === "bc-r" ? advBadge(slotAdvice(idx)) : "") +
       "</div>";
+    h += '<div class="fld bc-famcell">' + pickerHtml(prefix + "-fam-" + idx, groups, row.fam, grade) + "</div>";
+    // An empty cell collapses (`:empty` in the sheet), so a row with no rarity
+    // box and no value box gives the whole of that room to the family.
     if (isSpecial) {
       var fam = DATA.SPECIAL_BY_ID[Number(row.fam.slice(3))];
-      h += '<div class="fld">' + (fam ? tierHtml(prefix + "-tier-" + idx, fam, grade, row.tier || "mid") : "") + "</div>";
+      h += '<div class="fld bc-tiercell">' + (fam ? tierHtml(prefix + "-tier-" + idx, fam, grade, row.tier || "mid") : "") + "</div>";
     } else {
-      h += "<div></div>";
+      h += '<div class="bc-tiercell"></div>';
     }
-    h += '<div class="fld">' + pickerHtml(prefix + "-fam-" + idx, groups, row.fam, grade) + "</div>";
     if (isBasic) {
-      h += '<div class="fld"><input type="number" id="' + prefix + "-val-" + idx + '" step="1" min="' + rg[0] + '" max="' + rg[1] +
+      h += '<div class="fld bc-valcell"><input type="number" id="' + prefix + "-val-" + idx + '" step="1" min="' + rg[0] + '" max="' + rg[1] +
         '" value="' + msValue + '" data-gloss="The number this stat line actually rolled. The official bands run ' +
         rg[0] + "–" + rg[1] + ' on ' + (grade === "relic" ? "Relic" : "Ancient") + '."></div>';
     } else {
-      h += "<div></div>";
+      h += '<div class="bc-valcell"></div>';
     }
     return h + "</div>";
   }
 
   /**
-   * KEEP or ROLL for one granted slot, from the solver's best lock mask.
+   * LOCK or REROLL for one granted slot, from the solver's best lock set.
+   *
+   * ONE VERB FOR ONE ACT (Shizu, 2026-08-15). The badges said KEEP and ROLL,
+   * the table beside them said lock and reroll, and the padlock in game is a
+   * lock — three names for two decisions. KEEP is spoken for: it is the other
+   * half of the keep-or-replace flow, which is a different question entirely.
    *
    * Null when there is nothing to advise: no solve yet, no rolls left, or an
    * empty slot. Silence beats a confident badge on a bracelet the solver has
@@ -1250,8 +1356,8 @@
     var flags = locksFromKeys(lastSolve.bestLockMask.lockedKeys, grantedLines(), S.grade, buildProfile());
     if (!flags || flags.length <= idx) return null;
     return flags[idx]
-      ? { txt: "KEEP", cls: "keep", tip: "Lock this slot before your next roll." }
-      : { txt: "ROLL", cls: "roll", tip: "Leave this one unlocked — one attempt rerolls every unlocked slot together." };
+      ? { txt: "LOCK", cls: "keep", tip: "Lock this slot before your next roll." }
+      : { txt: "REROLL", cls: "roll", tip: "Leave this one unlocked — one attempt rerolls every unlocked slot together." };
   }
 
   /** The badge itself, or "" for a slot with nothing to advise. */
@@ -1308,7 +1414,7 @@
     var fam = DATA.SPECIAL_BY_ID[line.family];
     if (!fam) return "unknown";
     var vals = fam.values[grade][line.tier];
-    return fam.label + " · " + line.tier + " (" + vals.join(" / ") + ")";
+    return fam.label + " · " + tierWord(line.tier) + " (" + vals.join(" / ") + ")";
   }
 
   /**
@@ -2077,6 +2183,15 @@
   function mountBraceletPanel(hostId) {
     var panel = $("bc-braceletpanel"), host = $(hostId);
     if (panel && host && panel.parentNode !== host) host.appendChild(panel);
+    // THE PANEL'S OWN CONTROLS COME WITH IT. Grade, rolls left, the granted-slot
+    // count and the economy are three live elements profile.js parks in this
+    // panel's hosts, and it decides where they belong from what is on screen —
+    // which is only true once the panel has arrived. Claiming the deck happens
+    // first in both tabs, so without this the three were judged against the pane
+    // the panel was LEAVING: they stayed behind in the tab the user had just
+    // left, and the Calculator came back from the Advisor with an empty Grader
+    // header and no Economy at all.
+    if (panel && host && typeof P.adoptPanel === "function") P.adoptPanel();
   }
 
   /**
@@ -2159,8 +2274,25 @@
      * the gold slider drag without a three-second re-solve), so the worker's
      * own figure is identically zero. This applies the model's definition —
      * E[max(0, final% - baseline%)] x gpd — to the returned distribution.
+     *
+     * `fromCdf` is the core, and the Advisor's per-lock rows ride it with their
+     * own distribution and their own bar. `of` is the wrapper for a whole solve
+     * against the user's baseline. There is no second implementation left.
      */
-    worth: { of: worthOf, odds: oddsTxt, note: worthNote, gloss: worthGloss },
+    worth: { of: worthOf, fromCdf: worthFromCdf, odds: fmtOdds, note: worthNote, gloss: worthGloss },
+    /** The two shared formatters: damage percentages 2dp, odds 1dp. */
+    fmt: { dmg: fmtDmg, signDmg: signPct, odds: fmtOdds, gold: gold },
+    /** Heroic / Epic / Legendary, from the one map. */
+    tierWord: tierWord,
+    /**
+     * The combat-trait figures, so the Advisor's per-row chips and this file's
+     * read-out line are the same arithmetic: `one` per line, `total` their
+     * unrounded sum.
+     */
+    traits: {
+      one: function (k) { return traitOnePct(k); },
+      total: function () { return traitTotalPct(); }
+    },
     mountBracelet: mountBraceletPanel,
 
     solver: {
