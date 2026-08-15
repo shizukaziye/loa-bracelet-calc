@@ -108,10 +108,26 @@
       m = cdf[i].cum - prev;
       prev = cdf[i].cum;
       s = prevS === null ? cdf[i].score : (prevS + cdf[i].score) / 2;
-      prevS = cdf[i].score;
-      if (m <= 0) continue;
+      if (m <= 0) { prevS = cdf[i].score; continue; }
       over = pct(s + off) - base;
-      if (over > 0) { acc += m * over; p += m; }
+      if (over > 0) {
+        acc += m * over; p += m;
+      } else if (prevS !== null && pct(cdf[i].score + off) > base) {
+        // THE STRADDLING RUNG. A thinned rung can carry most of the mass across
+        // an interval the baseline lands inside — one live bracelet had 75% of
+        // everything in a 0.097-point rung — and taking the interval whole or
+        // not at all made a one-hundredth nudge of the baseline swing the odds
+        // by seventy-five points. Split it instead: mass is uniform across the
+        // interval, so the share above the bar is the share of the interval
+        // above the bar, and it lands at the midpoint of the cleared part.
+        var lo = pct(prevS + off), hi = pct(cdf[i].score + off);
+        var share = (hi - base) / (hi - lo);
+        if (share > 0 && share < 1) {
+          var mid = (base + hi) / 2 - base;
+          acc += m * share * mid; p += m * share;
+        }
+      }
+      prevS = cdf[i].score;
     }
     return { gold: acc * gpd(), p: p };
   }
@@ -689,7 +705,7 @@
   function ensureWorker() {
     if (worker) return worker;
     try {
-      worker = new Worker("solver-worker.js?v=10");
+      worker = new Worker("solver-worker.js?v=11");
     } catch (e) {
       worker = null;
       return null;
@@ -886,29 +902,55 @@
       "#tab-calculator .bc-hdrgrid{display:grid;grid-template-columns:minmax(0,1fr);gap:18px;align-items:start}" +
       "#tab-calculator .bc-hdrleft{min-width:0}" +
       // The trait rows and the granted-slot count, side by side; stacked rather
-      // than squeezed once the panel is narrow.
-      "#tab-calculator .bc-traitgrid{display:flex;gap:22px;align-items:flex-start}" +
-      "#tab-calculator .bc-traitgrid>#bc-traits{flex:1 1 auto;min-width:0}" +
-      "#tab-calculator .bc-traitgrid>#bc-slotshost{flex:0 0 auto;min-width:154px;padding-top:1px}" +
-      "@media(max-width:700px){#tab-calculator .bc-traitgrid{flex-direction:column;gap:8px}" +
-      "#tab-calculator .bc-traitgrid>#bc-traits,#tab-calculator .bc-traitgrid>#bc-slotshost{width:100%}}" +
+      // than squeezed once the panel is narrow. Class-scoped: this is the shared
+      // panel, and it is shown on the Advisor too (see the trait rows below).
+      ".bc-traitgrid{display:flex;gap:22px;align-items:flex-start}" +
+      ".bc-traitgrid>#bc-traits{flex:1 1 auto;min-width:0}" +
+      ".bc-traitgrid>#bc-slotshost{flex:0 0 auto;min-width:154px;padding-top:1px}" +
+      "@media(max-width:700px){.bc-traitgrid{flex-direction:column;gap:8px}" +
+      ".bc-traitgrid>#bc-traits,.bc-traitgrid>#bc-slotshost{width:100%}}" +
       // The character / default settings toggle is styled by profile.js, with the
       // rest of the control row it sits in: the Tier List draws the same row, and
       // a "#tab-calculator …" prefix here would have left that copy unstyled.
       // ---- the bracelet panel ----
-      "#tab-calculator .bc-hdrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}" +
+      ".bc-hdrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}" +
       // An illegal-but-scored state (three combat traits, or fewer than two):
       // the house note, flagged with the bad colour. A warning, not a block.
-      "#tab-calculator .note.bc-illegal{color:var(--bad);border-left:2px solid var(--bad);padding-left:9px;margin-top:8px}" +
+      ".note.bc-illegal{color:var(--bad);border-left:2px solid var(--bad);padding-left:9px;margin-top:8px}" +
       // ---- the bracelet's two fixed combat traits ---------------------
       // .bc-sl itself is the deck's row shape (profile.js); these are the
       // overrides that make a trait row typed instead of slid.
-      "#tab-calculator .bc-sl.bc-trrow{grid-template-columns:74px 96px 72px;justify-content:start}" +
-      "#tab-calculator .bc-trrow input[type=number]{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 7px;font:inherit;font-size:13px;width:100%}" +
-      "#tab-calculator .bc-trrow input[type=number]:focus{outline:1px solid var(--accent)}" +
-      "#tab-calculator .bc-trrow input:disabled{opacity:.45;cursor:not-allowed}" +
-      "#tab-calculator .bc-tract{padding:4px 8px;font-size:11px;width:100%}" +
-      "@media(max-width:640px){#tab-calculator .bc-sl.bc-trrow{grid-template-columns:62px 84px 66px;gap:6px}}" +
+      //
+      // NOT "#tab-calculator …" any more, and that prefix was the whole of
+      // Shizu's "the advisor combat traits is ugly" (2026-08-15). The panel is
+      // ONE live element that MOVES between this tab and the Advisor (see
+      // mountBraceletPanel), so a pane-id prefix dressed the rows here and left
+      // them bare over there: the deck's plain .bc-sl grid took the row, the
+      // number box stretched to 269px wearing the browser's own white
+      // background, and "active" was clipped into a 52px column. Class-scoped,
+      // exactly the way profile.js scopes the deck's own sheet, for exactly the
+      // same reason. Same for the illegal-state note above.
+      //
+      // FLEX, not the deck's three-column grid. The per-line worth chip is hung
+      // on the row by advisor.js — this file does not build it, and advisor.js
+      // is lazy, so on a visit that never opens the Advisor it is not there at
+      // all. A fourth grid column would hold a 62px hole open on every one of
+      // those visits; a flex row simply closes up. min-height matches the
+      // granted-slot rows below so the panel reads as one table.
+      ".bc-sl.bc-trrow{display:flex;align-items:center;gap:8px;min-height:40px;margin-bottom:8px}" +
+      ".bc-trrow .lb{flex:0 0 74px}" +
+      ".bc-trrow input[type=number]{flex:0 0 92px;background:var(--panel2);color:var(--text);border:1px solid var(--border);" +
+        "border-radius:6px;padding:5px 7px;font:inherit;font-size:13px;font-variant-numeric:tabular-nums}" +
+      ".bc-trrow input[type=number]:focus{outline:1px solid var(--accent)}" +
+      ".bc-trrow input:disabled{opacity:.45;cursor:not-allowed}" +
+      // What that one line is worth, beside the box it is typed into. Dim and
+      // tabular so the three read down as a column rather than as three labels.
+      ".bc-trrow .bc-trw{flex:0 0 62px;order:3;text-align:right;font-size:11.5px;font-weight:700;" +
+        "color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}" +
+      ".bc-trrow .bc-trw.off{opacity:.5}" +
+      ".bc-tract{flex:0 0 74px;order:4;padding:4px 8px;font-size:11px;text-align:center}" +
+      "@media(max-width:640px){.bc-sl.bc-trrow{gap:6px}.bc-trrow .lb{flex:0 0 62px}" +
+        ".bc-trrow input[type=number]{flex:0 0 78px}.bc-trrow .bc-trw{flex:0 0 52px}.bc-tract{flex:0 0 66px}}" +
       // ---- headline cards ----
       "#tab-calculator .bc-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:14px}" +
       "#tab-calculator .bc-card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 14px}" +

@@ -644,8 +644,41 @@
       "#tab-advisor .av-card .v.good{color:var(--good)}" +
       // ---- locks ----
       "#av-workgrid{display:grid;grid-template-columns:minmax(340px,5fr) minmax(420px,7fr);gap:14px;align-items:start}" +
-      "#av-workgrid > #av-brhost > .panel{margin-top:0}" +
+      // :first-child, not every .panel. The left column carries the locks table
+      // under the editor now, and that second panel wants the 12px .panel+.panel
+      // gives it. Both columns flow at their own height — no fixed heights
+      // anywhere, so the left one grows with the table and the grid does not
+      // fight it.
+      "#av-workgrid > #av-brhost > .panel:first-child{margin-top:0}" +
+      "#av-workgrid > #av-brhost{min-width:0}" +
       "@media (max-width:1020px){#av-workgrid{grid-template-columns:1fr}}" +
+      // ---- locks against the baseline ----
+      // Up to twelve rows of five figures in a column that can be 340px wide,
+      // so: no borders inside the lock cell, tabular figures, and the table in
+      // its own scroller rather than pushing the page sideways.
+      //
+      // table-layout:fixed, or the lock column sizes itself to the longest
+      // family name it happens to be holding — "Crit Damage; on crit, damage
+      // +1.5% · high" pushed the table 37px past the card and put a scrollbar
+      // under a desktop table that had room to spare. Fixed columns, and the
+      // lock cell ellipsises instead, which is what it is built to do.
+      "#tab-advisor .av-lk table{font-size:12px;table-layout:fixed}" +
+      "#tab-advisor .av-lk th:first-child,#tab-advisor .av-lk td:first-child{width:40%}" +
+      // On a phone 40% leaves the figure columns at 48px and the widest figure a
+      // row can hold — ">99.9%", "20.46M" — needs 52. The lock cell gives the
+      // width up: it truncates, and the whole label is in its gloss anyway.
+      "@media(max-width:700px){#tab-advisor .av-lk th:first-child,#tab-advisor .av-lk td:first-child{width:30%}}" +
+      "#tab-advisor .av-lk th,#tab-advisor .av-lk td{padding:5px 6px;vertical-align:top}" +
+      "#tab-advisor .av-lk th{white-space:normal;line-height:1.25}" +
+      "#tab-advisor .av-lk td.num{white-space:nowrap}" +
+      "#tab-advisor .av-lk tr.rec td{color:var(--accent)}" +
+      "#tab-advisor .av-lkl{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.5;" +
+        "text-decoration:none}" +
+      "#tab-advisor .av-lkl>i{font-style:normal;font-weight:700;color:var(--dim);margin-right:6px}" +
+      "#tab-advisor .av-lkl.none{color:var(--dim)}" +
+      "#tab-advisor .av-mk{display:inline-block;margin-bottom:2px;padding:0 6px;border-radius:99px;font-size:9.5px;" +
+        "font-weight:800;letter-spacing:.06em;text-transform:uppercase;line-height:1.6;border:1px solid var(--accent);color:var(--accent)}" +
+      "#tab-advisor .av-mk.odds{border-color:var(--high);color:var(--high)}" +
       "#tab-advisor .av-lockline{font-size:14px;line-height:1.6;margin:2px 0 8px}" +
       "#tab-advisor .av-pill{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:700;" +
         "background:var(--panel2);border:1px solid var(--border);margin:0 4px 4px 0}" +
@@ -942,6 +975,268 @@
       " played the way the lock table says.</p></div>";
   }
 
+  // ------------------------------------------------------------------
+  // LOCKS AGAINST THE BASELINE — the left column's second card
+  //
+  // The lock table above ranks masks by expected final and stops there. Shizu,
+  // 2026-08-15: "the baseline is very important and i need to know % odds of
+  // beating baseline on all my locks and the expected damage if i do beat it".
+  // That is a different question from the average, and the two answers do not
+  // always agree — a mask can hold the higher average and the worse odds of
+  // clearing a bar, because the average is paid by a tail the odds are not.
+  //
+  // Every row reads ONE distribution: maskEV[j].cdf, where the bracelet finishes
+  // if that mask is locked for the next roll and every roll after it is played
+  // the way the solver would (model/bracelet.js, maskDistribution). So the odds,
+  // the conditional average and the gold on a row cannot contradict each other
+  // — they are three readings of the same curve.
+  // ------------------------------------------------------------------
+
+  /**
+   * One mask's three figures, off its own cdf, against a bar in damage %.
+   *
+   * THE INTERVAL MODEL IS app.js's worthOf (BraceletApp.worth.of). The cdf
+   * arrives THINNED: distToCdf keeps ~160 rungs and merges every skipped rung's
+   * probability into the next kept one, so a rung's mass is not AT its score —
+   * it is spread through the interval that ends there, and its cum is exact
+   * only at the rung itself. worthOf answers that by scoring the mass at the
+   * interval's MIDPOINT rather than its top end, and the midpoint is right:
+   * summed back, it reproduces each mask's exact mean (maskEV[j].mean) five to
+   * twenty times closer than the top end does — measured, on a real solve.
+   *
+   * WHAT IS NOT COPIED is where the bar cuts. worthOf takes an interval whole
+   * or not at all, which is fine for a mean and wrong for a threshold: on a
+   * live bracelet one rung carried 75% of the mass across an interval a tenth
+   * of a point wide, and the bar landed inside it. All-or-nothing put the
+   * answer at 24% or 99% depending on which side of the midpoint the bar fell,
+   * from a one-hundredth nudge of the baseline. So a split interval is split:
+   * the same uniform spread worthOf assumes, applied at the bar instead of at
+   * the edge. Whole intervals still score exactly as worthOf scores them, so
+   * with a bar under the whole support this returns worthOf's gold to the
+   * floating point.
+   *
+   * Mass is a difference of cum, not rung.p, for worthOf's reason: cum is exact
+   * under both of the thinners these cdfs come from.
+   *
+   *   p      P(final% > bar)
+   *   mean   E[final% | final% > bar]
+   *   gold   p x (mean - bar) x gold per 1%, which is identically
+   *          E[max(0, final% - bar)] x gold per 1% — the house worth, never
+   *          negative, and never a difference of means.
+   */
+  function maskOdds(cdf, bar) {
+    if (!cdf || !cdf.length) return null;
+    var acc = 0, p = 0, prev = 0, prevS = null, i, m, loS, hiS, lo, hi, f, rep;
+    for (i = 0; i < cdf.length; i++) {
+      m = cdf[i].cum - prev;
+      prev = cdf[i].cum;
+      hiS = cdf[i].score;
+      loS = prevS === null ? hiS : prevS;        // the first rung is a point, not an interval
+      prevS = hiS;
+      if (m <= 0) continue;
+      lo = pct(loS); hi = pct(hiS);
+      // At or below the bar, whole. Strict on purpose: standing pat is a real
+      // outcome with real mass sitting exactly on the bar in the vs-current
+      // reading, and a bracelet does not beat itself.
+      if (hi <= bar) continue;
+      if (lo >= bar || hi <= lo) {
+        f = 1;
+        rep = pct((loS + hiS) / 2);              // worthOf's own midpoint, in log space
+      } else {
+        f = (hi - bar) / (hi - lo);              // the share of this interval above the bar
+        rep = (bar + hi) / 2;                    // and the middle of that share
+      }
+      acc += m * f * rep;
+      p += m * f;
+    }
+    return { p: p, mean: p > 0 ? acc / p : 0, gold: p > 0 ? (acc - p * bar) * gpd() : 0 };
+  }
+
+  /** Odds read as odds, to a hundredth while they are long — a real chance never rounds to 0%. */
+  function oddsCell(p) {
+    var v = clamp(num(p, 0), 0, 1) * 100;
+    if (v <= 0) return "0%";
+    if (v < 0.1) return "&lt;0.1%";
+    if (v >= 99.95 && v < 100) return "&gt;99.9%";
+    return fx(v, v < 10 ? 2 : 1) + "%";
+  }
+
+  /** The locked lines of one mask, one per line, slot number first. */
+  function lockCell(m, lines, profile) {
+    if (!m.lockedKeys.length) return '<span class="av-lkl none">lock nothing</span>';
+    var fl = locksFromKeys(m.lockedKeys, lines, S.grade, profile), h = "", i, lab;
+    for (i = 0; i < fl.length; i++) {
+      if (!fl[i]) continue;
+      lab = shortLabel(lines[i], S.grade);
+      // A long family name ellipsises in a 175px column, so the whole of it
+      // rides in the gloss. The "…" is the affordance here — the dotted
+      // underline is suppressed in the sheet, twenty-four of them down one
+      // column being exactly the noise this table is meant to be free of.
+      h += '<span class="av-lkl" data-gloss="Slot ' + (i + 1) + ": " + esc(lab) + '"><i>' +
+        (i + 1) + "</i>" + esc(lab) + "</span>";
+    }
+    return h;
+  }
+
+  /**
+   * The card itself, or "" when there is nothing to compare: no solve, a
+   * bracelet that has not been opened, or no rolls left. Zero rolls prints
+   * nothing on purpose — the tab already says "there is no decision in front of
+   * you", and a table repeating it in five columns is commentary.
+   */
+  function locksTableHtml() {
+    var res = lastSolve;
+    if (!res || lastErr) return "";
+    if (res.unrolled || isUnrolled() || isPartial()) return "";
+    if (S.rollsLeft <= 0 || !res.maskEV || !res.maskEV.length) return "";
+
+    var profile = buildProfile(), lines = grantedLines();
+    // The bar. A baseline of 0 is the shipped default and a comparison against
+    // nothing, so the table falls back to the bracelet on the wrist — always a
+    // meaningful question. A baseline that is set wins.
+    var base = num(S.econ.baseline, 0), vsCur = !(base > 0);
+    var bar = vsCur ? pct(res.currentScore) : base;
+    var barName = vsCur ? "the bracelet you hold" : "your baseline";
+
+    var rows = [], best = -1, i;
+    for (i = 0; i < res.maskEV.length; i++) {
+      rows.push(maskOdds(res.maskEV[i].cdf, bar));
+      if (rows[i] && (best < 0 || rows[i].p > rows[best].p + 1e-12)) best = i;
+    }
+
+    var h = '<h2 style="margin-top:0">' + (vsCur ? "Locks against what you hold" : "Locks against your baseline") + "</h2>";
+    h += '<p class="note">' + (vsCur
+      ? "No baseline set, so every row is measured against the <b>" + fx(bar, 2) +
+        "%</b> bracelet you wear now. Set one in <b>Economy</b> to compare against the bracelet you would wear instead."
+      : "Every row against your <b>" + fx(bar, 2) + "%</b> baseline, at " + gold(gpd()) + " gold per 1%.") + "</p>";
+
+    h += '<div class="av-tabwrap"><table><thead><tr>' +
+      '<th><span data-gloss="Which slots you pay to keep before pressing reroll. Everything not listed rerolls together — one attempt rerolls every unlocked slot at once.">Lock</span></th>' +
+      '<th class="num"><span data-gloss="The average finish with exactly these slots locked now and every later roll played the way the solver would play it.">Expected</span></th>' +
+      '<th class="num"><span data-gloss="How often this lock finishes above ' + barName +
+        ', counted over every way the remaining rolls can land.">' + (vsCur ? "Beats current" : "Beats baseline") + "</span></th>" +
+      '<th class="num"><span data-gloss="Where it lands in the runs that do beat ' + barName +
+        ' — the average of those finishes alone, not of all of them.">If it beats</span></th>' +
+      '<th class="num"><span data-gloss="The odds times how far those finishes clear ' + barName +
+        ', at your gold per 1%. Never negative: a bracelet you would not wear is worth nothing, not a debt.">Worth</span></th>' +
+      "</tr></thead><tbody>";
+
+    for (i = 0; i < res.maskEV.length; i++) {
+      var m = res.maskEV[i], o = rows[i], mk = "";
+      if (i === 0) mk += '<b class="av-mk" data-gloss="The solver&#39;s pick: the highest expected finish of every legal mask.">pick</b> ';
+      if (i === best && best !== 0) mk += '<b class="av-mk odds" data-gloss="The best odds of clearing the bar, which is not always the mask with the highest average.">odds</b> ';
+      h += "<tr" + (i === 0 ? ' class="rec"' : "") + "><td>" + mk + lockCell(m, lines, profile) +
+        '</td><td class="num">' + fx(pct(m.ev), 2) + "%</td>" +
+        (o
+          ? '<td class="num">' + oddsCell(o.p) + '</td><td class="num">' + (o.p > 0 ? fx(o.mean, 2) + "%" : "—") +
+            '</td><td class="num">' + (o.p > 0 ? gold(o.gold) : "0") + "</td>"
+          // The model attaches a distribution to every mask it returns. No cdf
+          // means the page is running an older model/bracelet.js than the one on
+          // disk — say so rather than draw three dashes and let it pass.
+          : '<td class="num" colspan="3">no distribution</td>') +
+        "</tr>";
+    }
+    h += "</tbody></table></div>";
+
+    if (best !== 0 && rows[best] && rows[0]) {
+      h += '<p class="note">Best odds and best average are different masks here: the <b>odds</b> row clears ' +
+        barName + " more often, the <b>pick</b> row has the higher average finish.</p>";
+    }
+    if (res.maskCount > res.maskEV.length) {
+      var rest = res.maskCount - res.maskEV.length;
+      h += '<p class="note">' + rest + (rest === 1 ? " weaker mask" : " weaker masks") + " not shown.</p>";
+    }
+    return h;
+  }
+
+  /**
+   * Hang the card under the bracelet panel, inside the left column.
+   *
+   * LAST child, re-taken every paint. mountBraceletPanel appends the panel into
+   * this host whenever the Advisor claims it back, which would otherwise leave
+   * the table sitting above the editor it describes.
+   */
+  var locksCard = null;
+  function renderLocksCard() {
+    var host = $("av-brhost");
+    if (!host) return;
+    var html = locksTableHtml();
+    if (!html) {
+      if (locksCard && locksCard.parentNode) locksCard.parentNode.removeChild(locksCard);
+      return;
+    }
+    if (!locksCard) {
+      locksCard = document.createElement("div");
+      locksCard.className = "panel av-lk";
+      locksCard.id = "av-lockvalue";
+    }
+    locksCard.innerHTML = html;
+    if (host.lastElementChild !== locksCard) host.appendChild(locksCard);
+  }
+
+  // ------------------------------------------------------------------
+  // the shared panel's combat-trait rows
+  //
+  // The rows are app.js's markup and their layout is app.js's stylesheet. What
+  // is added from here is the per-line WORTH chip: what that one trait line is
+  // worth on the character being scored, beside the box you type it into
+  // instead of three panels down in the breakdown. It is hung on the row rather
+  // than built into it because this file does not write app.js's markup.
+  //
+  // app.js rewrites #bc-traits wholesale on a toggle and on focusout, so the
+  // chips are re-hung by a MutationObserver on that box rather than by guessing
+  // when. The observer watches that box's own children only, so hanging a chip
+  // INSIDE a row cannot retrigger it. Typing does not redraw the row — app.js
+  // only clamps the state — so the live value comes off an input listener too.
+  // ------------------------------------------------------------------
+
+  var traitObs = null;
+
+  function paintTraitChip(chip, k) {
+    var tv = traitValues();
+    if (!tv[k]) {
+      chip.className = "bc-trw off";
+      chip.textContent = "—";
+      chip.setAttribute("data-gloss", "Switched off, so this line adds nothing to any score on the page.");
+      return;
+    }
+    var one = {};
+    one[k] = tv[k];
+    var d = B.traitDamage(one, buildProfile());
+    chip.className = "bc-trw";
+    chip.textContent = signPct(pct(d));
+    chip.setAttribute("data-gloss", tv[k] + " points of " + ((P.TRAIT_LABELS && P.TRAIT_LABELS[k]) || k) +
+      " is worth " + signPct(pct(d)) + " on the character being scored. It never rerolls, so every score on the page carries it.");
+  }
+
+  function decorateTraits() {
+    var box = $("bc-traits");
+    if (!box) return;
+    var rows = box.getElementsByClassName("bc-trrow"), i, inp, k, chip;
+    for (i = 0; i < rows.length; i++) {
+      inp = rows[i].querySelector("input[data-tr]");
+      k = inp && inp.getAttribute("data-tr");
+      if (!k) continue;
+      chip = rows[i].querySelector(".bc-trw");
+      if (!chip) { chip = document.createElement("span"); rows[i].appendChild(chip); }
+      paintTraitChip(chip, k);
+    }
+    if (!traitObs && window.MutationObserver) {
+      traitObs = new MutationObserver(function () { decorateTraits(); });
+      traitObs.observe(box, { childList: true });
+    }
+  }
+
+  // The value while it is being typed. app.js's own listener is on document and
+  // was registered first (it is an eager script), so the state is already
+  // clamped by the time this runs.
+  document.addEventListener("input", function (e) {
+    var t = e.target, k = t && t.getAttribute && t.getAttribute("data-tr");
+    if (!k || !t.parentNode || !t.parentNode.querySelector) return;
+    var chip = t.parentNode.querySelector(".bc-trw");
+    if (chip) paintTraitChip(chip, k);
+  });
+
   // ---- the cut flow ----
 
   function cutLocks(res, lines, profile) {
@@ -1125,6 +1420,16 @@
       "what the bracelet is worth after you lock exactly those slots and then play every remaining roll the way " +
       "it would play them. The <b>vs best</b> column prices the gap against the top mask at your gold rate.</p>" +
 
+      "<p><b>Every lock carries its own distribution.</b> The table beside the bracelet reads one curve per mask: " +
+      "where the bracelet finishes with exactly those slots locked for the NEXT roll and every roll after it played " +
+      "the way the solver would. <b>Beats</b> is how much of that curve sits above your baseline &mdash; above the " +
+      "bracelet you hold, when no baseline is set &mdash; and <b>if it beats</b> averages only the finishes that do. " +
+      "The highest average is not always the best odds: the average is paid by a long tail the odds are not, and " +
+      "when they part the table marks both rows. <b>Worth</b> is the same formula as the card above, per mask: " +
+      "odds &times; how far those finishes clear the bar &times; your gold per 1%. Each curve is carried at about " +
+      "160 rungs, so where one heavy outcome straddles the bar the odds are read across it rather than counted " +
+      "exactly.</p>" +
+
       "<p><b>The verdict never compares today&rsquo;s scores.</b> It compares <b>continuation values</b> &mdash; " +
       "<code>V(s, n)</code>, what a set is worth with n rolls still to come, solved backwards from the last roll. " +
       "A weaker set can genuinely be worth more, because the families it holds are out of the pool and the next " +
@@ -1159,6 +1464,10 @@
     if (!body) return;
     if (lead) lead.innerHTML = leadHtml();
     body.innerHTML = bodyHtml() + methodHtml();
+    // The left column, which render() otherwise never touches: the bracelet
+    // panel is a live element and the locks table hangs under it.
+    renderLocksCard();
+    decorateTraits();
     if (typeof P.mountCharControls === "function") P.mountCharControls($("av-hdrctl"));
   }
 

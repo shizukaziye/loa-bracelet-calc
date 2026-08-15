@@ -147,6 +147,63 @@ for (const m of missing) console.log("  MISS  " + m.path + "  changed but still 
 for (const c of conflicts) console.log("  CONFLICT  " + c.where + " stamps " + c.path + " at v" + c.v +
   " while index.html says v" + c.pageV);
 
+// ---- rule 4: misses already COMMITTED but not yet pushed --------------------
+// The rules above diff the worktree against HEAD, so a commit that changed a
+// script without its bump becomes invisible the moment it lands — which is
+// exactly how model/bracelet.js shipped commit ea56a91 at a stale v11 and was
+// only caught by an agent watching the worker return the old shape. When an
+// upstream exists and HEAD is ahead of it, the same check runs again with the
+// COMMITTED tree as "now" and the upstream as the ref.
+let upstream = null;
+try { upstream = git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]).trim(); } catch (e) {}
+if (upstream) {
+  let ahead = 0;
+  try { ahead = Number(git(["rev-list", "--count", upstream + "..HEAD"]).trim()); } catch (e) {}
+  if (ahead > 0) {
+    let upIndex = null, headIndex = null, headWorkerRefs = new Map(), upWorkerRefs = new Map();
+    try { upIndex = versions(git(["show", upstream + ":index.html"])); } catch (e) {}
+    try { headIndex = versions(git(["show", "HEAD:index.html"])); } catch (e) {}
+    // Worker-side stamps: collect from every committed root script at both ends.
+    let headTree = [];
+    try { headTree = git(["ls-tree", "--name-only", "HEAD"]).split("\n").filter(f => f.endsWith(".js")); } catch (e) {}
+    for (const src of headTree) {
+      try {
+        for (const [path, v] of versions(git(["show", "HEAD:" + src]))) {
+          if (path !== src) headWorkerRefs.set(src + "→" + path, v);
+        }
+      } catch (e) {}
+      try {
+        for (const [path, v] of versions(git(["show", upstream + ":" + src]))) {
+          if (path !== src) upWorkerRefs.set(src + "→" + path, v);
+        }
+      } catch (e) {}
+    }
+    const committedChanged = new Set(
+      git(["diff", upstream, "HEAD", "--name-only"]).split("\n").map(x => x.trim()).filter(Boolean)
+    );
+    if (upIndex && headIndex) {
+      for (const [path, v] of headIndex) {
+        if (!committedChanged.has(path)) continue;
+        const old = upIndex.get(path);
+        if (old !== undefined && old === v) {
+          missing.push({ path: path, v: v, where: "index.html, committed vs " + upstream });
+          console.log("  MISS  " + path + "  committed change still v" + v + "  [vs " + upstream + "]");
+        }
+      }
+      for (const [key, v] of headWorkerRefs) {
+        const path = key.split("→")[1], src = key.split("→")[0];
+        if (headIndex.has(path)) continue;                 // covered by the index pass
+        if (!committedChanged.has(path)) continue;
+        const old = upWorkerRefs.get(key);
+        if (old !== undefined && old === v) {
+          missing.push({ path: path, v: v, where: src + ", committed vs " + upstream });
+          console.log("  MISS  " + path + "  committed change still v" + v + "  [" + src + " vs " + upstream + "]");
+        }
+      }
+    }
+  }
+}
+
 if (!missing.length && !conflicts.length) {
   console.log("\nevery stamped reference is fresh and consistent — safe to deploy");
   process.exit(0);
