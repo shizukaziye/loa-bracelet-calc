@@ -74,14 +74,18 @@
   // band whose min a percentage clears is the band it belongs to.
   // S+ starts just past 100 because 100 is the ANCHOR — a reachable good bracelet
   // (three best families at Epic, traits at 110), not a maximum. Clearing it is
-  // the whole meaning of S+. Everything below is a flat five-point step.
+  // the whole meaning of S+. Everything below is a flat five-point step — all
+  // the way down since 2026-08-14, when F+ and F moved up from 20 and 10: seven
+  // rolls of even careless play almost never finish under 20, so the old bottom
+  // three bands held ~3.5% between them — letters that existed for nobody. At
+  // 25 / 20 they hold real brackets (2.75 / 3.5 / 8.4%).
   var LADDER = [
     ["S+", 100.1], ["S", 95], ["S-", 90],
     ["A+", 85], ["A", 80], ["A-", 75],
     ["B+", 70], ["B", 65], ["B-", 60],
     ["C+", 55], ["C", 50], ["C-", 45],
     ["D+", 40], ["D", 35], ["D-", 30],
-    ["F+", 20], ["F", 10], ["F-", -Infinity]
+    ["F+", 25], ["F", 20], ["F-", -Infinity]
   ];
 
   /**

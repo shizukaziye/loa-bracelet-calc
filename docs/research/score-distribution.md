@@ -140,11 +140,11 @@ below, from C- all the way to S+:
 | B | 65 | 1 in 11 | F | 10 | 1 in 1.00 |
 | B- | 60 | 1 in 6.5 | F- | — | — |
 
-**One defect, at the bottom.** F, F+ and F- hold 3.5% between them, because seven
-rolls of optimal play essentially guarantee a mediocre bracelet rather than a bad
-one. Moving **F to 20 and F+ to 25** gives those three bands 2.75 / 3.5 / 8.4%
-and costs nothing else. That is the only change worth making, and it is Shizu's
-to make.
+**One defect, at the bottom — since fixed.** F, F+ and F- held 3.5% between
+them, because seven rolls of optimal play essentially guarantee a mediocre
+bracelet rather than a bad one. **F moved to 20 and F+ to 25 on 2026-08-14**
+(decision delegated by Shizu), giving those three bands 2.75 / 3.5 / 8.4% and a
+flat five-point step the whole way down.
 
 ### The support ladder is matched, not shared
 

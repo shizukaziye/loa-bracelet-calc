@@ -684,7 +684,7 @@
         return D[i + 1].min + t * (D[i].min - D[i + 1].min);
       }
     }
-    // Below the bottom finite cut — support F opens at 0, the DPS F at 10.
+    // Below the bottom finite cut — support F opens at 0, the DPS F at 20.
     // braceletScore clamps at 0, so this is only ever reached by a flat zero.
     var lo = S[n - 1].min;
     return lo > 0 ? D[n - 1].min * (s / lo) : D[n - 1].min;

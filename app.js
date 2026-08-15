@@ -174,7 +174,6 @@
   // There is no default-vs-character toggle any more (Shizu, 2026-08-12). The
   // deck starts at the canonical defaults and holds whatever the user has made
   // of them; P.profile() is the single answer, and every tab asks it.
-  function hasCharacter() { return !!(S.char && S.char.name); }
   function buildProfile() { return P.profile(); }
   function famGrades(grade) { return P.famGrades(grade); }
   function letterOf(val, grade) { return P.letterOf(val, grade); }
@@ -276,7 +275,6 @@
   // Fixed rows keep the full family list, so they never carry a junk sentinel.
   function fixedLines() { return linesOf(S.fixedRows, S.grade); }
   function grantedLines() { return linesOf(S.rows, S.grade, junkReps()); }
-  function isUnrolled() { return grantedLines().length < S.slots; }
   function isPartial() { var n = grantedLines().length; return n > 0 && n < S.slots; }
 
   // ------------------------------------------------------------------
