@@ -135,10 +135,22 @@
     this.mode = "unknown";
   }
 
+  /**
+   * The shared data file rides at THE PAGE'S OWN STAMP, read off its script tag,
+   * so the OCR worker can never hold a staler copy of the family tables than the
+   * page is using. Only the ocr/* stack versions on this module's VERSION. The
+   * fallback matters solely in tests, where no script tag exists.
+   */
+  function pageStamp(path) {
+    var tag = document.querySelector('script[src^="' + path + '"]');
+    var m = tag && /[?&]v=(\d+)/.exec(tag.getAttribute("src") || "");
+    return m ? m[1] : null;
+  }
+
   Parser.prototype.urls = function () {
     var self = this;
-    function abs(p) { return new URL(p + "?v=" + self.v, location.href).href; }
-    return [TESSERACT_URL, abs(self.dataUrl)]
+    function abs(p, v) { return new URL(p + "?v=" + (v || self.v), location.href).href; }
+    return [TESSERACT_URL, abs(self.dataUrl, pageStamp(self.dataUrl))]
       .concat(OCR_FILES.map(function (p) { return abs(self.base + p); }));
   };
 
@@ -195,7 +207,7 @@
     if (this.inlineLoaded) return Promise.resolve();
     var self = this;
     var list = [TESSERACT_URL];
-    if (!root.BraceletData) list.push(self.dataUrl + "?v=" + self.v);
+    if (!root.BraceletData) list.push(self.dataUrl + "?v=" + (pageStamp(self.dataUrl) || self.v));
     list = list.concat(OCR_FILES.map(function (p) { return self.base + p + "?v=" + self.v; }));
     var chain = Promise.resolve();
     list.forEach(function (src) {

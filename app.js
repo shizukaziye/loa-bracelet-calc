@@ -643,7 +643,7 @@
   function ensureWorker() {
     if (worker) return worker;
     try {
-      worker = new Worker("solver-worker.js?v=6");
+      worker = new Worker("solver-worker.js?v=7");
     } catch (e) {
       worker = null;
       return null;

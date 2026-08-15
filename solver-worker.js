@@ -25,10 +25,16 @@
 "use strict";
 
 /* global importScripts, Bracelet */
+// THESE STAMPS MUST MATCH index.html's for the same files, or a returning
+// browser runs one model on the page and an older one in here — the Advisor's
+// verdicts quietly disagreeing with the Calculator's headline. It has happened:
+// this worker sat two model versions behind the page for one commit.
+// tools/check-cache-versions.mjs now cross-checks every stamped reference in
+// every root script against index.html and fails the mismatch.
 importScripts(
   "data/bracelet-data.js?v=2",
-  "data/gear-data.js?v=3",
-  "model/bracelet.js?v=6"
+  "data/gear-data.js?v=4",
+  "model/bracelet.js?v=8"
 );
 
 var lastCtx = null;
