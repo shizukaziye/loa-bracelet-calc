@@ -923,6 +923,17 @@ for i, c in enumerate(refs["solves"]):
         check("solves[%d].bestLockNull" % i, res["bestLockMask"], None, exact=True)
     for j, m in enumerate(c["maskEVTop"]):
         check("solves[%d].maskEV[%d].ev" % (i, j), r9(res["maskEV"][j]["ev"]), m["ev"])
+        if m.get("mean") is not None:
+            check("solves[%d].maskEV[%d].mean" % (i, j), r9(res["maskEV"][j]["mean"]), m["mean"])
+            check_true("solves[%d].maskEV[%d].evEqualsMean" % (i, j),
+                       abs(res["maskEV"][j]["ev"] - res["maskEV"][j]["mean"]) < 1e-9)
+            check("solves[%d].maskEV[%d].cdfLen" % (i, j),
+                  len(res["maskEV"][j]["cdf"]), len(m["cdf"]), exact=True)
+            for qi, cc in enumerate(m["cdf"]):
+                if qi % 20 != 0 and qi != len(m["cdf"]) - 1:
+                    continue
+                check("solves[%d].maskEV[%d].cdf[%d]" % (i, j, qi),
+                      r9(res["maskEV"][j]["cdf"][qi]["cum"]), cc["cum"])
         check("solves[%d].maskEV[%d].keys" % (i, j), "|".join(res["maskEV"][j]["lockedKeys"]),
               "|".join(m["lockedKeys"]), exact=True)
     cdf = res["finalScore"]["cdf"]

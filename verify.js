@@ -1034,6 +1034,19 @@ refs.solves.forEach(function (c, i) {
   c.maskEVTop.forEach(function (m, j) {
     check("solves[" + i + "].maskEV[" + j + "].ev", r9(res.maskEV[j].ev), m.ev);
     check("solves[" + i + "].maskEV[" + j + "].keys", res.maskEV[j].lockedKeys.join("|"), m.lockedKeys.join("|"), true);
+    if (m.mean !== null && m.mean !== undefined) {
+      check("solves[" + i + "].maskEV[" + j + "].mean", r9(res.maskEV[j].mean), m.mean);
+      // ev and mean are computed by different machinery (a value query against a
+      // forced forward pass); agreeing is the check that the forced pass is right.
+      checkTrue("solves[" + i + "].maskEV[" + j + "].evEqualsMean",
+        Math.abs(res.maskEV[j].ev - res.maskEV[j].mean) < 1e-9);
+      check("solves[" + i + "].maskEV[" + j + "].cdfLen", res.maskEV[j].cdf.length, m.cdf.length, true);
+      m.cdf.forEach(function (cc, q) {
+        if (q % 20 !== 0 && q !== m.cdf.length - 1) return;   // every 20th rung + the last
+        check("solves[" + i + "].maskEV[" + j + "].cdf[" + q + "]",
+          r9(res.maskEV[j].cdf[q].cum), cc.cum);
+      });
+    }
   });
   // P(final >= x): everything at or above the floor, nothing above the ceiling,
   // and non-increasing in between.

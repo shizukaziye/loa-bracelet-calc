@@ -1281,9 +1281,18 @@ def solve(opts):
             mask_ev.append({
                 "lockedSlots": list(mk["slots"]),
                 "lockedKeys": [state_atoms[i]["key"] for i in mk["atomIdx"]],
+                "maskKey": mk["key"],
                 "ev": _query_f(root_fs[mk["key"]], root_prev[start_code]),
             })
         mask_ev.sort(key=lambda m: -m["ev"])
+        # The top masks carry their own outcome distribution - see the JS twin.
+        # The mean comes off the FULL distribution (a thinned mean drifts ~1e-3)
+        # and must agree with ev to float noise, which the battery pins.
+        for j in range(min(len(mask_ev), 12)):
+            mdist = _mask_distribution(start_code, R, layers, policies, completions,
+                                       score, mask_ev[j]["maskKey"])
+            mask_ev[j]["cdf"] = _dist_to_cdf(mdist, 160)
+            mask_ev[j]["mean"] = sum(k * v for k, v in sorted(mdist.items()))
         expected_final = layers[R][start_code]
         ev_by_rolls_left = [layers[r][start_code] for r in range(R + 1)]
         cur = score[start_code]
@@ -1351,6 +1360,49 @@ def solve(opts):
         "stats": {"states": len(codes), "atoms": len(atoms), "stateAtoms": len(state_atoms),
                   "lockMasks": len(completions), "rolls": R},
     }
+
+
+def _dist_to_cdf(final_dist, max_rungs=160):
+    """A finalDist map -> sorted, THINNED cdf. Mirrors the JS: thinning merges a
+    dropped rung's probability into the next kept rung, never loses mass, and
+    both mirrors thin identically so refs compare rung for rung."""
+    keys = sorted(final_dist.keys())
+    full = []
+    acc = 0.0
+    for k in keys:
+        acc += final_dist[k]
+        full.append({"score": k, "p": final_dist[k], "cum": acc})
+    if len(full) <= max_rungs:
+        return full
+    out = []
+    step = len(full) / max_rungs
+    next_idx = 0.0
+    p_acc = 0.0
+    for i, row in enumerate(full):
+        p_acc += row["p"]
+        if i >= next_idx or i == len(full) - 1:
+            out.append({"score": row["score"], "p": p_acc, "cum": row["cum"]})
+            p_acc = 0.0
+            next_idx += step
+    return out
+
+
+def _mask_distribution(start_code, R, layers, policies, completions, score, mask_key):
+    """Final-score distribution with the FIRST roll forced onto one lock mask and
+    optimal play after - the JS twin explains why. Forcing the optimal mask
+    reproduces finalScore exactly."""
+    prev = layers[R - 1]
+    F = _build_f(completions[mask_key], prev)
+    v = prev[start_code]
+    mu = {}
+    stay = F["cumP"][bisect.bisect_right(F["vals"], v)]
+    if stay > 0:
+        mu[start_code] = stay
+    for t in range(F["n"]):
+        if F["vals"][t] > v and F["probs"][t] > 0:
+            cid = F["ids"][t]
+            mu[cid] = mu.get(cid, 0.0) + F["probs"][t]
+    return _forward_distribution(start_code, R - 1, layers, policies, completions, score, mu)
 
 
 def _forward_distribution(start_code, R, layers, policies, completions, score, seed_mu=None):

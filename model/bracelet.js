@@ -1741,11 +1741,26 @@
         var lockedKeys = [];
         for (var z = 0; z < mk.atomIdx.length; z++) lockedKeys.push(stateAtoms[mk.atomIdx[z]].key);
         maskEV.push({
-          lockedSlots: mk.slots.slice(), lockedKeys: lockedKeys,
+          lockedSlots: mk.slots.slice(), lockedKeys: lockedKeys, maskKey: mk.key,
           ev: queryF(rootFs[mk.key], rootPrev[startCode])
         });
       }
       maskEV.sort(function (x, y) { return y.ev - x.ev; });
+      // The top masks carry their own outcome distribution — the Advisor's
+      // locks-vs-baseline table reads P(>= baseline) and E[| >= baseline] off
+      // these. Twelve is the same trim the wire format already uses; the mean is
+      // kept beside ev because the two are computed by different machinery and
+      // agreeing to 1e-9 is a live cross-check the battery pins.
+      for (j = 0; j < maskEV.length && j < 12; j++) {
+        var mdist = maskDistribution(startCode, R, layers, policies, completions, score, maskEV[j].maskKey);
+        // The mean comes off the FULL distribution, never the thinned cdf — a
+        // merged rung keeps its probability but takes the kept rung's score, so
+        // a thinned mean drifts ~1e-3 while the true one matches ev to 1e-9.
+        var mm = 0, mk2;
+        for (mk2 in mdist) if (Object.prototype.hasOwnProperty.call(mdist, mk2)) mm += Number(mk2) * mdist[mk2];
+        maskEV[j].cdf = distToCdf(mdist, 160);
+        maskEV[j].mean = mm;
+      }
       expectedFinal = layers[R][startCode];
       for (r = 0; r <= R; r++) evByRollsLeft.push(layers[r][startCode]);
       cur = score[startCode];
@@ -1871,6 +1886,34 @@
    * sorted by continuation value, and a state keeps its own set exactly when
    * V(T) ≤ V(S). One sweep replaces a dense |states|² transition matrix.
    */
+  /**
+   * A finalDist map -> a sorted, THINNED cdf [{score, p, cum}]. The full support
+   * can run to thousands of rungs; a per-mask cdf exists so the client can ask
+   * P(>= baseline) and E[score | >= baseline], and ~160 rungs answer both to
+   * within a hundredth of a point. Thinning keeps every rung's cum exact (it
+   * merges probability into the next kept rung, never drops it), and both
+   * mirrors thin identically so the parity battery can compare byte for byte.
+   */
+  function distToCdf(finalDist, maxRungs) {
+    var keys = [], k;
+    for (k in finalDist) if (Object.prototype.hasOwnProperty.call(finalDist, k)) keys.push(Number(k));
+    keys.sort(function (x, y) { return x - y; });
+    var full = [], acc = 0, i;
+    for (i = 0; i < keys.length; i++) { acc += finalDist[keys[i]]; full.push({ score: keys[i], p: finalDist[keys[i]], cum: acc }); }
+    var max = maxRungs || 160;
+    if (full.length <= max) return full;
+    var out = [], step = full.length / max, nextIdx = 0, pAcc = 0;
+    for (i = 0; i < full.length; i++) {
+      pAcc += full[i].p;
+      if (i >= nextIdx || i === full.length - 1) {
+        out.push({ score: full[i].score, p: pAcc, cum: full[i].cum });
+        pAcc = 0;
+        nextIdx += step;
+      }
+    }
+    return out;
+  }
+
   function forwardDistribution(startCode, R, layers, policies, completions, score, seedMu) {
     var finalDist = {}, mu = {};
     if (seedMu) { for (var s0 in seedMu) if (Object.prototype.hasOwnProperty.call(seedMu, s0)) mu[s0] = seedMu[s0]; }
@@ -1918,6 +1961,35 @@
     }
     for (var c2 in mu) if (Object.prototype.hasOwnProperty.call(mu, c2)) addFinal(Number(c2), mu[c2]);
     return finalDist;
+  }
+
+  /**
+   * The final-score distribution when the FIRST roll is forced onto one lock
+   * mask and every later roll is played optimally. This is what prices a lock
+   * the way a player weighs it: "if I lock these, where do I land?" — the EV
+   * alone (maskEV.ev) says nothing about the odds of clearing a baseline, and
+   * the Advisor's whole point is that comparison.
+   *
+   * The first step is the groups logic from forwardDistribution for a single
+   * member: mass stays on the current set when the drawn set's continuation
+   * value does not beat it (ties stay, same as the DP), else moves to the draw.
+   * From there the standard optimal-play forward pass finishes the job. Forcing
+   * the OPTIMAL mask therefore reproduces finalScore exactly — a verify check.
+   */
+  function maskDistribution(startCode, R, layers, policies, completions, score, maskKey) {
+    var prev = layers[R - 1];
+    var F = buildF(completions[maskKey], prev);
+    var v = prev[startCode];
+    var mu = {};
+    var stay = F.cumP[upperBound(F.vals, v)];
+    if (stay > 0) mu[startCode] = stay;
+    for (var t = 0; t < F.n; t++) {
+      if (F.vals[t] > v && F.probs[t] > 0) {
+        var id = F.ids[t];
+        mu[id] = (mu[id] || 0) + F.probs[t];
+      }
+    }
+    return forwardDistribution(startCode, R - 1, layers, policies, completions, score, mu);
   }
 
   function matchAtom(atoms, line, grade) {

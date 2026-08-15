@@ -332,7 +332,15 @@ var solveCases = [
       p90: r9(res.finalScore.quantiles.p90) },
     evByRollsLeft: res.evByRollsLeft.map(r9),
     bestLockMask: res.bestLockMask ? { lockedKeys: res.bestLockMask.lockedKeys, ev: r9(res.bestLockMask.ev) } : null,
-    maskEVTop: res.maskEV.slice(0, 3).map(function (m) { return { lockedKeys: m.lockedKeys, ev: r9(m.ev) }; }),
+    maskEVTop: res.maskEV.slice(0, 3).map(function (m) {
+      return {
+        lockedKeys: m.lockedKeys, ev: r9(m.ev),
+        // The per-mask distribution rides in full (thinned to 160 in the model),
+        // so the Python mirror is held to it rung for rung.
+        mean: m.mean === undefined ? null : r9(m.mean),
+        cdf: (m.cdf || []).map(function (c) { return { score: r9(c.score), p: r9(c.p), cum: r9(c.cum) }; })
+      };
+    }),
     states: res.stats.states, stateAtoms: res.stats.stateAtoms, lockMasks: res.stats.lockMasks
   };
 });
