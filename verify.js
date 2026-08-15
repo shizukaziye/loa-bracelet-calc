@@ -319,8 +319,12 @@ refs.traits.forEach(function (c, i) {
   check("analytic.trait.additive", r9(B.traitDamage({ crit: 120, spec: 120 }, P)),
     r9(B.traitDamage({ crit: 120 }, P) + B.traitDamage({ spec: 120 }, P)));
   // A class already at 100% crit gains nothing from a crit trait line.
-  check("analytic.trait.critCapped",
-    r9(B.traitDamage({ crit: 120 }, B.normalizeProfile({ skills: [{ share: 1, critRate: 1, critDamage: 2.8 }] }))), 0);
+  // At 100% base crit a crit trait pays its SUBSTITUTION value, not zero — the
+  // uncap ruling (Shizu, 2026-08-14): overflow crit rate keeps the (cd−1) slope.
+  check("analytic.trait.critUncappedAtBase100",
+    r9(B.traitDamage({ crit: 120 },
+      B.normalizeProfile({ skills: [{ share: 1, critRate: 1, critDamage: 2.8 }] }))),
+    r9(D((1 + (1 + 120 * (25 / 699) / 100) * 1.8) / (1 + 1.0 * 1.8))));
   check("analytic.trait.none", r9(B.traitDamage({}, P)), 0);
   // lineDamage() scores a trait line ZERO — and that is the whole point of the
   // split, not an omission. setDamage() is the EFFECT-line scorer, so `linesPct`
@@ -427,37 +431,42 @@ refs.traitAtoms.forEach(function (c) {
   var f33h = { cat: "special", family: 33, tier: "high" };     // weapon power +9000
   var f23h = { cat: "special", family: 23, tier: "high" };     // outgoing damage +3%
 
-  // ---- crit, one cap over the whole bracelet ----
-  // The audited case: two crit lines and a 120-point Crit trait on a character
-  // already at 90% crit. 5 + 5 + 4.29 = 14.29pp of crit rate, of which the cap
-  // eats 4.29. Priced line by line it comes to 14.032; it is worth 11.043.
+  // ---- crit, pooled UNCAPPED over the whole bracelet ----
+  // Shizu, 2026-08-14: overflow crit is not wasted in practice — a player past
+  // the cap rebalances crit out of the rest of the build, so overflow pays its
+  // substitution value, which the linear factor gives exactly. The pool still
+  // matters: cross-terms price jointly, so the pooled answer sits BELOW the old
+  // per-line double count and ABOVE the hard-cap floor.
   var apart = B.lineDamage(f11h, "ancient", P) + B.lineDamage(f31h, "ancient", P) +
     B.traitDamage({ crit: 120, spec: 120 }, P);
   var together = B.jointScore([f11h, f31h], { crit: 120, spec: 120 }, "ancient", P);
-  check("analytic.joint.critCap.apart", r9(apart), 14.03181578);
-  check("analytic.joint.critCap.together", r9(together), 11.042771190);
-  // …and the joint answer is exactly one capped crit factor plus the Spec weight.
-  check("analytic.joint.critCap.closedForm", r9(together),
-    r9(D((1 + 1.0 * (2.8 * 1.015 - 1)) / (1 + 0.9 * 1.8)) + 120 * 0.024245));
-  checkTrue("analytic.joint.critCap.overstatement", apart / together - 1 > 0.27);
+  check("analytic.joint.crit.apart", r9(apart), 14.03181578);
+  // …and the joint answer is exactly one UNCAPPED crit factor plus the Spec
+  // weight: cr = 0.90 + 0.05 + 0.05 + 120·(25/699)/100 = 1.042918…
+  var crPool = 0.9 + 0.05 + 0.05 + 120 * (25 / 699) / 100;
+  check("analytic.joint.crit.closedForm", r9(together),
+    r9(D((1 + crPool * (2.8 * 1.015 - 1)) / (1 + 0.9 * 1.8)) + 120 * 0.024245));
+  // The pool orders strictly: hard cap < uncapped pool < per-line double count.
+  var capped = D((1 + 1.0 * (2.8 * 1.015 - 1)) / (1 + 0.9 * 1.8)) + 120 * 0.024245;
+  checkTrue("analytic.joint.crit.betweenCapAndDoubleCount",
+    together > capped + 1 && together < apart);
 
-  // A SATURATED set gains nothing from more crit rate. Family 31 high is worth
-  // 3.377 on its own and about nothing once the bracelet is already at the cap.
+  // Other buckets are untouched by any of this: family 17's crit-resist shred
+  // is a party multiplier, not a crit-rate source.
   var satur = [f11h, f31h];
   var satBase = B.jointScore(satur, { crit: 120 }, "ancient", P);
   var satPlus = B.jointScore(satur.concat([{ cat: "special", family: 17, tier: "high" }]),
     { crit: 120 }, "ancient", P);
-  // Family 17's crit-resist shred is a party multiplier, not a crit-rate source,
-  // so it still pays at the cap — the cap only eats the crit-RATE channel.
   checkTrue("analytic.joint.saturated.otherBucketsStillPay", satPlus > satBase + 1);
-  // The marginal worth of one more crit-rate line at 98.93% crit, which is what
-  // the advisor was quoting at 3.377: the cap leaves it 1.07pp, worth 0.690.
+  // The marginal crit line at 98.93% committed crit — the case that used to
+  // collapse to 0.69 under the hard cap — now pays its substitution value: the
+  // same (cd−1) slope it carries below the cap, ~3.35 for family 31 high.
   var atCap = B.normalizeProfile({ skills: [{ share: 1, critRate: 0.9893, critDamage: 2.8 }] });
   var marginal = B.jointScore([f31h], {}, "ancient", atCap);
-  check("analytic.joint.marginalCritAtCap", r9(marginal),
-    r9(D((1 + 1.0 * 1.8) / (1 + 0.9893 * 1.8))));
-  checkTrue("analytic.joint.marginalCritIsFarUnderStandalone",
-    B.lineDamage(f31h, "ancient", P) / marginal > 4.8);
+  check("analytic.joint.marginalCritUncapped", r9(marginal),
+    r9(D((1 + 1.0393 * 1.8) / (1 + 0.9893 * 1.8))));
+  checkTrue("analytic.joint.marginalCritStaysNearStandalone",
+    B.lineDamage(f31h, "ancient", P) / marginal < 1.1);
   // Crit DAMAGE has no cap, so two crit lines of different kinds do not fight.
   check("analytic.joint.critDamageIsNotCapped",
     r9(B.setDamage([f31h, f32h], "ancient", P)),

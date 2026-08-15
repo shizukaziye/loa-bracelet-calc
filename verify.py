@@ -312,9 +312,12 @@ check("analytic.trait.emptyOverrideKeepsDefaults",
       r9(B.trait_damage({"spec": 120}, B.normalize_profile({"traitWeights": {}}))), 2.9094)
 check("analytic.trait.additive", r9(B.trait_damage({"crit": 120, "spec": 120}, P)),
       r9(B.trait_damage({"crit": 120}, P) + B.trait_damage({"spec": 120}, P)))
-check("analytic.trait.critCapped",
+# At 100% base crit a crit trait pays its SUBSTITUTION value, not zero — the
+# uncap ruling (Shizu, 2026-08-14): overflow crit rate keeps the (cd-1) slope.
+check("analytic.trait.critUncappedAtBase100",
       r9(B.trait_damage({"crit": 120},
-                        B.normalize_profile({"skills": [{"share": 1, "critRate": 1, "critDamage": 2.8}]}))), 0)
+                        B.normalize_profile({"skills": [{"share": 1, "critRate": 1, "critDamage": 2.8}]}))),
+      r9(_D((1 + (1 + 120 * (25 / 699) / 100) * 1.8) / (1 + 1.0 * 1.8))))
 check("analytic.trait.none", r9(B.trait_damage({}, P)), 0)
 # line_damage() scores a trait line ZERO by design: set_damage() is the EFFECT-line
 # scorer, so lines_pct keeps meaning what bible's "Bracelet Effects +X%" means, and
@@ -399,31 +402,34 @@ _f33h = {"cat": "special", "family": 33, "tier": "high"}     # weapon power +900
 _f23h = {"cat": "special", "family": 23, "tier": "high"}     # outgoing damage +3%
 _f25h = {"cat": "special", "family": 25, "tier": "high"}     # back attack +3.5%
 
-# The audited case: two crit lines and a 120-point Crit trait on a character
-# already at 90% crit. 5 + 5 + 4.29 = 14.29pp of crit rate, of which the cap eats
-# 4.29. Priced line by line it comes to 14.032; it is worth 11.043.
+# Pooled UNCAPPED — the substitution ruling (Shizu, 2026-08-14). Cross-terms
+# still price jointly, so the pooled answer sits BELOW the per-line double count
+# and ABOVE the hard-cap floor. cr pools to 0.90+0.05+0.05+120·(25/699)/100.
 _apart = (B.line_damage(_f11h, "ancient", P) + B.line_damage(_f31h, "ancient", P)
           + B.trait_damage({"crit": 120, "spec": 120}, P))
 _together = B.joint_score([_f11h, _f31h], {"crit": 120, "spec": 120}, "ancient", P)
-check("analytic.joint.critCap.apart", r9(_apart), 14.03181578)
-check("analytic.joint.critCap.together", r9(_together), 11.042771190)
-check("analytic.joint.critCap.closedForm", r9(_together),
-      r9(_D((1 + 1.0 * (2.8 * 1.015 - 1)) / (1 + 0.9 * 1.8)) + 120 * 0.024245))
-check_true("analytic.joint.critCap.overstatement", _apart / _together - 1 > 0.27)
+check("analytic.joint.crit.apart", r9(_apart), 14.03181578)
+_cr_pool = 0.9 + 0.05 + 0.05 + 120 * (25 / 699) / 100
+check("analytic.joint.crit.closedForm", r9(_together),
+      r9(_D((1 + _cr_pool * (2.8 * 1.015 - 1)) / (1 + 0.9 * 1.8)) + 120 * 0.024245))
+_capped = _D((1 + 1.0 * (2.8 * 1.015 - 1)) / (1 + 0.9 * 1.8)) + 120 * 0.024245
+check_true("analytic.joint.crit.betweenCapAndDoubleCount",
+           _capped + 1 < _together < _apart)
 
-# A SATURATED set gains nothing more from crit RATE, but the other buckets still
-# pay: family 17's crit-resist shred is a party multiplier, not a crit source.
+# Other buckets are untouched: family 17's crit-resist shred is a party
+# multiplier, not a crit-rate source.
 _sat_base = B.joint_score([_f11h, _f31h], {"crit": 120}, "ancient", P)
 _sat_plus = B.joint_score([_f11h, _f31h, {"cat": "special", "family": 17, "tier": "high"}],
                           {"crit": 120}, "ancient", P)
 check_true("analytic.joint.saturated.otherBucketsStillPay", _sat_plus > _sat_base + 1)
-# The marginal worth of one more crit-rate line at 98.93% crit, which is what the
-# advisor was quoting at 3.377: the cap leaves it 1.07pp, worth 0.690.
+# The marginal crit line at 98.93% committed — the case the hard cap collapsed
+# to 0.69 — now pays the at-cap slope: cr 0.9893 + 0.05 = 1.0393.
 _at_cap = B.normalize_profile({"skills": [{"share": 1, "critRate": 0.9893, "critDamage": 2.8}]})
 _marginal = B.joint_score([_f31h], {}, "ancient", _at_cap)
-check("analytic.joint.marginalCritAtCap", r9(_marginal), r9(_D((1 + 1.0 * 1.8) / (1 + 0.9893 * 1.8))))
-check_true("analytic.joint.marginalCritIsFarUnderStandalone",
-           B.line_damage(_f31h, "ancient", P) / _marginal > 4.8)
+check("analytic.joint.marginalCritUncapped", r9(_marginal),
+      r9(_D((1 + 1.0393 * 1.8) / (1 + 0.9893 * 1.8))))
+check_true("analytic.joint.marginalCritStaysNearStandalone",
+           B.line_damage(_f31h, "ancient", P) / _marginal < 1.1)
 # Crit DAMAGE has no cap, so two crit lines of different kinds do not fight.
 check("analytic.joint.critDamageIsNotCapped", r9(B.set_damage([_f31h, _f32h], "ancient", P)),
       r9(_D((1 + 0.95 * (2.9 - 1)) / (1 + 0.9 * 1.8))))

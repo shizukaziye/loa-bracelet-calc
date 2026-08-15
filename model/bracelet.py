@@ -22,7 +22,7 @@ import gear_data as GEAR          # noqa: E402
 # Bump VERSION whenever a change here can move a stored number: the Worker stamps
 # MODEL_SIG + "@" + VERSION on every record and re-scores anything that no longer
 # matches. See bracelet.js for what each version changed.
-VERSION = "0.4.1"
+VERSION = "0.4.2"
 MODEL_SIG = "bracelet-v1"
 
 ADD_DMG_ASTROGEM_LV60 = 0.0484
@@ -257,7 +257,8 @@ def _crit_factor_of(skills, d_crit_rate, d_crit_damage):
     wsum = 0.0
     for sk in skills:
         cr = (sk.get("critRate") or 0) + (d_crit_rate or 0)
-        cr = 1 if cr > 1 else (0 if cr < 0 else cr)
+        # Floored, NOT capped - the substitution ruling (see crit_factor_full).
+        cr = 0 if cr < 0 else cr
         cd = (sk.get("critDamage") or 0) + (d_crit_damage or 0)
         tot += (sk.get("share") or 0) * (1 + cr * (cd - 1))
         wsum += (sk.get("share") or 0)
@@ -278,7 +279,9 @@ def crit_factor_full(profile, dcr, dcd, chd):
     tot = 0.0
     wsum = 0.0
     for sk in profile["skills"]:
-        cr = min(1, max(0, (sk.get("critRate") or 0) + dcr))
+        # Uncapped on purpose (Shizu, 2026-08-14) - overflow crit is credited at
+        # its substitution value, which the linear form pays exactly. See the JS twin.
+        cr = max(0, (sk.get("critRate") or 0) + dcr)
         cd = (sk.get("critDamage") or 0) + dcd
         tot += (sk.get("share") or 0) * (1 + cr * (cd * (1 + chd) - 1))
         wsum += (sk.get("share") or 0)
@@ -394,7 +397,7 @@ def component_multiplier(kind, x, profile, comp=None):
         tot = 0.0
         wsum = 0.0
         for sk in profile["skills"]:
-            cr = min(1, sk.get("critRate") or 0)
+            cr = max(0, sk.get("critRate") or 0)   # uncapped - see crit_factor_full
             cd = sk.get("critDamage") or 0
             b = 1 + cr * (cd - 1)
             n = 1 + cr * (cd * (1 + x / 100.0) - 1)

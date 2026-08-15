@@ -1951,7 +1951,7 @@
         '<div class="fld"><label data-gloss="How much of your damage this skill deals. The shares always add to exactly 100 — type one and the others move to make room. With a single skill it is locked at 100.">Share %</label>' +
         '<input id="bc-sk-share-' + i + '" type="number" step="1" min="0" max="100" data-sk="' + i + '" data-f="share" value="' + esc(s.share) + '"' +
         (one ? " disabled" : "") + "></div>" +
-        '<div class="fld"><label data-gloss="This skill\'s crit rate before any bracelet line. A crit-rate line is capped at 100%, which is why it quietly dies on a high-crit build.">Crit rate %</label>' +
+        '<div class="fld"><label data-gloss="This skill\'s crit rate before any bracelet line. Crit past 100% keeps its substitution value — the model assumes you rebalance rather than waste it.">Crit rate %</label>' +
         '<input id="bc-sk-cr-' + i + '" type="number" step="0.1" data-sk="' + i + '" data-f="cr" value="' + esc(s.cr) + '"></div>' +
         '<div class="fld"><label data-gloss="What a crit deals, as a multiple. 280% means a crit hits for 2.8 times, not 3.8.">Crit dmg %</label>' +
         '<input id="bc-sk-cd-' + i + '" type="number" step="1" data-sk="' + i + '" data-f="cd" value="' + esc(s.cd) + '"></div>' +

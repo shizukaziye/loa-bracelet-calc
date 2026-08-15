@@ -90,7 +90,9 @@ var lines = [];
 var profileVariants = [
   { label: "master on", profile: { master: true }, family: 24, tier: "high", grade: "ancient" },
   { label: "two skills", profile: { skills: [{ share: 0.6, critRate: 0.75, critDamage: 2.6 }, { share: 0.4, critRate: 1.0, critDamage: 2.9 }] }, family: 31, tier: "high", grade: "ancient" },
-  { label: "crit already capped", profile: { skills: [{ share: 1, critRate: 1.0, critDamage: 2.8 }] }, family: 31, tier: "high", grade: "ancient" },
+  // At 100% base crit a crit-rate line pays its SUBSTITUTION value, not zero —
+  // the uncap ruling (Shizu, 2026-08-14). The case stays to pin that behaviour.
+  { label: "crit at 100% base (uncapped substitution)", profile: { skills: [{ share: 1, critRate: 1.0, critDamage: 2.8 }] }, family: 31, tier: "high", grade: "ancient" },
   { label: "no flat AP", profile: { flatAP: 0 }, family: 33, tier: "high", grade: "ancient" },
   { label: "front-attack build", profile: { frontAttackShare: 0.7, backAttackShare: 0 }, family: 26, tier: "high", grade: "ancient" },
   { label: "burst only", profile: { cooldownPenaltyWeight: 1 }, family: 15, tier: "high", grade: "ancient" },
@@ -145,7 +147,7 @@ var jointCases = [
   { label: "orthogonal lines only (pooling changes nothing)",
     lines: [{ cat: "special", family: 23, tier: "high" }, { cat: "special", family: 25, tier: "high" }],
     traits: { spec: 100 }, grade: "ancient", profile: {} },
-  { label: "already at the crit cap",
+  { label: "past 100% base crit (uncapped: overflow pays substitution value)",
     lines: [{ cat: "special", family: 31, tier: "high" }, { cat: "special", family: 32, tier: "high" }],
     traits: { crit: 120 }, grade: "ancient",
     profile: { skills: [{ share: 1, critRate: 1.0, critDamage: 2.8 }] } },

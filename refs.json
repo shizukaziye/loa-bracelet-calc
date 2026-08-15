@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generated": "2026-08-15T02:59:34.051Z",
+    "generated": "2026-08-15T06:27:06.110Z",
     "modelSig": "bracelet-v1",
     "floatTolerance": 1e-8,
     "note": "Captured references for the bracelet core. Regenerate with `node tools/gen-refs.js`. Scoring is % damage in log space (D = 100*ln(multiplier)); the solver's V is the expected final score under optimal play with free rerolls."
@@ -1446,10 +1446,10 @@
       "grade": "ancient",
       "family": 31,
       "tier": "high",
-      "damage": 1.916991611
+      "damage": 3.408970602
     },
     {
-      "label": "crit already capped",
+      "label": "crit at 100% base (uncapped substitution)",
       "profile": {
         "skills": [
           {
@@ -1462,7 +1462,7 @@
       "grade": "ancient",
       "family": 31,
       "tier": "high",
-      "damage": 0
+      "damage": 3.163708494
     },
     {
       "label": "no flat AP",
@@ -1585,7 +1585,7 @@
           }
         ]
       },
-      "damage": 0
+      "damage": 2.721667842
     },
     {
       "label": "zero weights",
@@ -1643,7 +1643,7 @@
       },
       "setDamage": 8.13337119,
       "traitDamage": 5.815361107,
-      "jointScore": 11.04277119
+      "jointScore": 13.786480644
     },
     {
       "label": "the same set with no traits",
@@ -1737,7 +1737,7 @@
       "jointScore": 8.820522896
     },
     {
-      "label": "already at the crit cap",
+      "label": "past 100% base crit (uncapped: overflow pays substitution value)",
       "grade": "ancient",
       "profile": {
         "skills": [
@@ -1763,9 +1763,9 @@
       "traits": {
         "crit": 120
       },
-      "setDamage": 3.509131981,
-      "traitDamage": 0,
-      "jointScore": 3.509131981
+      "setDamage": 6.732481439,
+      "traitDamage": 2.721667842,
+      "jointScore": 9.418781785
     },
     {
       "label": "relic, a trait line among the effect lines (scores zero)",
@@ -1874,8 +1874,8 @@
     "plainCurrent": 0,
     "plainFinal": 3.314247824,
     "traitCurrent": 5.815361107,
-    "traitFinal": 8.550535264,
-    "traitValueGold": 268265.722012048,
+    "traitFinal": 8.551482215,
+    "traitValueGold": 268297.681242716,
     "states": 2669
   },
   "familyGrades": [

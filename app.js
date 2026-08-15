@@ -589,7 +589,7 @@
         return "+" + nf(scaled) + " main stat, amplified by the ×" + fx(1 + profile.msPct, 3) + " bucket.";
       case "critRate":
         cf0 = B.critFactor(profile, 0, 0); cf1 = B.critFactor(profile, x / 100, 0);
-        return "crit rate +" + x + " pp (capped at 100%): expected crit factor " + fx(cf0, 4) + " → " + fx(cf1, 4) + ".";
+        return "crit rate +" + x + " pp (uncapped — overflow pays its substitution value): expected crit factor " + fx(cf0, 4) + " → " + fx(cf1, 4) + ".";
       case "critDamage":
         cf0 = B.critFactor(profile, 0, 0); cf1 = B.critFactor(profile, 0, x / 100);
         return "crit damage +" + x + " pp: crit factor " + fx(cf0, 4) + " → " + fx(cf1, 4) + ".";
@@ -691,7 +691,7 @@
   function ensureWorker() {
     if (worker) return worker;
     try {
-      worker = new Worker("solver-worker.js?v=9");
+      worker = new Worker("solver-worker.js?v=10");
     } catch (e) {
       worker = null;
       return null;

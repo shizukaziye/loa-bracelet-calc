@@ -158,7 +158,13 @@
   // two halves. 42 of 59 seeded characters move, most under 0.1pp; the two
   // crit-saturated ones land where the 0.4.0 audit predicted (Kyulo -8.4%,
   // Heero -5.7% against their pre-pooling scores).
-  var VERSION = "0.4.1";
+  // 0.4.2: crit is UNCAPPED (Shizu). Overflow crit rate past 100% pays its
+  // substitution value — a real player rebalances crit out of the rest of the
+  // build, so the marginal pp keeps the (cd−1) slope it has below the cap. The
+  // pool from 0.4.x stays: cross-terms still price jointly, so a crit-heavy set
+  // sits below the old per-line double count and above the hard-cap floor.
+  // Kyulo and Heero regain most of what 0.4.1 took (13.35 -> 14.41, 14.21 -> 15.08).
+  var VERSION = "0.4.2";
   var MODEL_SIG = "bracelet-v1";
 
   // ------------------------------------------------------------------
@@ -462,7 +468,7 @@
     for (var i = 0; i < skills.length; i++) {
       var sk = skills[i];
       var cr = (sk.critRate || 0) + (dCritRate || 0);
-      if (cr > 1) cr = 1;
+      // Floored, NOT capped — the substitution ruling (see critFactorFull).
       if (cr < 0) cr = 0;
       var cd = (sk.critDamage || 0) + (dCritDamage || 0);
       // Expected factor = 1 + cr·(cd − 1); a crit deals cd× (2.8 = 2.8×, not 3.8×).
@@ -615,7 +621,7 @@
         if (!dps) return 1;
         var skills = profile.skills, tot = 0, wsum = 0;
         for (var i = 0; i < skills.length; i++) {
-          var sk = skills[i], cr = Math.min(1, (sk.critRate || 0)), cd = sk.critDamage;
+          var sk = skills[i], cr = Math.max(0, (sk.critRate || 0)), cd = sk.critDamage;   // uncapped — see critFactorFull
           var b = 1 + cr * (cd - 1);
           var n = 1 + cr * (cd * (1 + x / 100) - 1);
           tot += (sk.share || 0) * (n / b);
@@ -714,12 +720,26 @@
   }
 
   // Crit factor with all three crit shifts applied at once:
-  // per skill  1 + cr'·(cd'·(1+chd) − 1),  cr' capped at 1.
+  // per skill  1 + cr'·(cd'·(1+chd) − 1),  cr' floored at 0 and NOT capped at 1.
+  //
+  // UNCAPPED ON PURPOSE (Shizu, 2026-08-14). Pooled crit past 100% is not
+  // wasted in practice: a player whose bracelet pushes them over the cap
+  // rebalances — less crit on the accessories or the traits, more of something
+  // else — so overflow crit rate is worth its substitution value, which at the
+  // margin is the same (cd−1) slope it carries below the cap. The linear form
+  // IS that substitution credit: factor(cr) is linear in cr, so extending it
+  // past 1 pays overflow at exactly the at-cap marginal rate.
+  //
+  // The one distortion this accepts: a crit-DAMAGE delta on an over-cap build
+  // scales by the pooled cr (say 1.05) where the rebalanced reality is 1.00 —
+  // a second-order overcount of a few percent ON THE DELTA, not the line.
+  // Clamping interactions while crediting overflow separately would fix it at
+  // the cost of a piecewise formula nobody can read; not worth it.
   function critFactorFull(profile, dcr, dcd, chd) {
     var skills = profile.skills, tot = 0, wsum = 0;
     for (var i = 0; i < skills.length; i++) {
       var sk = skills[i];
-      var cr = Math.min(1, Math.max(0, (sk.critRate || 0) + dcr));
+      var cr = Math.max(0, (sk.critRate || 0) + dcr);
       var cd = (sk.critDamage || 0) + dcd;
       tot += (sk.share || 0) * (1 + cr * (cd * (1 + chd) - 1));
       wsum += (sk.share || 0);
