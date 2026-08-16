@@ -1421,18 +1421,35 @@
       ".bc-toprow .lb{display:block;margin-bottom:4px}" +
       ".bc-toprow .bc-sl .tk{display:inline-block;width:calc(100% - 56px);vertical-align:middle}" +
       ".bc-toprow .bc-sl .chip{display:inline-block;width:52px;text-align:right;vertical-align:middle}" +
-      // ---- the three in their real home: one line inside the Grader ----
-      // They wrap onto their own lines on a phone; the rolls track takes whatever
-      // width is left over, so it never squeezes the two pill groups.
-      "#bc-tophost{margin:2px 0 12px}" +
-      "#bc-tophost .bc-brachdr{min-width:0}" +
-      "#bc-tophost .bc-toprow{flex-direction:row;flex-wrap:wrap;align-items:flex-end;gap:10px 22px}" +
-      "#bc-tophost .bc-toprow>*{flex:0 0 auto}" +
-      "#bc-tophost .bc-toprow .bc-segrow{min-width:132px}" +
-      "#bc-tophost .bc-toprow .bc-sl{flex:1 1 200px;min-width:180px}" +
-      // The slot pills beside the trait rows, and the economy under the panel.
-      "#bc-slotshost .bc-toprow{gap:0}" +
-      "#bc-slotshost .bc-segrow{min-width:0}" +
+      // ---- the top cluster: what SHAPE is this bracelet ----
+      //
+      // Role, Grade and Granted slots read as one row of pill groups, with the
+      // rolls track on its own line under them at the panel's full width.
+      //
+      // GRANTED SLOTS USED TO SIT BESIDE THE COMBAT TRAITS and printed over
+      // them (Shizu, 2026-08-15). The trait row is a flex row of four cells that
+      // are all `flex:0 0 <fixed>` — 326px of them — and in the Advisor's left
+      // column the box holding it is 261px, so with nothing allowed to shrink
+      // the row simply overflowed to the right, straight under the slot pills
+      // the layout had parked there. Nothing was positioned; the row was wider
+      // than its box. The count says the same kind of thing as Grade, so it
+      // joins Grade, and the traits get the whole panel width back.
+      //
+      // display:contents on the four wrappers, so the three pill groups and the
+      // slider are FLEX ITEMS OF ONE ROW even though two of them arrive inside
+      // #bc-top and the third inside #bc-slotsctl — two elements, because each
+      // has to be parentable into its own host (see placeMovables). The hosts
+      // stay ordinary boxes in normal flow everywhere else; these rules only
+      // apply inside the cluster.
+      ".bc-topcluster{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 22px;margin:2px 0 12px}" +
+      ".bc-topcluster>#bc-tophost,.bc-topcluster>#bc-slotshost," +
+        ".bc-topcluster #bc-top,.bc-topcluster #bc-slotsctl,.bc-topcluster .bc-toprow{display:contents}" +
+      ".bc-topcluster .bc-toprow>.bc-segrow{flex:0 0 auto;min-width:132px}" +
+      ".bc-topcluster #bc-slotsctl .bc-segrow{min-width:104px}" +
+      // Its own line, and the whole of it: basis 100% cannot share a line, and
+      // order puts it after the pill groups whichever element it arrived in.
+      ".bc-topcluster .bc-toprow>.bc-sl{flex:1 1 100%;order:2;min-width:0}" +
+      // The economy under the panel.
       "#bc-econhost .bc-toprow{gap:9px}" +
       // ---- the gem spread: one line shut, five counts open ----
       ".bc-mini{padding:3px 10px;font-size:11px;line-height:1.4}" +
@@ -1488,21 +1505,38 @@
       // "Legendary · +9,000/+2,400" measures 203px in this select's own font,
       // and a box that cannot show its own selection is the bug being fixed.
       // (150px was the first guess and cannot hold it: the word alone is 69px.)
-      ".bc-slot{display:flex;align-items:flex-end;gap:8px;margin-bottom:8px}" +
-      ".bc-slot>.sn{flex:0 0 64px;font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;padding-bottom:7px}" +
+      // A ROW IS A BOX, and a locked row's box is green (Shizu, 2026-08-15:
+      // "use a green border to highlight the whole section to signify a lock").
+      // Every row carries the border and the padding, transparent until the row
+      // is locked, so locking one can never shift the row under it — one
+      // geometry, one colour swapped. The negative side margins spend the
+      // panel's own padding on the border, so the three text columns sit exactly
+      // where they sat without it.
+      //
+      // min-height, so a row is the same height with a badge on it or without
+      // one: the label cell is two lines high the moment a badge lands, and the
+      // Advisor's own slot rows (advisor.js, .av-slotrow) hold this same figure
+      // so the three sections keep one rhythm.
+      ".bc-slot{display:flex;align-items:flex-end;gap:8px;min-height:44px;margin:0 -9px 8px;padding:4px 8px;" +
+        "border:1px solid transparent;border-radius:9px}" +
+      ".bc-slot.bc-locked{border-color:var(--good);background:rgba(110,231,168,.07)}" +
+      // 100px holds "Slot 1" and the widest badge ("REROLL") on ONE line, which
+      // is what keeps every row the same height.
+      ".bc-slot>.sn{flex:0 0 100px;font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;padding-bottom:7px}" +
       ".bc-slot>.bc-famcell{flex:1 1 auto;min-width:0}" +
       ".bc-slot>.bc-tiercell{flex:0 0 208px;min-width:0}" +
       ".bc-slot>.bc-valcell{flex:0 0 118px;min-width:0}" +
       ".bc-slot>.bc-tiercell:empty,.bc-slot>.bc-valcell:empty{display:none}" +
       // LOCK / REROLL beside the slot number (app.js's slotAdvice). It rides IN
-      // the label cell rather than taking a column of its own — inline-block, so
-      // a narrow cell wraps the badge under the number instead of stretching the
-      // row. 64px holds "REROLL" on one line.
-      ".bc-slot .sn .bc-adv{display:inline-block;margin-left:5px;padding:1px 6px;border-radius:99px;" +
+      // the label cell rather than taking a column of its own. Named by its own
+      // class alone, NOT ".bc-slot .sn .bc-adv": the Advisor prints the same two
+      // badges on its own lock rows, and one badge with two stylesheets is how
+      // they drift apart.
+      ".bc-adv{display:inline-block;margin-left:5px;padding:1px 6px;border-radius:99px;" +
         "font-size:9px;font-weight:800;letter-spacing:.06em;line-height:1.6;vertical-align:baseline;" +
         "border:1px solid transparent}" +
-      ".bc-slot .sn .bc-adv.keep{color:var(--good);border-color:var(--good);background:rgba(110,231,168,.13)}" +
-      ".bc-slot .sn .bc-adv.roll{color:var(--dim);border-color:var(--border);background:var(--panel2)}" +
+      ".bc-adv.keep{color:var(--good);border-color:var(--good);background:rgba(110,231,168,.13)}" +
+      ".bc-adv.roll{color:var(--dim);border-color:var(--border);background:var(--panel2)}" +
       // ---- the character header's right-hand CONTROL CLUSTER ----
       //
       // Everything you press, in one place, to the right of everything you read

@@ -959,14 +959,12 @@
       // Grader, so nothing is parked to the right of the name any more.
       "#tab-calculator .bc-hdrgrid{display:grid;grid-template-columns:minmax(0,1fr);gap:18px;align-items:start}" +
       "#tab-calculator .bc-hdrleft{min-width:0}" +
-      // The trait rows and the granted-slot count, side by side; stacked rather
-      // than squeezed once the panel is narrow. Class-scoped: this is the shared
-      // panel, and it is shown on the Advisor too (see the trait rows below).
-      ".bc-traitgrid{display:flex;gap:22px;align-items:flex-start}" +
-      ".bc-traitgrid>#bc-traits{flex:1 1 auto;min-width:0}" +
-      ".bc-traitgrid>#bc-slotshost{flex:0 0 auto;min-width:154px;padding-top:1px}" +
-      "@media(max-width:700px){.bc-traitgrid{flex-direction:column;gap:8px}" +
-      ".bc-traitgrid>#bc-traits,.bc-traitgrid>#bc-slotshost{width:100%}}" +
+      // THE TRAIT ROWS TAKE THE WHOLE PANEL WIDTH. They used to share it with
+      // the granted-slot count in a two-column .bc-traitgrid, and in the
+      // Advisor's left column that left them 261px to draw a row that cannot be
+      // narrower than 326px — so the row overflowed and the slot pills sat on
+      // top of CRIT's active toggle (Shizu, 2026-08-15). The count is up in the
+      // top cluster with Role and Grade now, where it belongs.
       // The character / default settings toggle is styled by profile.js, with the
       // rest of the control row it sits in: the Tier List draws the same row, and
       // a "#tab-calculator …" prefix here would have left that copy unstyled.
@@ -995,7 +993,11 @@
       // all. A fourth grid column would hold a 62px hole open on every one of
       // those visits; a flex row simply closes up. min-height matches the
       // granted-slot rows below so the panel reads as one table.
-      ".bc-sl.bc-trrow{display:flex;align-items:center;gap:8px;min-height:40px;margin-bottom:8px}" +
+      // flex-wrap, though the row is meant to hold one line: every cell on it is
+      // `flex:0 0 <fixed>` and cannot shrink, so in a box narrower than the
+      // 326px they add up to the row used to OVERFLOW its container and print
+      // over whatever sat to its right. Wrapping is the honest failure.
+      ".bc-sl.bc-trrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-height:44px;margin-bottom:8px}" +
       ".bc-trrow .lb{flex:0 0 74px}" +
       ".bc-trrow input[type=number]{flex:0 0 92px;background:var(--panel2);color:var(--text);border:1px solid var(--border);" +
         "border-radius:6px;padding:5px 7px;font:inherit;font-size:13px;font-variant-numeric:tabular-nums}" +
@@ -1069,33 +1071,37 @@
   /**
    * The Grader — everything that describes the bracelet being scored.
    *
-   * #bc-tophost holds grade, granted slots and rolls left. Those three used to be
-   * adopted into the CHARACTER BANNER's control cluster, which was a mistake with
-   * two teeth in it: the banner is rebuilt by renderCharHeader, so moving the
-   * rolls slider destroyed the slider under the hand — and with no character
-   * loaded the banner is not drawn at all, so the three controls vanished from
-   * the page entirely. They belong beside the lines they describe (Shizu,
-   * 2026-08-11: "move that to the grader so it only interacts with the grader"),
-   * and nothing ever rewrites this panel's markup.
+   * #bc-tophost holds role, grade and rolls left, #bc-slotshost the granted-slot
+   * count. Those controls used to be adopted into the CHARACTER BANNER's control
+   * cluster, which was a mistake with two teeth in it: the banner is rebuilt by
+   * renderCharHeader, so moving the rolls slider destroyed the slider under the
+   * hand — and with no character loaded the banner is not drawn at all, so the
+   * controls vanished from the page entirely. They belong beside the lines they
+   * describe (Shizu, 2026-08-11: "move that to the grader so it only interacts
+   * with the grader"), and nothing ever rewrites this panel's markup.
+   *
+   * THE TWO HOSTS SIT IN ONE CLUSTER. Both hold a LIVE element profile.js
+   * parents in, so this file must never innerHTML either of them; the cluster
+   * around them lays their contents out as one row (profile.js, .bc-topcluster)
+   * — Role, Grade, Granted slots, with the rolls track on its own line beneath.
    */
   function braceletMarkup() {
     return '' +
       '<div class="panel" id="bc-braceletpanel">' +
       '  <div class="bc-hdrow"><h2 style="margin:0">Bracelet</h2>' +
       '    <button class="mbtn" id="bc-clear" type="button">Mark as unrolled</button></div>' +
-      '  <div id="bc-tophost"></div>' +
-      '  <div class="bc-sub" id="bc-slotnote"></div>' +
-      // GRANTED SLOTS SITS BESIDE THE COMBAT TRAITS (Shizu, 2026-08-12). The two
-      // say the same kind of thing — what SHAPE is this bracelet — and the trait
-      // rows are narrow, so the count used to leave a strip of dead space to
-      // their right while crowding the grade pills in the row above.
-      // #bc-slotshost holds a LIVE element profile.js parents in, exactly as
-      // #bc-tophost does, so this file must never innerHTML it.
-      '  <div class="subh"><span id="bc-trhd">Combat traits</span></div>' +
-      '  <div class="bc-traitgrid">' +
-      '    <div id="bc-traits"></div>' +
+      '  <div class="bc-topcluster">' +
+      '    <div id="bc-tophost"></div>' +
       '    <div id="bc-slotshost"></div>' +
       '  </div>' +
+      '  <div class="bc-sub" id="bc-slotnote"></div>' +
+      // THE TRAIT ROWS GET THE WHOLE WIDTH. The granted-slot count sat beside
+      // them from 2026-08-12 on the argument that the two say the same kind of
+      // thing — but a trait row is 326px of cells that cannot shrink, and in the
+      // Advisor's left column the box holding it is 261px, so it overflowed and
+      // printed under the slot pills. The count is in the cluster above now.
+      '  <div class="subh"><span id="bc-trhd">Combat traits</span></div>' +
+      '  <div id="bc-traits"></div>' +
       '  <div class="subh"><span data-gloss="The lines the bracelet rolled. Leave every slot empty to score it as unrolled.">Granted slots</span></div>' +
       '  <div id="bc-slots"></div>' +
       '  <div id="bc-fixed"></div>' +
@@ -1313,9 +1319,15 @@
     // The advice, on the row it applies to. The lock table says the same thing
     // in aggregate, but a LOCK/REROLL badge beside the line you are looking at
     // is what people actually read (Shizu, 2026-08-12).
-    var h = '<div class="bc-slot">' +
+    // A LOCKED ROW IS GREEN, all of it — badge, family, rarity (Shizu,
+    // 2026-08-15). The class rides on the row rather than on the badge so the
+    // whole line reads as the thing being kept; paintSlotAdvice re-toggles it
+    // when the solve lands, and the Advisor prints the same green on its own
+    // lock rows.
+    var adv = prefix === "bc-r" ? slotAdvice(idx) : null;
+    var h = '<div class="bc-slot' + (isLock(adv) ? " bc-locked" : "") + '">' +
       '<div class="sn" id="' + prefix + "-sn-" + idx + '">' + esc(label) +
-      (prefix === "bc-r" ? advBadge(slotAdvice(idx)) : "") +
+      advBadge(adv) +
       "</div>";
     h += '<div class="fld bc-famcell">' + pickerHtml(prefix + "-fam-" + idx, groups, row.fam, grade) + "</div>";
     // An empty cell collapses (`:empty` in the sheet), so a row with no rarity
@@ -1366,6 +1378,9 @@
     return ' <span class="bc-adv ' + adv.cls + '" data-gloss="' + esc(adv.tip) + '">' + adv.txt + "</span>";
   }
 
+  /** Does this advice say LOCK? The one test the green row is painted from. */
+  function isLock(adv) { return !!(adv && adv.cls === "keep"); }
+
   /**
    * The badges, repainted in place.
    *
@@ -1379,7 +1394,13 @@
   function paintSlotAdvice() {
     for (var i = 0; i < S.slots; i++) {
       var el = $("bc-r-sn-" + i);
-      if (el) el.innerHTML = esc("Slot " + (i + 1)) + advBadge(slotAdvice(i));
+      if (!el) continue;
+      var adv = slotAdvice(i);
+      el.innerHTML = esc("Slot " + (i + 1)) + advBadge(adv);
+      // The green row, repainted with the badge that decides it — a row left
+      // green after the solver stopped recommending the lock is a lie.
+      var row = el.parentNode;
+      if (row && row.classList) row.classList.toggle("bc-locked", isLock(adv));
     }
   }
 

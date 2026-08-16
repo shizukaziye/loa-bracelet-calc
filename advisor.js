@@ -509,6 +509,43 @@
     return fam.label + " · " + tierWord(line.tier) + " (" + fam.values[grade][line.tier].join(" / ") + ")";
   }
 
+  /**
+   * The whole of a line's name, tier word and all, nothing clipped.
+   *
+   * shortLabel() cuts at 40 characters because it was written for a pill. The
+   * slot rows have a row each, so they print what the Grader's own picker shows
+   * — "Weapon Power; while HP is 50% or more, on-hit Weapon Power · Legendary".
+   */
+  function fullLabel(line, grade) {
+    if (!line) return "—";
+    if (line.junk) return "Junk Line";
+    if (line.cat === "basic") return (line.family === "mainStat" ? "Str / Dex / Int +" : "Vitality +") + nf(line.value);
+    if (line.cat === "trait") return lineLabel(line, grade);
+    var fam = DATA.SPECIAL_BY_ID[line.family];
+    if (!fam) return "unknown";
+    return cleanFamLabel(fam) + " · " + tierWord(line.tier);
+  }
+
+  /**
+   * ONE ROW PER SLOT, the Grader's own shape: slot number, the LOCK or REROLL
+   * badge it wears in the Grader, then the line in full — and the whole row
+   * bordered green when it is a lock.
+   *
+   * `extra` is the keep-or-replace checkbox, which rides in the label cell so
+   * the line text starts on the Grader's family column either way.
+   */
+  function slotRowHtml(idx, locked, line, extra) {
+    var badge = locked
+      ? ' <span class="bc-adv keep" data-gloss="Lock this slot before your next roll.">LOCK</span>'
+      : ' <span class="bc-adv roll" data-gloss="Leave this one unlocked — one attempt rerolls every unlocked slot together.">REROLL</span>';
+    // The gloss carries the same text the cell does, for the widths where the
+    // cell has to ellipsise it.
+    var name = esc(fullLabel(line, S.grade));
+    return '<div class="av-slotrow' + (locked ? " on" : "") + '">' +
+      '<div class="sn">' + (extra || "") + "Slot " + (idx + 1) + badge + "</div>" +
+      '<div class="ln" data-gloss="' + name + '">' + name + "</div></div>";
+  }
+
   /** A pill-sized name: the placeholders and the value list stripped, tier kept. */
   function shortLabel(line, grade) {
     if (!line) return "—";
@@ -693,7 +730,11 @@
       "#tab-advisor .av-card .v.gold{color:var(--high)}" +
       "#tab-advisor .av-card .v.good{color:var(--good)}" +
       // ---- locks ----
-      "#av-workgrid{display:grid;grid-template-columns:minmax(340px,5fr) minmax(420px,7fr);gap:14px;align-items:start}" +
+      // 55/45, THE EDITOR FIRST (Shizu, 2026-08-15: "give more horizontal space
+      // to the grader"). It was 5fr/7fr the other way round, which left the
+      // family picker — the longest text on the page, and the control being
+      // used — 149px at 1280 while the answers beside it had room to spare.
+      "#av-workgrid{display:grid;grid-template-columns:minmax(340px,11fr) minmax(360px,9fr);gap:14px;align-items:start}" +
       // :first-child, not every .panel. The left column carries the locks table
       // under the editor now, and that second panel wants the 12px .panel+.panel
       // gives it. Both columns flow at their own height — no fixed heights
@@ -701,7 +742,11 @@
       // fight it.
       "#av-workgrid > #av-brhost > .panel:first-child{margin-top:0}" +
       "#av-workgrid > #av-brhost{min-width:0}" +
-      "@media (max-width:1020px){#av-workgrid{grid-template-columns:1fr}}" +
+      // minmax(0,1fr), never a bare 1fr — the same rule .av-cutgrid below spells
+      // out. A bare 1fr is minmax(AUTO,1fr), so the one column can never be
+      // narrower than the widest thing in either half of the tab, and one long
+      // unbreakable line inside it scrolls the whole page sideways.
+      "@media (max-width:1020px){#av-workgrid{grid-template-columns:minmax(0,1fr)}}" +
       // ---- locks against the baseline ----
       // Up to twelve rows of five figures in a column that can be 340px wide,
       // so: no borders inside the lock cell, tabular figures, and the table in
@@ -732,11 +777,45 @@
       "#tab-advisor .av-mk{display:inline-block;margin-bottom:2px;padding:0 6px;border-radius:99px;font-size:9.5px;" +
         "font-weight:800;letter-spacing:.06em;text-transform:uppercase;line-height:1.6;border:1px solid var(--accent);color:var(--accent)}" +
       "#tab-advisor .av-mk.odds{border-color:var(--high);color:var(--high)}" +
-      "#tab-advisor .av-lockline{font-size:14px;line-height:1.6;margin:2px 0 8px}" +
-      "#tab-advisor .av-pill{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:700;" +
-        "background:var(--panel2);border:1px solid var(--border);margin:0 4px 4px 0}" +
-      "#tab-advisor .av-pill.lock{border-color:var(--accent);color:var(--accent)}" +
-      "#tab-advisor .av-pill.roll{color:var(--dim)}" +
+      // ---- ONE SLOT ROW, THREE SECTIONS ----
+      //
+      // The best-locks advice, the keep-or-replace checkboxes and the Grader's
+      // own granted slots are one bracelet seen three times, so they are drawn
+      // as one row: a fixed label cell holding the slot number and its LOCK /
+      // REROLL badge, then the line itself. The advice used to be a run of
+      // chips with the word "reroll" floating between them and a paragraph
+      // underneath (Shizu, 2026-08-15: "looks weird — it should be better
+      // formatted").
+      //
+      // min-height, padding and margin are the Grader row's own figures
+      // (profile.js, .bc-slot) to the pixel, so the sections keep one rhythm —
+      // which is the whole of "i rolled keep or replace should be exactly the
+      // same height as the grader granted slots".
+      "#tab-advisor .av-slotrow{display:flex;align-items:center;gap:8px;min-height:44px;margin:0 0 8px;" +
+        "padding:4px 8px;border:1px solid transparent;border-radius:9px;font-size:12.5px}" +
+      // LOCKED IS GREEN, and it is the same green in all three places: this row,
+      // the Grader row it describes, and the checkbox you tick to say you locked
+      // that slot in game. A rerolling row stays plain — the contrast is the
+      // signal, and three outlined boxes would have nothing to stand out from.
+      "#tab-advisor .av-slotrow.on{border-color:var(--good);background:rgba(110,231,168,.07)}" +
+      "#tab-advisor .av-slotrow>.sn{flex:0 0 100px;font-size:10px;color:var(--dim);text-transform:uppercase;" +
+        "letter-spacing:.05em;line-height:1.5}" +
+      // The checkbox rides INSIDE the label cell, so the line text starts on the
+      // same column as the Grader's family box rather than 20px right of it.
+      "#tab-advisor .av-slotrow>.sn input{accent-color:var(--accent);margin:0 6px 0 0;vertical-align:middle}" +
+      // The whole name rides in the row's gloss for the narrow widths where it
+      // still has to ellipsise — but WITHOUT the dotted underline [data-gloss]
+      // normally draws: the "…" is the affordance, and three underlined lines
+      // down a column is the noise these rows were rebuilt to be free of.
+      //
+      // flex BASIS 0, never auto. With `flex:1 1 auto` the cell's base size is
+      // its own content, and a nowrap line 230px long then reports 230px as the
+      // row's minimum — which the one-column grid track below honours, and the
+      // page scrolled sideways at 375px. min-width:0 does not cover this: it
+      // lifts the automatic minimum, not the content-based base size.
+      "#tab-advisor .av-slotrow>.ln{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;" +
+        "white-space:nowrap;line-height:1.45;text-decoration:none}" +
+      "#tab-advisor .av-slotrow.on>.ln{color:var(--text)}" +
       "#tab-advisor .av-tabwrap{overflow-x:auto}" +
       // ---- the quantile strip ----
       "#tab-advisor .av-strip{position:relative;height:34px;margin:12px 0 4px}" +
@@ -776,10 +855,6 @@
       "#tab-advisor .bc-slot>*{min-width:0}" +
       "#tab-advisor .bc-slot select,#tab-advisor .bc-slot input{max-width:100%}" +
       "@media(max-width:640px){#tab-advisor .bc-slot{grid-template-columns:minmax(0,1fr)}}" +
-      "#tab-advisor .av-lockrow{display:flex;align-items:center;gap:8px;padding:5px 8px;border:1px solid var(--border);" +
-        "border-radius:7px;margin-bottom:6px;background:var(--panel2);font-size:12.5px}" +
-      "#tab-advisor .av-lockrow input{accent-color:var(--accent);flex:0 0 auto}" +
-      "#tab-advisor .av-lockrow .ln{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
       "#tab-advisor .av-verdict{border-radius:10px;padding:13px 15px;margin-top:12px;border:1px solid var(--border);background:var(--panel2)}" +
       "#tab-advisor .av-verdict.keep{border-color:var(--good)}" +
       "#tab-advisor .av-verdict.replace{border-color:var(--high)}" +
@@ -1107,15 +1182,24 @@
   }
 
   /**
-   * THE CHIPS AND ONE SENTENCE. What to lock before the next roll, and what that
-   * choice is worth over the next best one.
+   * ONE ROW PER SLOT AND ONE SENTENCE. What to lock before the next roll, and
+   * what that choice is worth over the next best one.
    *
-   * The three-column table that used to sit here — lock, expected final, vs best
-   * — is gone (Shizu, 2026-08-15). It ranked the same lock sets as the table
-   * beside the Grader, in different words, with a "vs best" column that priced
-   * the gap between two AVERAGES while the other table priced the gap between
-   * two worths. Two tables, two answers, one question. The worth deltas won, and
-   * the sentence below quotes the same figure the table's vs-pick column does.
+   * The rows mirror the Grader's granted slots exactly — same order, same slot
+   * numbers, same LOCK / REROLL badges, same green on a locked row — so the
+   * advice and the bracelet it is about read as one table. It used to be a
+   * "Lock" label, two chips, the word "reroll" adrift between them, another
+   * chip and a paragraph (Shizu, 2026-08-15: "looks weird — it should be better
+   * formatted"). The names are printed in full here: the rows have the width
+   * the chips never did.
+   *
+   * The three-column table that once sat here — lock, expected final, vs best —
+   * is gone. It ranked the same lock sets as the table beside the Grader, in
+   * different words, with a "vs best" column that priced the gap between two
+   * AVERAGES while the other table priced the gap between two worths. The worth
+   * deltas won, and the sentence below quotes the same figure the table's
+   * vs-pick column does. What a lock IS, and when one is worth buying, is in
+   * the method block at the foot of the tab.
    */
   function locksHtml(res, profile, lines) {
     var h = '<div class="panel"><h2 style="margin-top:0">Best locks for the next roll</h2>';
@@ -1124,18 +1208,8 @@
     }
     var best = res.maskEV[0];
     var lockFlags = locksFromKeys(best.lockedKeys, lines, S.grade, profile);
-
-    h += '<div class="av-lockline">';
-    if (!best.lockedKeys.length) {
-      h += "<b>Lock nothing.</b> Reroll all " + S.slots + " slots.";
-    } else {
-      h += "<b>Lock</b> ";
-      var i;
-      for (i = 0; i < lockFlags.length; i++) if (lockFlags[i]) h += '<span class="av-pill lock">Slot ' + (i + 1) + " · " + esc(shortLabel(lines[i], S.grade)) + "</span>";
-      h += "<b>reroll</b> ";
-      for (i = 0; i < lockFlags.length; i++) if (!lockFlags[i]) h += '<span class="av-pill roll">Slot ' + (i + 1) + " · " + esc(shortLabel(lines[i], S.grade)) + "</span>";
-    }
-    h += "</div>";
+    var i;
+    for (i = 0; i < lines.length; i++) h += slotRowHtml(i, !!lockFlags[i], lines[i], "");
 
     var second = res.maskEV.length > 1 ? res.maskEV[1] : null;
     var bar = lockBar(res);
@@ -1148,8 +1222,7 @@
         : ", worth " + gold(Math.abs(d)) + " gold " + (d > 0 ? "more" : "less") + " than the next best lock";
     }
     h += '<p class="note">Expected final ' + dmg(pct(best.ev)) + say +
-      ". A lock is only worth it when the line it holds is scarcer than what a fresh draw would give you — the solver weighs both, over every remaining roll. " +
-      "Every other lock, its odds and what it costs against this one: the lock table under the bracelet panel.</p>";
+      ". Every other lock, its odds and what it costs against this one: the lock table under the bracelet panel.</p>";
     return h + "</div>";
   }
 
@@ -1417,10 +1490,12 @@
       " still to come — not by which of them scores more today. A weaker set can be worth more, because of what it clears out of the pool for the rolls that follow.</p>";
 
     h += '<div class="av-cutgrid"><div><div class="subh"><span data-gloss="Pre-filled from the pick above. Change them if you locked something else in game — what you actually locked is what the roll answers to, not what the solver would have chosen.">Locked for this roll</span></div>';
+    // The Grader's row, with a checkbox in the label cell: same height, same
+    // rhythm, same badges, and the same green on a row you have ticked.
     var i;
     for (i = 0; i < S.slots; i++) {
-      h += '<div class="av-lockrow"><input type="checkbox" data-avlock="' + i + '"' + (locks[i] ? " checked" : "") +
-        '><span class="ln">Slot ' + (i + 1) + " · " + esc(shortLabel(lines[i], S.grade)) + "</span></div>";
+      h += slotRowHtml(i, !!locks[i], lines[i],
+        '<input type="checkbox" data-avlock="' + i + '"' + (locks[i] ? " checked" : "") + ">");
     }
     h += '</div><div><div class="subh">What the roll gave you</div>';
     var any = false;
@@ -1576,7 +1651,9 @@
       "<p><b>The lock table ranks sets of locks, not lines.</b> One attempt rerolls every unlocked slot at once, " +
       "so the decision is which SET to freeze. For each legal set the solver reports <b>expected</b>: what the " +
       "bracelet is worth after you lock exactly those slots and then play every remaining roll the way it would " +
-      "play them.</p>" +
+      "play them. A lock is only worth buying when the line it holds is scarcer than what a fresh draw would " +
+      "hand you &mdash; so a <b>LOCK</b> badge does not say this line is good, it says keeping it beats " +
+      "rerolling it over every roll you have left.</p>" +
 
       "<p><b>Every lock carries its own distribution.</b> The table under the bracelet reads one curve per lock " +
       "set: where the bracelet finishes with exactly those slots locked for the NEXT roll and every roll after it " +
