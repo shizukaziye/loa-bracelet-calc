@@ -198,7 +198,8 @@ _ap_ms = math.sqrt((703826 + 13888) * 1.09 * 241367 * 1.085 / 6) * 1.125 + 3600
 check("analytic.mainStat.13888",
       r9(B.line_damage({"cat": "basic", "family": "mainStat", "value": 13888}, "ancient", P)), r9(_D(_ap_ms / _ap0)))
 check("analytic.f15.ancient.high", r9(_d(15, "high")), r9(_D(0.7 * 1.055 + 0.3 * 1.055 / 1.02)))
-check("analytic.f13.ancient.high", r9(_d(13, "high")), r9(_D(1.03 * (1 + 0.10 * 0.05))))
+# Family 13's stagger half scales by the profile share, 20% since 0.5.0.
+check("analytic.f13.ancient.high", r9(_d(13, "high")), r9(_D(1.03 * (1 + 0.20 * 0.05))))
 
 
 def _ap_wp(dw):

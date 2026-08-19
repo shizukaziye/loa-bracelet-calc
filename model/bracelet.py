@@ -22,7 +22,7 @@ import gear_data as GEAR          # noqa: E402
 # Bump VERSION whenever a change here can move a stored number: the Worker stamps
 # MODEL_SIG + "@" + VERSION on every record and re-scores anything that no longer
 # matches. See bracelet.js for what each version changed.
-VERSION = "0.4.2"
+VERSION = "0.5.0"
 MODEL_SIG = "bracelet-v1"
 
 ADD_DMG_ASTROGEM_LV60 = 0.0484
@@ -84,7 +84,7 @@ DEFAULT_PROFILE = {
     "backAttackShare": 1.00,
     "frontAttackShare": 1.00,
     "nonDirectionalShare": 1.00,
-    "staggeredShare": 0.10,
+    "staggeredShare": 0.20,   # Shizu, 2026-08-15 - see the JS twin
     # A boolean gate, not a share: the toggle drives exactly 0 or 1.
     "demonShare": 0.00,
     "demonBase": 0.073,

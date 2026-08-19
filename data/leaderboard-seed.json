@@ -15373,9 +15373,9 @@
         "ticket": 0
       },
       "damage": 14.410823526738989,
-      "damagePct": 15.325779914484894,
+      "damagePct": 15.842421039039568,
       "linesDamage": 9.939572092885372,
-      "linesPct": 10.416245623417343,
+      "linesPct": 10.910892816354512,
       "goldAt1_5M": 23251367.1720163,
       "benchmark": "near-final",
       "rawStats": [
@@ -27055,9 +27055,9 @@
         "ticket": 0
       },
       "damage": 13.527410839038517,
-      "damagePct": 14.452896257585369,
+      "damagePct": 14.908883892077718,
       "linesDamage": 8.618947791705565,
-      "linesPct": 9.001284210249416,
+      "linesPct": 9.435552274832082,
       "goldAt1_5M": 21727583.173283815,
       "benchmark": "good",
       "rawStats": [
@@ -32675,9 +32675,9 @@
         "ticket": 0
       },
       "damage": 13.021458959785392,
-      "damagePct": 13.790396029057895,
+      "damagePct": 14.30015887836673,
       "linesDamage": 9.038981888146928,
-      "linesPct": 9.460089664610427,
+      "linesPct": 9.950453431151708,
       "goldAt1_5M": 20860918.54081208,
       "benchmark": "good",
       "rawStats": [
@@ -42745,9 +42745,9 @@
         "ticket": 0
       },
       "damage": 11.847348963503315,
-      "damagePct": 12.576325114928522,
+      "damagePct": 13.024836370366465,
       "linesDamage": 7.911931271909534,
-      "linesPct": 8.233345051377716,
+      "linesPct": 8.664553597399149,
       "goldAt1_5M": 18866554.341971323,
       "benchmark": "good",
       "rawStats": [
@@ -43569,9 +43569,9 @@
         "ticket": 0
       },
       "damage": 11.601435547815601,
-      "damagePct": 12.164022222184157,
+      "damagePct": 12.610890836615152,
       "linesDamage": 7.367972500482651,
-      "linesPct": 7.646198642319768,
+      "linesPct": 8.07506795961983,
       "goldAt1_5M": 18451799.008752067,
       "benchmark": "good",
       "rawStats": [

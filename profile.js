@@ -179,7 +179,7 @@
         flatWP: 0,
         accessoryMainStat: 71429, rosterBonus: 2085,
         addWeapon: 30, addPet: 1, addAstrogem: 4.84,
-        staggerShare: 10, demonBase: 7.3, shieldUptime: 60, enemyDR: 50,
+        staggerShare: 20, demonBase: 7.3, shieldUptime: 60, enemyDR: 50,
         allyCount: 2, atkSpeedPer10: 1
       },
       skills: [{ name: "", share: 100, cr: 90, cd: 280 }],

@@ -194,7 +194,9 @@ refs.profileVariants.forEach(function (c, i) {
   // Family 15: burst-weighted mean of the burst and sustained cases (w = 0.7).
   check("analytic.f15.ancient.high", r9(d(15, "high")), r9(D(0.7 * 1.055 + 0.3 * 1.055 / 1.02)));
   // Family 13: undiluted +3% damage, plus +5% inside stagger windows at a 10% share.
-  check("analytic.f13.ancient.high", r9(d(13, "high")), r9(D(1.03 * (1 + 0.10 * 0.05))));
+  // Family 13 = outgoing +3% and staggered +5%; the stagger half scales by the
+  // profile share, 20% since 0.5.0 (Shizu, 2026-08-15).
+  check("analytic.f13.ancient.high", r9(d(13, "high")), r9(D(1.03 * (1 + 0.20 * 0.05))));
   // Families 20/21/22: weapon power at the hard max-stack / full-uptime
   // assumption. A family carrying TWO weapon-power components adds them and takes
   // ONE attack-power ratio — they are the same square root, not two of them.

@@ -164,7 +164,13 @@
   // pool from 0.4.x stays: cross-terms still price jointly, so a crit-heavy set
   // sits below the old per-line double count and above the hard-cap floor.
   // Kyulo and Heero regain most of what 0.4.1 took (13.35 -> 14.41, 14.21 -> 15.08).
-  var VERSION = "0.4.2";
+  // 0.5.0: the stagger share doubles, 10% -> 20% (Shizu, 2026-08-15). It is the
+  // share of your damage that lands while the boss is staggered, and exactly one
+  // family reads it — 13, "Damage +A%; damage to Staggered +B%". Only the second
+  // half of that line scales, so the family gains 14-17%, not 100%: Ancient reads
+  // 2.780 / 3.365 / 3.951 against 2.380 / 2.918 / 3.455. Every bracelet carrying
+  // one moves, and family 13's letter grade may move with it.
+  var VERSION = "0.5.0";
   var MODEL_SIG = "bracelet-v1";
 
   // ------------------------------------------------------------------
@@ -259,7 +265,7 @@
     backAttackShare: 1.00,
     frontAttackShare: 1.00,
     nonDirectionalShare: 1.00,
-    staggeredShare: 0.10,           // share of damage landing in stagger windows
+    staggeredShare: 0.20,           // share of damage landing in stagger windows (Shizu, 2026-08-15)
     // A boolean gate, not a share: the Demon boss toggle drives exactly 0 or 1.
     // Flip this one value to ship the tool with it on.
     demonShare: 0.00,
