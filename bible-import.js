@@ -99,7 +99,10 @@
   var WORKER_URL = "https://bracelet-bible.shizukaziye.workers.dev";
 
   /** The baked board, used as a free instant cache. ?v= for the edge, as everywhere. */
-  var SEED_URL = "data/leaderboard-seed.json?v=3";
+  // The board seed split (2026-08-15): leaderboard-seed.json is now a slim
+  // summary payload with no raw stats, so the instant-cache reads the full
+  // per-character store instead.
+  var SEED_URL = "data/characters.json?v=1";
 
   // One silent re-auth per page load. A dead token sends the user straight back
   // through /oauth/authorize, which auto-approves while the grant lives — but if
@@ -581,7 +584,13 @@
       if (!r.ok) throw new Error("http_" + r.status);
       return r.json();
     }).then(function (j) {
-      var list = ((j && j.entries) || []).map(fromSeedEntry).filter(function (e) { return !!e; });
+      // characters.json is keyed "<REGION>|<name>"; the old seed was {entries:[…]}.
+      // Accept both so a cached copy of either shape still works.
+      var rows = (j && j.entries) ? j.entries : [];
+      if (!rows.length && j && typeof j === "object") {
+        for (var k in j) if (Object.prototype.hasOwnProperty.call(j, k) && j[k] && j[k].name) rows.push(j[k]);
+      }
+      var list = rows.map(fromSeedEntry).filter(function (e) { return !!e; });
       var byKey = {};
       list.forEach(function (e) { byKey[charKey(e.region, e.name)] = e; });
       return { list: list, byKey: byKey };

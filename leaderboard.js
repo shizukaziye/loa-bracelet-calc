@@ -9,24 +9,34 @@
  *
  * WHERE THE DATA COMES FROM
  *   1. WORKER_URL + "/?list=1", when a Worker is deployed and answers with rows.
- *   2. data/leaderboard-seed.json — the 30 characters read off public character
- *      pages on 2026-08-11 — otherwise.
- * The Worker is not deployed yet, so (2) is the live path. The fallback is silent:
- * a line in the footer says which source the table came from, and only a real
- * failure (no file, HTTP error, network error) speaks up as an error.
+ *   2. data/leaderboard-seed.json otherwise — which is the SAME v3 payload, baked.
+ * One decoder reads both, so a wire-format change cannot pass the baked copy by.
+ * The fallback is silent: a line in the footer says which source the table came
+ * from, and only a real failure (no file, HTTP error, network error) speaks up.
+ *
+ * THE ROW IS A SUMMARY, AND THIS FILE DOES NOT SCORE. Until v3 the payload
+ * shipped every character's raw bracelet — and every loadout's, for anyone
+ * wearing more than one — and this file decoded and re-scored all of it on load:
+ * a grade-checked decode, a set score, a joint score and a 0-100 grade per row,
+ * twice over for a support class. That is the whole record travelling to every
+ * reader so a table of letters can be drawn.
+ *
+ * The scoring moved to the Worker, which was already scoring every record it
+ * stored. A row now carries the two finished numbers, the decoded effect lines
+ * (a family and a tier, not a stat index and a raw value) and the two combat
+ * traits. What is left here is DISPLAY: band the numbers on subrank's ladders,
+ * letter each line with one lineDamage() call, sort. Anything that needs the
+ * bracelet itself — the row click, which loads it into the Calculator — asks
+ * GET /character for that one character.
  *
  * WHAT IT RANKS
  *   Everyone is scored on the CANONICAL DEFAULT profile, Bracelet.normalizeProfile({}),
  *   never on the user's own settings. Otherwise the board would rank gear, not
  *   bracelets, and your rank would move when you dragged a slider.
- *   The score is RECOMPUTED here from each row's raw stats rather than read out of
- *   the file, so a change to model/bracelet.js shows up on the board the moment it
- *   ships — the file's stored numbers are only a fallback for a row with no raw
- *   stats. This is the same reason the Worker stores raw payloads and ranks nothing.
  *
  * MULTI-LOADOUT
  *   A lostark.bible character page carries one loadout per tab (Raid / Chaos /
- *   Est. Raid) and each has its OWN bracelet — 9 of the 30 seeded characters wear
+ *   Est. Raid) and each has its OWN bracelet — 19 of the 59 baked characters wear
  *   different ones. Every loadout is scored; the board ranks the highest, and a
  *   marker beside the name names the alternatives.
  *
@@ -55,8 +65,8 @@
  * with the token.
  *
  * Model API used (window.Bracelet, never modified): normalizeProfile,
- * decodeBibleBracelet, traitDamage, setDamage, damagePercent, lineDamage,
- * lineInfo, DATA. Plus window.Subrank for the ladder and the 0–100 grade.
+ * damagePercent, lineDamage, DATA. Plus window.Subrank for the two ladders and
+ * their anchors. The decode and the set scoring are the Worker's now.
  */
 (function () {
   "use strict";
@@ -65,9 +75,17 @@
   // the board then reads the baked seed, which is the state this ships in.
   var WORKER_URL = "https://bracelet-bible.shizukaziye.workers.dev";
 
-  // The baked board. ?v= for the same reason every other file carries one: the
-  // loseii zone edge-caches for four hours, so a re-baked seed needs a new URL.
-  var SEED_URL = "data/leaderboard-seed.json?v=3";
+  // The baked board — the v3 summary. ?v= for the same reason every other file
+  // carries one: the loseii zone edge-caches for four hours, so a re-baked seed
+  // needs a new URL. It moved to 4 when the file's SHAPE changed, which is the
+  // one bump that cannot be skipped: a v3 client reading a cached v2 seed would
+  // read percentages out of a stat index.
+  var SEED_URL = "data/leaderboard-seed.json?v=4";
+
+  // The whole characters, baked — raw stat lines and every loadout, ~940KB.
+  // Fetched ONCE, and only when a row click needs a bracelet and no Worker
+  // answered. The Worker's GET /character is the normal path and costs 2KB.
+  var CHARS_URL = "data/characters.json?v=1";
 
   var PAGE_SIZE = 100;      // rows per page; the pager hides itself below one page
   var SEARCH_DEBOUNCE = 200;
@@ -215,84 +233,11 @@
       'onerror="this.style.display=\'none\'">';
   }
 
-  /**
-   * THE SUPPORT CLASSES (Shizu's list and Shizu's ruling, 2026-08-14):
-   * "support characters will default to whichever bracelet has a better letter
-   * rank". A character of one of these four is scored TWICE — once as a damage
-   * dealer on the DPS ladder, once as a support on the support one — and the
-   * board shows the reading with the better letter. A tie on band index keeps
-   * the damage-dealer reading, because that is the one everything else on the
-   * board is comparable to.
-   *
-   * GUARDIAN KNIGHT IS NOT HERE, deliberately: it is a damage dealer, and the
-   * board carries two of them. Spelled out as an explicit table rather than
-   * inferred from anything, because the game's own answer to "is this class a
-   * support" is not written down anywhere the tool can read.
-   *
-   * Matching strips punctuation and case, the same rule CLASS_ICON_BY_KEY uses,
-   * so both data paths agree: the baked seed carries a `class` NAME per entry
-   * and the Worker snapshot carries a classIdx into its own `classes` array —
-   * fromSeed() and fromWorker() both resolve it to that name before scoring, so
-   * the name is there either way.
-   */
-  var SUPPORT_CLASSES = { bard: 1, paladin: 1, artist: 1, valkyrie: 1 };
-  function isSupportClass(cls) {
-    return !!SUPPORT_CLASSES[String(cls == null ? "" : cls).replace(/[^A-Za-z]/g, "").toLowerCase()];
-  }
-
   // ------------------------------------------------------------------
-  // scoring — the canonical default profile, recomputed from raw stats
+  // display arithmetic — the scoring is the Worker's
   // ------------------------------------------------------------------
 
-  // The split is on `cat`, never on `fixed`: EVERY combat-trait line scores
-  // through traitDamage(), every effect line through setDamage(). `fixed` is
-  // bible's lock icon, not the drop's fixed/granted split, so keying on it sent a
-  // trait that had rolled into a granted slot to setDamage(), which scores a trait
-  // line zero. The rule lives in model/bracelet.js's traitDamage() header; same
-  // split as worker/bracelet.js's score() and bible-import.js's defaultScore().
-  var TRAIT_TO_APP = { crit: "crit", spec: "spec", swiftness: "swift" };
-  var TRAIT_CAP = { relic: 100, ancient: 120 };
-
-  function slotChoices(grade) { return grade === "relic" ? [1, 2] : [1, 2, 3]; }
-  function traitsBreakCap(dec, grade) {
-    for (var i = 0; i < dec.lines.length; i++) {
-      if (dec.lines[i].cat === "trait" && dec.lines[i].value > TRAIT_CAP[grade]) return true;
-    }
-    return false;
-  }
-  function unplaced(dec) {
-    var n = 0;
-    for (var i = 0; i < dec.lines.length; i++) {
-      var l = dec.lines[i];
-      if (l.cat === "special" && (!l.tier || l.unmatchedValue)) n++;
-    }
-    return n;
-  }
-
-  /**
-   * The grade the payload does not carry, inferred and then checked twice: a trait
-   * above the grade's cap rules that grade out (a hard fact about the item), and
-   * the granted-slot count is only a hint (a player can lock granted lines). Copied
-   * from bible-import.js so the two paths can never disagree about a bracelet.
-   */
-  function decodeWithGradeCheck(stats) {
-    var dec = B.decodeBibleBracelet(stats), i, granted = 0;
-    if (traitsBreakCap(dec, dec.grade)) {
-      var forced = dec.grade === "relic" ? "ancient" : "relic";
-      var fdec = B.decodeBibleBracelet(stats, { grade: forced });
-      if (!traitsBreakCap(fdec, forced)) return fdec;
-    }
-    for (i = 0; i < dec.lines.length; i++) if (!dec.lines[i].fixed) granted++;
-    if (slotChoices(dec.grade).indexOf(granted) >= 0) return dec;
-    var other = dec.grade === "relic" ? "ancient" : "relic";
-    if (slotChoices(other).indexOf(granted) < 0) return dec;
-    var alt = B.decodeBibleBracelet(stats, { grade: other });
-    if (traitsBreakCap(alt, other)) return dec;
-    if (unplaced(alt) > unplaced(dec)) return dec;
-    return alt;
-  }
-
-  /** The profile a reading scores on. Two constants, one lookup. */
+  /** The profile a reading letters its lines on. Two constants, one lookup. */
   function profileFor(role) { return role === "support" ? SUPPORT_PROFILE : DEFAULT_PROFILE; }
 
   // subrank.js caches its anchors for the CANONICAL profile only — pass any
@@ -307,58 +252,24 @@
   }
 
   /**
-   * score(rawStats, role) ->
-   *   { role, grade, pct, linesPct, lines, traits, traitVals, unmapped, grade0to100 }
-   * `pct` is the whole bracelet, `linesPct` the effect lines alone (the figure
-   * comparable to lostark.bible's own "Bracelet Effects +X%").
+   * The band a row's 0–100 grade falls in, on ITS OWN ROLE'S LADDER.
    *
-   * `role` is "dps" (every row) or "support" (the second reading a support-class
-   * row gets). On the support reading every figure is WHAT ONE DAMAGE DEALER
-   * GAINS — that is the unit the model's support channel is in, and the Damage %
-   * cell says so out loud when this is the reading on screen.
-   *
-   * `grade0to100` is Subrank.braceletScore() on the SAME two terms — the effect
-   * lines through setDamage() and the two fixed combat traits through
-   * traitDamage(). setDamage() returns zero for a trait line by design, so the
-   * trait term has to be added separately or every bracelet reads as junk. The
-   * support reading hands it the support profile, and braceletScore then bands
-   * on SUPPORT_BANDS by itself — it reads the profile's own role, so there is no
-   * second switch to keep in step.
+   * The number comes from the Worker; the cuts stay here. That split is the point:
+   * tools/rank-match.mjs re-cuts the support ladder whenever a line's damage
+   * moves, and a re-cut has to reach the board on a site deploy rather than
+   * waiting for a Worker one.
    */
-  function score(stats, role) {
-    if (!B || !stats || !stats.length) return null;
-    var prof = profileFor(role);
-    var dec = decodeWithGradeCheck(stats);
-    var traits = { crit: 0, spec: 0, swift: 0 }, traitLines = [], lines = [], i, l, k;
-    for (i = 0; i < dec.lines.length; i++) {
-      l = dec.lines[i];
-      k = TRAIT_TO_APP[l.family];
-      if (l.cat === "trait" && k) {
-        traits[k] = l.value;
-        traitLines.push({ trait: l.family, value: l.value, fixed: !!l.fixed });
-        continue;
-      }
-      lines.push(l);
-    }
-    var traitD = B.traitDamage(traits, prof);
-    var linesD = B.setDamage(lines, dec.grade, prof);
-    return {
-      role: role === "support" ? "support" : "dps",
-      grade: dec.grade,
-      traits: traitLines,
-      traitVals: traits,
-      lines: lines,
-      pct: B.damagePercent(traitD + linesD),
-      linesPct: B.damagePercent(linesD),
-      unmapped: (dec.unknown || []).length,
-      // No Subrank on the page (a stale index.html, a failed script) is not a
-      // reason to lose the board: the column simply goes blank.
-      grade0to100: SR ? SR.braceletScore({
-        lines: lines, traits: traits, grade: dec.grade,
-        // null, not DEFAULT_PROFILE: that is what hits subrank's anchor cache.
-        profile: role === "support" ? SUPPORT_PROFILE : null
-      }) : null
-    };
+  function bandOf(c) {
+    if (!SR || c._score == null) return null;
+    return SR.of(c._score, c._role);
+  }
+
+  /** The grade's ANCHOR in % damage — the "good bracelet" a score of 100 means.
+   *  A constant per grade and role, so subrank's own cache answers most calls. */
+  function anchorPctOf(c) {
+    if (!SR || !SR.anchorsFor) return null;
+    var a = SR.anchorsFor(c._grade || "ancient", c._role === "support" ? SUPPORT_PROFILE : null);
+    return a ? a.perfect : null;
   }
 
   /**
@@ -453,195 +364,105 @@
   // ------------------------------------------------------------------
 
   /**
-   * One loaded row, whatever it came from:
-   *   { name, region, class, itemLevel, pulledAt, loadouts:[{label, rawStats,
-   *     rollsRemaining, storedPct}], chosenLoadout, storedPct }
-   * Scoring happens afterwards, in scoreChars(), so both sources take one path.
+   * THE SNAPSHOT ROW, decoded — v3.
+   *
+   * One row in, one display object out, and no arithmetic on the way except the
+   * two things that must stay on this side: the LADDER a number is banded on,
+   * and the per-line letters. Everything the row asserts — which loadout the
+   * board ranks, which axis a support-class character is shown on, the two
+   * percentages and the 0–100 grade — the Worker settled at snapshot time.
+   *
+   * The row is fixed width at 13. See encodeSnapshot() in worker/bracelet.js for
+   * what each slot holds; the short version is
+   *
+   *   [region, name, ilvl, classIdx, pulledAt, grade, role,
+   *    [pct, score, isPerfect], alt, traits, lines, unmapped, loadouts]
+   *
+   * with `lines` a flat run of (cat, family, tierOrValue, fixed) and `traits` a
+   * flat run of (traitCode, value).
+   *
+   * THE SUPPORT CLASSES no longer appear in this file. A Bard, Paladin, Artist or
+   * Valkyrie is read twice — once as a damage dealer, once as a support — and
+   * shown on whichever grades the bracelet better (Shizu, 2026-08-14). Both
+   * readings are in the row: slot 7 is the one that won, slot 8 the one that
+   * lost. The list of which classes get the second reading is the Worker's
+   * SUPPORT_CLASSES, so there is one copy of it and not two drifting apart.
    */
-  function fromSeed(data) {
-    var entries = (data && data.entries) || [];
-    var stamp = toTime(data && data._scoredAt);
-    return entries.map(function (e) {
-      var loadouts = (e.loadouts && e.loadouts.length ? e.loadouts : [e]).map(function (l, i) {
-        return {
-          label: l.label || ("Loadout " + (i + 1)),
-          rawStats: l.rawStats || e.rawStats || [],
-          rollsRemaining: l.rollsRemaining || e.rollsRemaining || null,
-          itemLevel: l.itemLevel != null ? Math.round(l.itemLevel) : e.itemLevel,
-          storedPct: typeof l.damagePct === "number" ? l.damagePct : null
-        };
-      });
-      return {
-        name: e.name,
-        region: normRegion(e.region),
-        "class": e["class"] || null,
-        itemLevel: e.itemLevel != null ? Math.round(e.itemLevel) : null,
-        pulledAt: toTime(e.scoredAt) || stamp,
-        loadouts: loadouts,
-        chosenLoadout: e.chosenLoadout || 0,
-        storedPct: typeof e.damagePct === "number" ? e.damagePct : null,
-        biblePct: typeof e.biblePct === "number" ? e.biblePct : null
-      };
-    });
-  }
+  var CATS = ["special", "basic", "trait"];
+  var TIERS = ["low", "mid", "high"];
+  var BASIC_FAMS = ["mainStat", "vitality"];
+  var TRAIT_FAMS = ["crit", "spec", "swiftness"];
 
-  /**
-   * The Worker's snapshot. Two shapes are accepted so a snapshot format still being
-   * written cannot break this tab: the seed's own {entries:[…]} envelope, or the
-   * packed {classes:[…], labels:[…], characters:[[region,name,itemLevel,classIdx,
-   * pulledAt,grade,statsPacked, loadouts?, chosen?]]} of ARCHITECTURE §1.2.
-   * Anything else reads as empty.
-   *
-   * THE PACKED ROW GREW, IT DID NOT MOVE. Indices 0–6 mean in v2 exactly what they
-   * meant in v1, and index 6 is still the bracelet the board ranks. v2 appends:
-   *
-   *   index 7  every loadout, [labelIdx, itemLevel, statsPacked] each, in the
-   *            character's own tab order — present only when the character wears
-   *            more than one DISTINCT bracelet, which is the only case the marker
-   *            and its tooltip have anything to say about.
-   *   index 8  which of them index 6 is.
-   *
-   * So a v1 payload (and a row that ends at 6) still decodes here: no loadouts,
-   * one bracelet, exactly the old behaviour. The v gate is belt to that braces —
-   * it keeps a FUTURE format from being read as if index 7 still meant this.
-   */
-  function fromWorker(data) {
-    if (!data) return [];
-    if (data.entries) return fromSeed(data);
-    var chars = data.characters || [];
-    if (!chars.length) return [];
-    if (!Array.isArray(chars[0])) {
-      // Already object-shaped: trust the field names, invent nothing.
-      return chars.map(function (c) {
-        var los = (c.loadouts && c.loadouts.length ? c.loadouts : [c]).map(function (l, i) {
-          return {
-            label: l.label || ("Loadout " + (i + 1)),
-            rawStats: l.stats || l.rawStats || [],
-            rollsRemaining: l.rollsRemaining || null,
-            itemLevel: l.itemLevel != null ? Math.round(l.itemLevel) : null,
-            storedPct: null
-          };
-        });
-        return {
-          name: c.name, region: normRegion(c.region), "class": c["class"] || null,
-          itemLevel: c.itemLevel != null ? Math.round(c.itemLevel) : null,
-          pulledAt: toTime(c.pulledAt), loadouts: los,
-          chosenLoadout: c.chosenLoadout || 0, storedPct: null, biblePct: null
-        };
-      });
-    }
+  function fromSnapshot(data) {
+    if (!data || !Array.isArray(data.characters)) return [];
     var classes = data.classes || [], labels = data.labels || [];
-    var v = typeof data.v === "number" ? data.v : 1;
-    function unpack(packed) {
-      var stats = [], i;
-      packed = packed || [];
-      for (i = 0; i + 3 < packed.length; i += 4) {
-        stats.push({ type: packed[i], index: packed[i + 1], value: packed[i + 2], fixed: !!packed[i + 3] });
-      }
-      return stats;
-    }
-    return chars.map(function (a) {
-      var stats = unpack(a[6]);
-      var ilvl = a[2] != null ? Math.round(a[2]) : null;
-      var los = null, chosen = 0;
-      if (v >= 2 && Array.isArray(a[7]) && a[7].length > 1) {
-        los = a[7].map(function (l, i) {
-          return {
-            label: (l && l[0] != null && l[0] >= 0 && labels[l[0]]) || ("Loadout " + (i + 1)),
-            rawStats: unpack(l && l[2]),
-            // The snapshot carries no roll counts, in v1 or v2 — the record's own
-            // numbers are rolls USED and this panel wants rolls LEFT, and there is
-            // no honest way to turn one into the other here.
-            rollsRemaining: null,
-            itemLevel: (l && l[1] != null) ? Math.round(l[1]) : ilvl,
-            storedPct: null
-          };
-        });
-        if (typeof a[8] === "number" && a[8] >= 0 && a[8] < los.length) chosen = a[8];
-      }
-      if (!los) los = [{ label: "Bracelet", rawStats: stats, rollsRemaining: null, itemLevel: a[2], storedPct: null }];
-      return {
-        name: a[1], region: normRegion(a[0]),
-        itemLevel: ilvl,
-        "class": (a[3] != null && a[3] >= 0) ? (classes[a[3]] || null) : null,
-        pulledAt: toTime(a[4]),
-        loadouts: los,
-        chosenLoadout: chosen, storedPct: null, biblePct: null
-      };
-    });
-  }
 
-  /**
-   * Score every loadout, then pick the one the board ranks: the highest RECOMPUTED
-   * score. The file's own chosenLoadout only breaks a tie — recomputing is the
-   * point, so a model change may legitimately promote a different loadout.
-   */
-  function scoreChars(chars) {
-    chars.forEach(function (c) {
-      var best = -Infinity, bestI = -1, i, s, seen = {}, distinct = 0;
-      for (i = 0; i < c.loadouts.length; i++) {
-        var lo = c.loadouts[i];
-        s = null;
-        try { s = score(lo.rawStats, "dps"); } catch (e) { s = null; }
-        lo.score = s;
-        lo.pct = s ? s.pct : (lo.storedPct != null ? lo.storedPct : null);
-        // A row whose numbers do not come out finite is a row we cannot rank. Say
-        // nothing rather than print "Infinity%": a broken payload must not look
-        // like the best bracelet in the game.
-        if (typeof lo.pct !== "number" || !isFinite(lo.pct)) lo.pct = null;
-        var sig = JSON.stringify((lo.rawStats || []).map(function (st) {
-          return [st.type, st.index, st.value, st.fixed ? 1 : 0];
-        }));
-        if (!seen[sig]) { seen[sig] = 1; distinct++; }
-        if (lo.pct != null && (lo.pct > best + 1e-9 ||
-            (Math.abs(lo.pct - best) < 1e-9 && i === c.chosenLoadout))) {
-          best = lo.pct; bestI = i;
+    function unlines(flat, grade) {
+      var out = [], i;
+      flat = flat || [];
+      for (i = 0; i + 3 < flat.length; i += 4) {
+        var cat = CATS[flat[i]] || "special";
+        var line = { cat: cat, fixed: !!flat[i + 3], tier: null, value: null };
+        if (cat === "special") {
+          line.family = flat[i + 1];
+          line.tier = TIERS[flat[i + 2]] || null;
+        } else {
+          line.family = (cat === "basic" ? BASIC_FAMS : TRAIT_FAMS)[flat[i + 1]] || null;
+          line.value = flat[i + 2];
+        }
+        out.push(line);
+      }
+      return out;
+    }
+    function untraits(flat) {
+      var out = [], i;
+      flat = flat || [];
+      for (i = 0; i + 1 < flat.length; i += 2) {
+        out.push({ family: TRAIT_FAMS[flat[i]] || null, value: flat[i + 1] });
+      }
+      return out;
+    }
+
+    return data.characters.map(function (a) {
+      var read = a[7] || [], alt = a[8], lo = a[12];
+      var grade = a[5] === 1 ? "relic" : "ancient";
+      var c = {
+        name: a[1],
+        region: normRegion(a[0]),
+        "class": (a[3] != null && a[3] >= 0) ? (classes[a[3]] || null) : null,
+        itemLevel: a[2] != null ? Math.round(a[2]) : null,
+        pulledAt: toTime(a[4]),
+        _grade: grade,
+        _role: a[6] === 1 ? "support" : "dps",
+        _pct: typeof read[0] === "number" ? read[0] : null,
+        _score: typeof read[1] === "number" ? read[1] : null,
+        _isPerfect: !!read[2],
+        // The reading the better-letter rule rejected, kept so the Grade tooltip
+        // and the SUP chip can name it. Null on every class but the four.
+        _alt: (alt && typeof alt[0] === "number") ? { pct: alt[0], score: alt[1] } : null,
+        _traits: untraits(a[9]),
+        _lines: unlines(a[10], grade),
+        _unmapped: a[11] || 0,
+        loadouts: null,
+        best: 0,
+        distinctBrackets: 1
+      };
+      if (lo && lo.length === 3) {
+        c.distinctBrackets = lo[0] || 1;
+        c.best = lo[1] || 0;
+        c.loadouts = [];
+        for (var i = 0; i + 1 < lo[2].length; i += 2) {
+          c.loadouts.push({
+            label: (lo[2][i] >= 0 && labels[lo[2][i]]) || ("Loadout " + (c.loadouts.length + 1)),
+            // The DAMAGE-DEALER reading, always: that is the axis the loadout is
+            // picked on, for every character, and the marker says so.
+            pct: typeof lo[2][i + 1] === "number" ? lo[2][i + 1] : null
+          });
         }
       }
-      c.distinctBrackets = distinct;
-      c.best = bestI >= 0 ? bestI : (c.chosenLoadout || 0);
-      var b = c.loadouts[c.best] || null;
-      c._s = b ? b.score : null;
-      c._pct = b ? b.pct : (c.storedPct != null ? c.storedPct : null);
-      c._grade = c._s ? c._s.grade : null;
-      if (b && b.itemLevel != null && c.itemLevel == null) c.itemLevel = Math.round(b.itemLevel);
-      applySupportReading(c, b);
       c._sortKey = sortKeyOf(c);
+      return c;
     });
-    return chars;
-  }
-
-  /**
-   * THE BETTER-LETTER RULE. A support-class character's bracelet is read a second
-   * time on the support profile and the support ladder, and the board shows
-   * whichever reading grades it better — smaller band index. A tie keeps the
-   * damage-dealer reading: comparability wins ties.
-   *
-   * The SAME payload is read twice. The loadout was already picked, on the
-   * damage-dealer figure, exactly as it is for everyone else; this does not go
-   * back and re-pick it. For a support wearing two genuinely different bracelets
-   * that is a corner worth knowing about, and none of the live rows is in it —
-   * every support on the board today reads better as a dealer anyway.
-   *
-   * The losing reading is kept on `_sup` whichever way it goes, so the Grade
-   * tooltip can name it. On today's board that is the only visible sign the rule
-   * is running at all, and "we looked and the other axis was worse" is worth
-   * saying out loud.
-   */
-  function applySupportReading(c, lo) {
-    c._sup = null;
-    c._role = "dps";
-    if (!lo || !c._s || !c._s.grade0to100 || !isSupportClass(c["class"])) return;
-    var sup = null;
-    try { sup = score(lo.rawStats, "support"); } catch (e) { sup = null; }
-    if (!sup || !sup.grade0to100) return;
-    c._sup = sup;
-    if (sup.grade0to100.band.i < c._s.grade0to100.band.i) {
-      c._role = "support";
-      c._s = sup;
-      c._pct = sup.pct;
-      c._grade = sup.grade;
-    }
   }
 
   /**
@@ -691,9 +512,8 @@
   }
 
   function sortKeyOf(c) {
-    var g = c._s && c._s.grade0to100;
-    if (!g) return null;
-    return c._role === "support" ? supportScoreToDps(g.score) : g.score;
+    if (c._score == null) return null;
+    return c._role === "support" ? supportScoreToDps(c._score) : c._score;
   }
 
   // ------------------------------------------------------------------
@@ -737,6 +557,10 @@
 '  #tab-leaderboard td,#tab-leaderboard th{overflow:hidden}' +
 '  #tab-leaderboard tbody tr{cursor:pointer}' +
 '  #tab-leaderboard tbody tr:hover{background:var(--panel2)}' +
+// A clicked row fetches its bracelet — the row no longer carries one. Usually
+// one small KV read and gone in a blink; visible when the network is slow, and
+// it has to be, or a slow click reads as a dead one.
+'  #tab-leaderboard tbody tr.loading{cursor:progress;opacity:.55}' +
 '  #tab-leaderboard td.lb-char{white-space:nowrap}' +
 '  #tab-leaderboard .lb-charwrap{display:flex;align-items:center;min-width:0}' +
 '  #tab-leaderboard .lb-name{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' +
@@ -925,9 +749,10 @@
      'your gear, your fight. This board deliberately does not. If it used each player&rsquo;s own settings it would be ranking gear ' +
      'and fight profiles, not bracelets, and nobody&rsquo;s rank would mean anything.</p>' +
 '  <p><b>The arithmetic is the Calculator&rsquo;s</b>, called with different settings &mdash; the same trait model, the same line ' +
-     'model, added in log space and converted once. What is particular to this board: the score is recomputed in your browser from ' +
-     'each character&rsquo;s raw stat lines every time the tab loads, so a change to the model shows up here at once. The numbers ' +
-     'stored in the data file are only a fallback for a row with no raw stats.</p>' +
+     'model, pooled across the whole bracelet, added in log space and converted once. Where it runs is the one thing particular to ' +
+     'this board: every bracelet is scored <b>once, on the server</b>, when the board is built, and what reaches your browser is a ' +
+     'row of finished numbers rather than sixty-odd raw brackets to re-score on every visit. Click a row and it fetches that one ' +
+     'character&rsquo;s bracelet to hand to the Calculator.</p>' +
 '  <p><b>The 0&ndash;100 grade.</b> The Damage % column answers &ldquo;how much&rdquo;; the Grade column answers ' +
      '&ldquo;how good a bracelet&rdquo;, and it is what the board ranks on. It is a straight line between two fixed points: ' +
      '<b>0</b> is the worst bracelet the game can hand you &mdash; both combat traits at the bottom of the band, ' +
@@ -1039,36 +864,39 @@
    * column has been collapsed to make room for the name.
    */
   function gradeCell(c) {
-    var g = c._s && c._s.grade0to100;
-    if (!g) return '<span class="lb-dash">&mdash;</span>';
-    var b = g.band;
+    var b = bandOf(c);
+    if (!b) return '<span class="lb-dash">&mdash;</span>';
     var sup = isSupportRead(c);
-    var gloss = "Bracelet grade " + fx(g.score, 1) + " out of 100, subrank " + b.key + ". " +
+    var anchor = anchorPctOf(c);
+    var gloss = "Bracelet grade " + fx(c._score, 1) + " out of 100, subrank " + b.key + ". " +
       gradeAnchorSentence(c._grade) + " This bracelet is worth " +
       fx(c._pct == null ? 0 : c._pct, 2) + "% damage " +
       (sup ? "to one damage dealer, on the default support, against " : "on the default character, against ") +
-      fx(B.damagePercent(g.perfect), 2) + "% for that good one." +
+      (anchor == null ? "—" : fx(B.damagePercent(anchor), 2)) + "% for that good one." +
       (sup ? " Read on the support ladder, which is cut to the same rarities as the damage dealer's — a support " +
         b.key + " is as rare as a dealer's " + b.key + "." : "") +
       // A support class the DAMAGE-DEALER reading won. Say that the other axis
       // was tried, or the rule is invisible on a board where it never fires.
-      (!sup && c._sup && c._sup.grade0to100
-        ? " A support class: read as a support the same bracelet grades " + c._sup.grade0to100.band.key +
+      (!sup && c._alt
+        ? " A support class: read as a support the same bracelet grades " + SR.of(c._alt.score, "support").key +
           ", the worse letter of the two, so the board shows the damage-dealer reading."
         : "");
     // Only the CEILING wears the animated rainbow — the three best distinct
     // families at Legendary with both traits at the top of the band. astrogem
     // gates it on the config being perfect rather than on the band, for the same
     // reason: an S+ is not a ceiling, and the rainbow has to mean the ceiling.
-    var col = SR.colorOf(b.key, g.isPerfect);
+    // The Worker decides it, on the same numbers it scored the bracelet with: at
+    // the ceiling the total equals an anchor to the last bit, and re-deriving it
+    // here from a rounded score would make the rainbow flicker on noise.
+    var col = SR.colorOf(b.key, c._isPerfect);
     return '<span class="lb-badge' + (b.top ? " top" : "") + (col.cls ? " " + col.cls : "") +
       '" style="background:' + col.bg + ';color:' + col.fg +
       '" data-gloss="' + esc(gloss) + '">' + esc(b.key) + '</span>' +
-      '<span class="lb-score">' + fx(g.score, 1) + '</span>' +
+      '<span class="lb-score">' + fx(c._score, 1) + '</span>' +
       // Phones collapse the Damage % column into this line, so the per-dealer
       // tell has to ride along with it or it is lost on the smaller screen.
       '<span class="lb-dmgmini">' + (c._pct == null ? "&mdash;" : fx(c._pct, 2) + "%") +
-      (isSupportRead(c) ? '<span class="lb-perdealer">per dealer</span>' : "") + '</span>';
+      (sup ? '<span class="lb-perdealer">per dealer</span>' : "") + '</span>';
   }
 
   /** Is this row being shown on the support axis rather than the dealer one? */
@@ -1097,10 +925,9 @@
    */
   function roleMarker(c) {
     if (!isSupportRead(c)) return '';
-    var d = c.loadouts && c.loadouts[c.best] && c.loadouts[c.best].score;
-    var alt = (d && d.grade0to100)
-      ? " Read as a damage dealer the same bracelet grades " + d.grade0to100.band.key +
-        " at " + fx(d.pct, 2) + "%, which is the worse letter of the two."
+    var alt = c._alt
+      ? " Read as a damage dealer the same bracelet grades " + SR.of(c._alt.score, "dps").key +
+        " at " + fx(c._alt.pct, 2) + "%, which is the worse letter of the two."
       : "";
     return '<span class="lb-role" data-gloss="' + esc("A support class, shown on the support axis: its buffs and debuffs, " +
       "scored on one damage dealer. A support-class character is graded both ways and the board shows whichever reading " +
@@ -1108,9 +935,9 @@
   }
 
   function linesCell(c) {
-    if (!c._s || !c._s.lines.length) return '<span class="lb-dash">&mdash;</span>';
+    if (!c._lines || !c._lines.length) return '<span class="lb-dash">&mdash;</span>';
     var h = '<div class="lb-lines">', i;
-    for (i = 0; i < c._s.lines.length; i++) h += linePill(c._s.lines[i], c._s.grade, c._role);
+    for (i = 0; i < c._lines.length; i++) h += linePill(c._lines[i], c._grade, c._role);
     return h + '</div>';
   }
 
@@ -1119,9 +946,9 @@
    * OVERALL rank, so a favourite that is #3 still reads #3 in the pinned section.
    */
   function charRow(c, i, rankNum) {
-    var warn = (c._s && c._s.unmapped)
-      ? '<span class="lb-warn" data-gloss="' + esc(c._s.unmapped + " line" + (c._s.unmapped === 1 ? " uses a stat index" : "s use stat indices") +
-          " the model does not map yet, so " + (c._s.unmapped === 1 ? "it scores" : "they score") + " zero. The real bracelet is worth more than this row says.") + '">&#9888;</span>'
+    var warn = c._unmapped
+      ? '<span class="lb-warn" data-gloss="' + esc(c._unmapped + " line" + (c._unmapped === 1 ? " uses a stat index" : "s use stat indices") +
+          " the model does not map yet, so " + (c._unmapped === 1 ? "it scores" : "they score") + " zero. The real bracelet is worth more than this row says.") + '">&#9888;</span>'
       : '';
     return '<tr data-i="' + i + '">' +
       starCell(c, i) +
@@ -1226,41 +1053,159 @@
   }
 
   // ------------------------------------------------------------------
-  // click -> load into the Calculator
+  // click -> fetch the bracelet -> load it into the Calculator
   // ------------------------------------------------------------------
+
+  /**
+   * THE ROW HAS NO BRACELET, so the click fetches one. That is the trade the v3
+   * summary makes: every reader used to download 67 raw brackets to draw a table
+   * of letters, and now the one reader who clicks a row downloads one.
+   *
+   *   1. GET /character on the Worker — a KV read, ~2KB, no lostark.bible traffic
+   *      for a character the board already lists (it is on the board because it
+   *      is cached). `queue=1` so a record that HAS gone missing answers at once
+   *      with "queued" instead of holding the request open on an upstream fetch.
+   *   2. data/characters.json otherwise — the whole baked store, ~940KB, fetched
+   *      once per page and only ever on this path. It is what makes a row click
+   *      work with no Worker at all, which is the state the site can ship in.
+   *
+   * Both are memoised per character for the session: clicking the same row twice
+   * costs one fetch.
+   */
+  // Only SUCCESS is cached, on both. A click is a thing a reader repeats, and a
+  // remembered failure would make the second attempt fail without trying.
+  var detailCache = {};     // "REGION|name" -> that character's brackets
+  var bakedChars = null;    // the whole data/characters.json, once
+  var bakedPromise = null;  // …and the fetch in flight, so two clicks share one
+
+  function detailKey(region, name) {
+    var r = normRegion(region);
+    return (r === "EU" ? "CE" : r) + "|" + String(name || "").toLowerCase();
+  }
+
+  /** The Worker's /character answer, as the list of loadouts the click picks from. */
+  function loadoutsFromWorker(j) {
+    if (!j || !j.bracelet || !Array.isArray(j.bracelet.stats)) return null;
+    var los = (j.loadouts || []).filter(function (l) {
+      return l && l.bracelet && Array.isArray(l.bracelet.stats) && l.bracelet.stats.length;
+    }).map(function (l) {
+      // Rolls LEFT is what the Calculator counts; a record stores rolls USED, and
+      // there is no honest way to turn one into the other. So this path fills
+      // zero, exactly as the board did before it fetched anything at all.
+      return { label: l.label || null, stats: l.bracelet.stats, rollsRemaining: null };
+    });
+    return { list: los, fallback: { stats: j.bracelet.stats, rollsRemaining: null } };
+  }
+
+  /** The same, from the baked whole-character store — which DOES know rolls left. */
+  function loadoutsFromBaked(e) {
+    if (!e || !Array.isArray(e.rawStats)) return null;
+    var los = (e.loadouts || []).filter(function (l) {
+      return l && Array.isArray(l.rawStats) && l.rawStats.length;
+    }).map(function (l) {
+      return { label: l.label || null, stats: l.rawStats,
+        rollsRemaining: l.rollsRemaining || e.rollsRemaining || null };
+    });
+    return { list: los, fallback: { stats: e.rawStats, rollsRemaining: e.rollsRemaining || null } };
+  }
+
+  /**
+   * WHICH BRACELET DID THE ROW RANK? The detail payload is fetched now and the row
+   * was built minutes or hours ago, so the two are matched rather than assumed.
+   *
+   *   no loadout block   the row ranks the character's OWN bracelet — that is what
+   *                      the Worker scored when the loadouts all wore one item, and
+   *                      `bracelet` is that item. Not list[0], which is a tab.
+   *   a loadout block    index `best`, but only if the label there still agrees;
+   *                      otherwise the label is looked up, and otherwise the
+   *                      character's own bracelet. A record re-pulled with its tabs
+   *                      in a new order must not silently open a different item.
+   */
+  function pickLoadout(c, d) {
+    if (!c.loadouts || !d.list.length) return d.fallback;
+    var want = c.loadouts[c.best] || null;
+    var byIndex = d.list[c.best] || null;
+    if (byIndex && (!want || !want.label || !byIndex.label || want.label === byIndex.label)) return byIndex;
+    for (var i = 0; i < d.list.length; i++) if (want && d.list[i].label === want.label) return d.list[i];
+    return d.fallback;
+  }
+
+  function fetchBaked() {
+    if (bakedChars) return Promise.resolve(bakedChars);
+    if (bakedPromise) return bakedPromise;
+    bakedPromise = fetchJson(CHARS_URL, false).then(function (r) {
+      bakedChars = (r.ok && r.data && r.data.characters) ? r.data.characters : null;
+      if (!bakedChars) bakedPromise = null;      // a failed fetch is not an answer
+      return bakedChars;
+    }).catch(function () { bakedPromise = null; return null; });
+    return bakedPromise;
+  }
+
+  /** One character's brackets, from the Worker if it answers and the baked store
+   *  if it does not. Resolves to null when neither can produce one. */
+  function fetchDetail(c) {
+    var k = detailKey(c.region, c.name);
+    if (detailCache[k]) return Promise.resolve(detailCache[k]);
+    var baked = function () {
+      return fetchBaked().then(function (store) {
+        var d = store ? loadoutsFromBaked(store[k]) : null;
+        if (d) detailCache[k] = d;
+        return d;
+      });
+    };
+    if (!WORKER_URL) return baked();
+    var u = WORKER_URL.replace(/\/+$/, "") + "/character?queue=1&region=" +
+      encodeURIComponent(normRegion(c.region) === "EU" ? "CE" : (normRegion(c.region) || "NA")) +
+      "&name=" + encodeURIComponent(c.name || "");
+    return fetchJson(u, false).then(function (r) {
+      var d = r.ok ? loadoutsFromWorker(r.data) : null;
+      if (!d) return baked();
+      detailCache[k] = d;
+      return d;
+    }).catch(baked);
+  }
 
   /**
    * Hand the clicked bracelet to app.js's own import hook — the same one
    * bible-import.js uses, so a row click and an import land in identical state.
-   * No refetch: everything the panel needs is already in the row.
    */
-  function openInCalculator(c) {
+  function openInCalculator(c, tr) {
     var app = window.BraceletApp, imp = window.BraceletImport;
     if (!app || !app.applyImport || !imp || !imp.buildPatch) {
       if (typeof window.selectTab === "function") window.selectTab("calculator");
       setStatus("The Calculator panel is not ready yet.", "err");
       return;
     }
-    var lo = c.loadouts[c.best] || c.loadouts[0];
-    if (!lo || !lo.rawStats || !lo.rawStats.length) { setStatus("That row carries no bracelet to load.", "err"); return; }
-    var rolls = lo.rollsRemaining || { base: 0, ticket: 0 };
-    var built;
-    try {
-      built = imp.buildPatch({
-        stats: lo.rawStats,
-        // The panel counts rolls LEFT; the payload's numRerolls are the counts USED,
-        // so the seed's own rollsRemaining is what goes in here.
-        numRerolls: rolls.base || 0,
-        numTicketRerolls: rolls.ticket || 0
-      });
-    } catch (e) { setStatus("That bracelet could not be decoded.", "err"); return; }
-    built.patch.character = {
-      name: c.name, region: c.region, "class": c["class"] || null,
-      itemLevel: c.itemLevel == null ? null : c.itemLevel,
-      source: "leaderboard", cached: null, pulledAt: c.pulledAt || null
-    };
-    app.applyImport(built.patch);
-    if (typeof window.selectTab === "function") window.selectTab("calculator");
+    if (tr) tr.classList.add("loading");
+    setStatus("Loading " + (c.name || "that bracelet") + "…", "");
+    fetchDetail(c).then(function (d) {
+      if (tr) tr.classList.remove("loading");
+      if (!d) {
+        setStatus("That bracelet could not be loaded — the character store is not reachable right now.", "err");
+        return;
+      }
+      var lo = pickLoadout(c, d);
+      if (!lo || !lo.stats || !lo.stats.length) { setStatus("That row carries no bracelet to load.", "err"); return; }
+      var rolls = lo.rollsRemaining || { base: 0, ticket: 0 };
+      var built;
+      try {
+        built = imp.buildPatch({
+          stats: lo.stats,
+          // The panel counts rolls LEFT; a payload's numRerolls are the counts
+          // USED, so only a source that stores rolls-left can fill these.
+          numRerolls: rolls.base || 0,
+          numTicketRerolls: rolls.ticket || 0
+        });
+      } catch (e) { setStatus("That bracelet could not be decoded.", "err"); return; }
+      built.patch.character = {
+        name: c.name, region: c.region, "class": c["class"] || null,
+        itemLevel: c.itemLevel == null ? null : c.itemLevel,
+        source: "leaderboard", cached: null, pulledAt: c.pulledAt || null
+      };
+      setStatus("", "");
+      app.applyImport(built.patch);
+      if (typeof window.selectTab === "function") window.selectTab("calculator");
+    });
   }
 
   function wireTbody(tbody) {
@@ -1277,7 +1222,7 @@
       var tr = e.target.closest ? e.target.closest("tr[data-i]") : null;
       if (!tr) return;
       var ch = allChars[parseInt(tr.getAttribute("data-i"), 10)];
-      if (ch) openInCalculator(ch);
+      if (ch) openInCalculator(ch, tr);
     });
   }
 
@@ -1351,7 +1296,7 @@
   }
 
   function renderTable(chars) {
-    rawChars = scoreChars(chars);
+    rawChars = chars;
     populateClassOptions();
     page = 1;
     rebuild();
@@ -1372,7 +1317,8 @@
     });
   }
 
-  /** The seed file — the board's default source while the Worker is undeployed. */
+  /** The seed file — the baked v3 summary, which is the board's source whenever
+   *  the Worker cannot answer with one. */
   function loadSeed(fresh, prefix) {
     return fetchJson(SEED_URL, fresh).then(function (r) {
       if (r.status === 404 || (r.ok && !r.data)) {
@@ -1385,7 +1331,7 @@
         if (!rawChars.length) renderMessage(MSG.http);
         return;
       }
-      var chars = fromSeed(r.data);
+      var chars = readable(r.data) ? fromSnapshot(r.data) : [];
       if (!chars.length) {
         setStatus("The board data carries no characters.", "");
         if (!rawChars.length) renderMessage(MSG.empty);
@@ -1403,10 +1349,31 @@
   }
 
   /**
+   * IS THIS PAYLOAD ONE WE CAN READ? v3 and only v3.
+   *
+   * Every number on the board now comes out of the payload, so a shape this file
+   * does not know is not a payload to render as best it can — it is percentages
+   * read out of stat indices. v2's row put a packed stat array where v3 puts the
+   * two combat traits, and a v2 row decoded as v3 would draw a bracelet worth
+   * 15% as one worth 2, with no error anywhere.
+   *
+   * ONE RELEASE OF TOLERANCE, and it is deliberately the dull kind: a v2 payload
+   * is refused, not adapted, and the board falls through to the baked v3 summary
+   * with the footer saying so. That is a real board, correctly scored, a few days
+   * older — which is what the same fallback already does when the Worker has no
+   * snapshot yet. Adapting v2 would mean keeping the whole decode-and-re-score
+   * path alive to serve a window that only opens if the site is deployed before
+   * the Worker, and the deploy order is Worker first for exactly this reason.
+   */
+  function readable(data) {
+    return !!(data && data.v === 3 && Array.isArray(data.characters));
+  }
+
+  /**
    * The Worker first when one is configured, the seed otherwise — and the seed
-   * again, quietly, whenever the Worker cannot answer with rows. A 429 is NOT an
-   * error: the board throttles refreshes on purpose, so keep whatever is on screen
-   * and say so in a neutral voice.
+   * again, quietly, whenever the Worker cannot answer with rows it can read. A
+   * 429 is NOT an error: the board throttles refreshes on purpose, so keep
+   * whatever is on screen and say so in a neutral voice.
    */
   function load(fresh) {
     if (busy) return;
@@ -1430,16 +1397,21 @@
         if (!rawChars.length) return loadSeed(fresh, "");
         return null;
       }
-      var chars = r.ok ? fromWorker(r.data) : [];
+      var stale = r.ok && r.data && !readable(r.data) && typeof r.data.v === "number" && r.data.v < 3;
+      var chars = (r.ok && readable(r.data)) ? fromSnapshot(r.data) : [];
       if (chars.length) {
         sourceNote = "Live board data from our Worker.";
         setStatus(chars.length + " character" + (chars.length === 1 ? "" : "s") + " on the board.", "");
         renderTable(chars);
         return null;
       }
-      // The Worker is up but has no snapshot yet (it answers 501 until one is
-      // built). That is not a failure the reader needs shouting at them.
-      return loadSeed(fresh, "The Worker has no snapshot yet, so this is the baked copy. ");
+      // Either the Worker is up but has no snapshot yet (it answers with an empty
+      // list until one is built), or it is still serving the older format and has
+      // not been redeployed. Neither is a failure the reader needs shouting at
+      // them, and both land on the same honest baked copy.
+      return loadSeed(fresh, stale
+        ? "The Worker is still serving the previous board format, so this is the baked copy. "
+        : "The Worker has no snapshot yet, so this is the baked copy. ");
     }).catch(function () {
       return loadSeed(fresh, "The Worker could not be reached, so this is the baked copy. ");
     }).then(done, done);

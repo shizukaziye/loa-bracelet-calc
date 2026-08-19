@@ -33,7 +33,7 @@
   worker/feedback-and-admin.md lists exactly what is owed.
 
   NETWORK RULE, ABSOLUTE: this page talks to the bracelet Worker and to its own
-  origin (data/leaderboard-seed.json for the seed POST). Nothing else.
+  origin (data/characters.json for the seed POST). Nothing else.
 -->
 <style>
   :root{
@@ -175,7 +175,7 @@
       <div class="ctl">
         <div class="lbl">Seed the board</div>
         <div class="row">
-          <button class="ghost" id="seed-go">Load data/leaderboard-seed.json</button>
+          <button class="ghost" id="seed-go">Load data/characters.json</button>
         </div>
         <p class="note">Reads the seed file from this origin and POSTs it. Every entry is re-scored by the
           Worker from its raw stats, so the response reports each entry's delta against the file.</p>
@@ -584,12 +584,12 @@
       });
     });
 
-    confirmable($("seed-go"), "Load data/leaderboard-seed.json", function () {
+    confirmable($("seed-go"), "Load data/characters.json", function () {
       // The token check comes FIRST. Even a same-origin read is work nobody
       // signed in has asked for; no token, no request of any kind.
       if (!token()) { out("o-seed", "Not signed in.", "bad"); return; }
       out("o-seed", "Reading the seed file…", "muted");
-      fetch("data/leaderboard-seed.json", { cache: "no-store" }).then(function (r) {
+      fetch("data/characters.json", { cache: "no-store" }).then(function (r) {
         if (!r.ok) throw new Error("The seed file did not load (" + r.status + ").");
         return r.json();
       }).then(function (seed) {

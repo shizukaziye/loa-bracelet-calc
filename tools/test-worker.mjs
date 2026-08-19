@@ -9,14 +9,18 @@
  * under test are the deployed ones, not a copy.
  *
  * What it covers:
- *   1. SCORING PARITY — every entry in data/leaderboard-seed.json, re-scored by
- *      the Worker's own score() and compared to the number the seed recorded.
- *      Entries whose payload uses a type:2 index the shipped model does not map
- *      (the seed decoded 4, 74 and 151 with a local extension map) are EXPECTED
- *      to come out lower; the test asserts they are the only ones that differ.
- *   2. THE PAGE PARSER — extractBracelets() against a hand-built fragment in the
+ *   1. SCORING PARITY — every character in data/characters.json, re-scored by the
+ *      Worker's own score() and compared to the number that character's own entry
+ *      recorded, and then to the number the BOARD SUMMARY publishes for it.
+ *      Since the summary carries finished scores rather than raw brackets, the
+ *      second half is what says the Worker's snapshot builder and its record
+ *      scorer are the same arithmetic. Both halves are exact equalities.
+ *   2. THE SNAPSHOT — snapshotEntry()/encodeSnapshot() against the same
+ *      characters: the row shape, the loadout pick, the better-letter rule for a
+ *      support class, and the promise that no raw bracelet is on the wire.
+ *   3. THE PAGE PARSER — extractBracelets() against a hand-built fragment in the
  *      exact hydration-blob style, including the raid-then-chaos repeat.
- *   3. THE ROSTER PROOF — collectRosterChars() and ownsCharacter() against the
+ *   4. THE ROSTER PROOF — collectRosterChars() and ownsCharacter() against the
  *      real roster payload and four older speculative shapes, plus the cases that
  *      must be REFUSED. Since 2026-08-11 this proof guards POST /forget alone; a
  *      LOOKUP needs no sign-in and no ownership (ARCHITECTURE.md §0.3). These
@@ -30,13 +34,15 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { __test } from "../worker/bracelet.js";
+import { recordOf, charKey, readCharacters, orderedEntries } from "./split-seed.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
-const { score, extractBracelets, collectRosterChars, ownsCharacter, normRegion,
+const { score, boardScore, extractBracelets, collectRosterChars, ownsCharacter, normRegion,
         extractLoadouts, pickBestLoadout, briefScore, loadoutLabel,
         parseCharacterProfile, snapTo, modal, MASTER_NODE_ID, GEM_AP_LEVEL,
-        noSuchMsg, lookupKey, regionLabel } = __test;
+        noSuchMsg, lookupKey, regionLabel, snapshotEntry, encodeSnapshot,
+        isSupportClass, r2, r3, SNAPSHOT_V } = __test;
 
 let pass = 0, fail = 0;
 function ok(name, cond, detail) {
@@ -45,9 +51,11 @@ function ok(name, cond, detail) {
 }
 
 // ---------------------------------------------------------------------------
-console.log("\n1. scoring parity against data/leaderboard-seed.json");
+console.log("\n1. scoring parity against data/characters.json");
 // ---------------------------------------------------------------------------
-const seed = JSON.parse(readFileSync(join(root, "data", "leaderboard-seed.json"), "utf8"));
+const src = readCharacters();
+if (!src) { console.log("  FAIL no character store — run tools/split-seed.mjs"); process.exit(1); }
+const entries = orderedEntries(src.store);
 const TOL = 1e-9;
 // EXACT parity, no tolerated exceptions. Until 2026-08-11 this loop allowed two
 // standing excuses — an unmapped type:2 index, and "a combat trait sits in a
@@ -57,7 +65,7 @@ const TOL = 1e-9;
 // entry ever diverges again, that is a regression, so print it and fail.
 let matched = 0;
 const diverged = [];
-for (const e of seed.entries) {
+for (const e of entries) {
   const s = score(e.rawStats);
   const why = [];
   if (Math.abs(s.pct - e.damagePct) > TOL) why.push("pct " + e.damagePct.toFixed(4) + " -> " + s.pct.toFixed(4));
@@ -67,9 +75,9 @@ for (const e of seed.entries) {
   if (!why.length) matched++;
   else diverged.push({ name: e.name, why: why.join("; ") });
 }
-console.log("     " + matched + "/" + seed.entries.length + " reproduce the seed exactly");
+console.log("     " + matched + "/" + entries.length + " reproduce the stored character exactly");
 for (const d of diverged) console.log("     ~ " + d.name.padEnd(16) + d.why);
-ok("every seeded character re-scores to the number the seed stored",
+ok("every stored character re-scores to the number its record holds",
   diverged.length === 0, diverged.length + " diverged");
 
 // linesPct is NOT just "pct minus a bit": it is the effect lines alone, the
@@ -78,8 +86,8 @@ ok("every seeded character re-scores to the number the seed stored",
 // through setDamage() instead of traitDamage() and pct comes out right while
 // this number silently gains ~2.5pp. Four seeded characters carry one, so this
 // check is the one that would catch the fix being reapplied the wrong way.
-const grantedTraitFolk = seed.entries.filter(e => (e.traits || []).some(t => !t.fixed));
-ok("the seed still carries characters with a trait in a granted slot",
+const grantedTraitFolk = entries.filter(e => (e.traits || []).some(t => !t.fixed));
+ok("the store still carries characters with a trait in a granted slot",
   grantedTraitFolk.length >= 4, String(grantedTraitFolk.length));
 ok("a granted trait scores in pct but NOT in linesPct", grantedTraitFolk.every(e => {
   const s = score(e.rawStats);
@@ -95,21 +103,253 @@ ok("and it still counts as one of the bracelet's granted slots",
 // type:2 special line at all — the only value evidence the decoder ever had. Two
 // of those had four of five lines locked, which made the granted-slot check read
 // them as Relic and score every special line one tier low.
-ok("no seeded bracelet decodes as relic", seed.entries.every(e => score(e.rawStats).grade === "ancient"),
-  seed.entries.filter(e => score(e.rawStats).grade !== "ancient").map(e => e.name).join(","));
+ok("no stored bracelet decodes as relic", entries.every(e => score(e.rawStats).grade === "ancient"),
+  entries.filter(e => score(e.rawStats).grade !== "ancient").map(e => e.name).join(","));
 
 // The split the board depends on: trait lines score through traitDamage, effect
 // lines through setDamage, and pct > linesPct whenever a trait is present.
-const white = seed.entries.find(e => e.name === "White");
+const white = src.store[charKey("NA", "White")];
 if (white) {
   const s = score(white.rawStats);
-  ok("White: linesPct matches the seed", Math.abs(s.linesPct - white.linesPct) < TOL,
+  ok("White: linesPct matches its record", Math.abs(s.linesPct - white.linesPct) < TOL,
     s.linesPct + " vs " + white.linesPct);
   ok("White: whole bracelet scores above its effect lines alone", s.pct > s.linesPct);
   ok("White: grade decoded as ancient", s.grade === "ancient", s.grade);
   ok("White: three granted lines", s.granted === 3, String(s.granted));
   ok("White: score is stamped with the canonical profile", s.profile === "canonical-default");
 }
+
+// ---------------------------------------------------------------------------
+console.log("\n1b. the board summary reproduces those same numbers");
+// ---------------------------------------------------------------------------
+// THE GUARANTEE THE SPLIT HAS TO KEEP. data/leaderboard-seed.json no longer holds
+// a bracelet, so "does the board agree with the model" cannot be asked of it
+// directly any more. It is asked in two hops instead: score() re-scores the WHOLE
+// character (above), and here the snapshot builder re-runs on that same whole
+// character and its row is compared, field by field, with the row the published
+// summary carries. Nothing is compared to a stored constant — both sides are
+// rebuilt from the raw payload, so the check catches a model change, a builder
+// change and a stale file alike.
+const board = JSON.parse(readFileSync(join(root, "data", "leaderboard-seed.json"), "utf8"));
+ok("the baked board is a v" + SNAPSHOT_V + " snapshot payload",
+  board.v === SNAPSHOT_V && Array.isArray(board.characters), "v=" + board.v);
+ok("it has no `entries` array — the whole characters moved out",
+  board.entries === undefined);
+ok("one summary row per stored character",
+  board.characters.length === entries.length,
+  board.characters.length + " rows vs " + entries.length + " characters");
+
+const rebuilt = encodeSnapshot(board.builtAt, entries.map(e => snapshotEntry(recordOf(e))));
+const rowDiffs = [];
+for (let i = 0; i < board.characters.length; i++) {
+  const a = JSON.stringify(board.characters[i]), b = JSON.stringify(rebuilt.characters[i]);
+  if (a !== b) rowDiffs.push(entries[i].name + "\n         published " + a + "\n         rebuilt   " + b);
+}
+for (const d of rowDiffs.slice(0, 5)) console.log("     ~ " + d);
+ok("every published row is byte-for-byte what the builder produces now",
+  rowDiffs.length === 0, rowDiffs.length + " rows differ");
+ok("the class and label tables are rebuilt identically",
+  JSON.stringify([board.classes, board.labels]) === JSON.stringify([rebuilt.classes, rebuilt.labels]));
+
+// The percentage on the board and the percentage in the record are ONE number
+// rounded to what the board prints. This is the check that would catch the two
+// scorers drifting — boardScore() pools the whole bracelet with jointScore(), and
+// summing traitDamage() and setDamage() instead moves 42 of these 59 rows.
+const pctDiffs = [];
+for (let i = 0; i < entries.length; i++) {
+  const want = r2(score(entries[i].rawStats).pct);
+  const rowRanksSameBracelet = board.characters[i][12] === 0;
+  if (rowRanksSameBracelet && board.characters[i][7][0] !== want) {
+    pctDiffs.push(entries[i].name + ": board " + board.characters[i][7][0] + " vs record " + want);
+  }
+}
+for (const d of pctDiffs.slice(0, 5)) console.log("     ~ " + d);
+ok("a single-bracelet row publishes exactly its record's own damage %",
+  pctDiffs.length === 0, pctDiffs.length + " differ");
+
+// THE ROW CARRIES NO BRACELET. Said as a test rather than as a comment, because
+// it is the whole point of the format and the easy thing to undo by accident.
+// Checked structurally, not by sniffing for numbers that look like stat indices:
+// a main-stat line's rolled value is a five-digit number too, and four rows carry
+// one. What v2 shipped and v3 must not is NESTED arrays of raw tuples, and lines
+// and traits longer than a bracelet can be.
+function flatNums(x) { return Array.isArray(x) && x.every(n => typeof n === "number"); }
+const shapeBad = board.characters.filter(a =>
+  !flatNums(a[9]) || a[9].length % 2 !== 0 || a[9].length > 4 ||        // ≤2 combat traits
+  !flatNums(a[10]) || a[10].length % 4 !== 0 || a[10].length > 20 ||    // ≤5 lines
+  !flatNums(a[7]) || a[7].length !== 3 ||
+  (a[8] !== 0 && !flatNums(a[8])) ||
+  (a[12] !== 0 && !(a[12].length === 3 && flatNums(a[12][2]) && a[12][2].length % 2 === 0)));
+ok("no row carries a nested raw stat array, and none is longer than a bracelet",
+  shapeBad.length === 0, shapeBad.map(a => a[1]).join(","));
+ok("a row is 13 slots wide, every row",
+  board.characters.every(a => a.length === 13),
+  JSON.stringify([...new Set(board.characters.map(a => a.length))]));
+// The size claim, as a number rather than an adjective. v2's rows averaged 170
+// bytes across the same characters; a regression past this would mean a raw
+// payload had crept back in.
+const wire = JSON.stringify({ v: board.v, builtAt: board.builtAt, classes: board.classes,
+  labels: board.labels, characters: board.characters });
+ok("the whole board averages under 150 bytes a row on the wire",
+  wire.length / board.characters.length < 150,
+  (wire.length / board.characters.length).toFixed(1) + " B/row");
+
+// The loadout pick. It is the CLIENT's old rule — highest re-scored damage %,
+// ties to the record's chosen index — and not pickBestLoadout's, which ranks
+// linesPct first and disagrees on real characters. Moving it server-side is only
+// safe while the row's own numbers are the picked bracelet's numbers.
+const loRows = board.characters.filter(a => a[12] !== 0);
+ok("the loadout marker only draws where there are ≥2 distinct brackets",
+  loRows.every(a => a[12][0] >= 2), String(loRows.length));
+ok("the ranked loadout is the highest-scoring one the row lists",
+  loRows.every(a => {
+    const pcts = [];
+    for (let i = 1; i < a[12][2].length; i += 2) pcts.push(a[12][2][i]);
+    return pcts[a[12][1]] === Math.max.apply(null, pcts);
+  }), String(loRows.length));
+ok("its own damage % is the ranked loadout's",
+  loRows.every(a => a[12][2][a[12][1] * 2 + 1] === a[7][0]), String(loRows.length));
+
+// THE BETTER-LETTER RULE, which no live character currently exercises: every
+// support-class row on the board today reads better as a dealer. So it is tested
+// against a bracelet built to make the support reading win — two ALLY families,
+// worth exactly nothing to a damage dealer and most of a support's value.
+//
+// The index is the payload's own arithmetic (model/bracelet.js decodeBibleBracelet):
+// 11000 + n·10 + a grade digit, where the damage families 11-33 are n = family-10
+// and the utility families 1-10 are n = family+25; digit 1 is Legendary, 2 Epic,
+// 3 Rare.
+function t3(family, tier) {
+  const n = family >= 11 ? family - 10 : family + 25;
+  return 11000 + n * 10 + (tier === "high" ? 1 : tier === "mid" ? 2 : 3);
+}
+const SUPPORT_BRACELET = [
+  { type: 2, index: 15, value: 110, fixed: true },        // Crit trait
+  { type: 2, index: 18, value: 110, fixed: true },        // Swiftness trait
+  { type: 3, index: t3(29, "high"), value: 5, fixed: false },  // ally attack power
+  { type: 3, index: t3(30, "high"), value: 5, fixed: false },  // ally damage
+  { type: 3, index: t3(17, "high"), value: 5, fixed: false }   // crit-resist shred
+];
+ok("Bard, Paladin, Artist and Valkyrie are the support classes, and nothing else",
+  ["Bard", "Paladin", "Artist", "Valkyrie"].every(isSupportClass) &&
+  !isSupportClass("Guardianknight") && !isSupportClass("Sorceress"));
+const supRec = {
+  region: "NA", name: "Fixture", "class": "Bard", itemLevel: 1700, pulledAt: 1,
+  stats: SUPPORT_BRACELET, loadouts: [], chosenLoadout: 0, score: { grade: "ancient" }, published: true
+};
+const supRow = snapshotEntry(supRec);
+const supAsDps = boardScore(SUPPORT_BRACELET, "dps");
+const supAsSup = boardScore(SUPPORT_BRACELET, "support");
+ok("a support bracelet's two readings are genuinely different numbers",
+  supAsDps.score !== supAsSup.score && supAsDps.pct !== supAsSup.pct,
+  supAsDps.score + " / " + supAsSup.score);
+ok("a support class is shown on whichever axis grades it better",
+  supRow.role === "support", supRow.role + " (dps " + supAsDps.score.toFixed(1) +
+  ", support " + supAsSup.score.toFixed(1) + ")");
+ok("and the losing reading rides along for the tooltip",
+  supRow.alt !== null && supRow.alt.pct === supAsDps.pct);
+ok("the same bracelet on a damage dealer stays on the dealer axis",
+  snapshotEntry(Object.assign({}, supRec, { "class": "Sorceress" })).role === "dps");
+ok("a damage dealer carries no second reading at all",
+  snapshotEntry(Object.assign({}, supRec, { "class": "Sorceress" })).alt === null);
+// A tie must keep the dealer reading — comparability wins ties.
+ok("the shown reading's numbers are the ones in slot 7",
+  r2(supAsSup.pct) === encodeSnapshot(0, [supRow]).characters[0][7][0] &&
+  r3(supAsSup.score) === encodeSnapshot(0, [supRow]).characters[0][7][1]);
+
+// An unpublished record is not a board row, and never has been.
+ok("`published:false` keeps a character off the board",
+  snapshotEntry(Object.assign({}, supRec, { published: false })) === null);
+
+// A ROW CLICK MUST OPEN THE BRACELET THE ROW RANKED. The row carries no bracelet
+// now, so the click fetches GET /character and picks out of THAT — which means
+// the row's `best` index and the detail payload's loadout list have to line up.
+// leaderboard.js's pickLoadout() is the rule; this is that rule, run against
+// every stored character, checking the bracelet it lands on re-scores to the
+// percentage the row publishes. It is the one thing that cannot be checked by
+// looking at either side alone.
+function clientPickLoadout(row, detail) {
+  const lo = row[12];
+  if (lo === 0 || !detail.list.length) return detail.fallback;
+  const best = lo[1];
+  const labels = [];
+  for (let i = 0; i < lo[2].length; i += 2) labels.push(board.labels[lo[2][i]] || null);
+  const want = labels[best] || null;
+  const byIndex = detail.list[best] || null;
+  if (byIndex && (!want || !byIndex.label || want === byIndex.label)) return byIndex;
+  for (const l of detail.list) if (want && l.label === want) return l;
+  return detail.fallback;
+}
+const clickDiffs = [];
+for (let i = 0; i < entries.length; i++) {
+  const e = entries[i], rec = recordOf(e), row = board.characters[i];
+  // The detail payload as GET /character serves it: every loadout that carries a
+  // bracelet, plus the record's own bracelet as the fallback.
+  const detail = {
+    list: rec.loadouts.filter(l => Array.isArray(l.stats) && l.stats.length)
+      .map(l => ({ label: l.label || null, stats: l.stats })),
+    fallback: { stats: rec.stats }
+  };
+  const got = clientPickLoadout(row, detail);
+  const want = row[12] === 0 ? r2(boardScore(rec.stats, "dps").pct) : row[12][2][row[12][1] * 2 + 1];
+  const gotPct = r2(boardScore(got.stats, "dps").pct);
+  if (gotPct !== want) clickDiffs.push(e.name + ": click opens " + gotPct + "%, the row ranks " + want + "%");
+}
+for (const d of clickDiffs.slice(0, 5)) console.log("     ~ " + d);
+ok("a row click opens the bracelet that row ranked, for every stored character",
+  clickDiffs.length === 0, clickDiffs.length + " mismatched");
+
+// ---------------------------------------------------------------------------
+console.log("\n1c. the shape bump forces one rebuild past the dirty gate");
+// ---------------------------------------------------------------------------
+// THE REBUILD IS DIRTY-GATED: no marker, no work. That is right for a content
+// change and wrong for a FORMAT change, because a format change touches every
+// row and no record has moved. Without the fmt gate a new row shape would reach
+// the board one edited character at a time and the rest would serve the old
+// shape forever — so a stored fmt that does not match SNAPSHOT_FMT has to beat
+// the dirty gate exactly once, and then stop beating it.
+//
+// A KV stub is enough to prove it: rebuildSnapshotIfChanged only ever does
+// get/put/list/delete, and Node has the same CompressionStream the runtime does.
+function stubKV(seedPairs) {
+  const m = new Map(Object.entries(seedPairs || {}));
+  return {
+    store: m,
+    async get(k, type) {
+      const v = m.get(k);
+      if (v === undefined) return null;
+      if (type === "arrayBuffer") return v instanceof Uint8Array ? v.buffer : new TextEncoder().encode(v).buffer;
+      return typeof v === "string" ? v : new TextDecoder().decode(v);
+    },
+    async put(k, v) { m.set(k, v instanceof ArrayBuffer ? new Uint8Array(v) : v); },
+    async delete(k) { m.delete(k); },
+    async list({ prefix, limit }) {
+      const keys = [...m.keys()].filter(k => k.startsWith(prefix)).slice(0, limit || 1000).map(name => ({ name }));
+      return { keys, list_complete: true, cursor: null };
+    }
+  };
+}
+const someone = entries[0];
+const CK = "c:na:" + String(someone.name).toLowerCase();
+const kvSeed = {};
+kvSeed[CK] = JSON.stringify(recordOf(someone));
+kvSeed["lb:builtat"] = String(Date.now() - 60 * 60 * 1000);   // an hour ago: past the throttle
+kvSeed["lb:snapshot:fmt"] = "2";                              // …but built in the OLD shape
+const kv = stubKV(kvSeed);
+const bumped = await __test.rebuildSnapshotIfChanged({ CHARS: kv }, 0);
+ok("a stale stored format rebuilds even with no character marked dirty",
+  bumped.built === 1 && bumped.fromScratch === true, JSON.stringify(bumped));
+ok("and it stamps the new format so the next tick does not repeat it",
+  kv.store.get("lb:snapshot:fmt") === "3", kv.store.get("lb:snapshot:fmt"));
+ok("the rebuilt payload is v" + SNAPSHOT_V,
+  bumped.v === SNAPSHOT_V, String(bumped.v));
+// The second call: same store, nothing dirty, format now current -> no work.
+kv.store.set("lb:builtat", String(Date.now() - 60 * 60 * 1000));
+const again = await __test.rebuildSnapshotIfChanged({ CHARS: kv }, 0);
+ok("the tick after that is clean and does nothing", again.skipped === "clean", JSON.stringify(again));
+// And the served bytes really are the compact form, not the source objects.
+const servedGz = kv.store.get("lb:snapshot:gz");
+ok("the served snapshot is stored gzipped", servedGz instanceof Uint8Array && servedGz.length > 0);
 
 // ---------------------------------------------------------------------------
 console.log("\n2. the character-page bracelet parser");

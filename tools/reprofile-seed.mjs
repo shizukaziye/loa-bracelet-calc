@@ -1,15 +1,19 @@
 /**
  * tools/reprofile-seed.mjs — refresh the §1.1 PROFILE blocks in
- * data/leaderboard-seed.json from the saved character pages, and nothing else.
+ * data/characters.json from the saved character pages, and nothing else.
  *
  *   node tools/reprofile-seed.mjs [--write]
  *
- * WHY THIS AND NOT A FULL REBUILD. The seed's scores are the board. They were
+ * WHY THIS AND NOT A FULL REBUILD. The stored scores are the board. They were
  * read and scored in one pass on 2026-08-11 and they must not move because the
  * PARSER learned to read five more numbers off the same pages. So this tool
- * rewrites exactly one key per entry and per loadout — `profile` — and refuses
- * to write if any other byte of the file would change. Run it after touching
- * parseCharacterProfile; it needs .corpus/, which is gitignored.
+ * rewrites exactly one key per character and per loadout — `profile` — and
+ * refuses to write if any other byte of the file would change. Run it after
+ * touching parseCharacterProfile; it needs .corpus/, which is gitignored.
+ *
+ * It does NOT touch data/leaderboard-seed.json, and it does not need to: the
+ * summary carries no profile block. That is the whole reason a profile refresh
+ * is now a one-file change.
  *
  * It makes NO network requests. The corpus is the input and the only input.
  */
@@ -17,11 +21,11 @@ import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { __test } from "../worker/bracelet.js";
+import { charsPath, readCharacters, orderedEntries } from "./split-seed.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 const corpusDir = join(root, ".corpus");
-const seedPath = join(root, "data", "leaderboard-seed.json");
 const write = process.argv.includes("--write");
 
 if (!existsSync(corpusDir)) {
@@ -29,7 +33,12 @@ if (!existsSync(corpusDir)) {
   process.exit(2);
 }
 
-const seed = JSON.parse(readFileSync(seedPath, "utf8"));
+const src = readCharacters();
+if (!src || !src.split) {
+  console.error("no data/characters.json — run tools/split-seed.mjs --write first.");
+  process.exit(2);
+}
+const seed = { entries: orderedEntries(src.store) };
 const before = JSON.stringify(seed);
 
 // Corpus file -> page text, keyed the way the seed names characters. The file
@@ -82,8 +91,10 @@ console.log("entries reprofiled: " + touched + (missing ? ", no page for " + mis
 if (mismatched) { console.error("REFUSING TO WRITE while a loadout count disagrees."); process.exit(1); }
 
 if (!write) {
-  console.log("dry run — pass --write to rewrite data/leaderboard-seed.json");
+  console.log("dry run — pass --write to rewrite data/characters.json");
   process.exit(0);
 }
-writeFileSync(seedPath, JSON.stringify(seed, null, 2) + "\n");
-console.log("wrote data/leaderboard-seed.json");
+const store = JSON.parse(readFileSync(charsPath, "utf8"));
+store.characters = src.store;
+writeFileSync(charsPath, JSON.stringify(store, null, 1) + "\n");
+console.log("wrote data/characters.json");

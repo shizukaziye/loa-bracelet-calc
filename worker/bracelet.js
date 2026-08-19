@@ -81,7 +81,7 @@
  *   POST /admin/control  {mode, rate}           X-Admin-Token. run/off/probe, 1–20 a minute.
  *   POST /admin/dequeue  {match|all}            X-Admin-Token. Evict by key substring.
  *   POST /admin/rescore  {}                     X-Admin-Token. Re-score from the raw stats.
- *   POST /admin/seed                            X-Admin-Token. Body = data/leaderboard-seed.json
+ *   POST /admin/seed                            X-Admin-Token. Body = data/characters.json
  *   POST /admin/delete   {region, name}         X-Admin-Token. Takedown.
  *   POST /admin/drain · POST /admin/snapshot    X-Admin-Token. Run one now.
  *                                               /admin/snapshot {full:true} rebuilds
@@ -125,6 +125,15 @@
  */
 
 import Bracelet from "../model/bracelet.js";
+// The 0–100 bracelet grade and its two ladders. The board snapshot now carries a
+// finished score per row instead of the raw bracelet, so the arithmetic that
+// produced it has to live here — and it has to be the SAME arithmetic the page
+// runs, not a second copy of it. subrank.js is a UMD file the browser loads as a
+// <script> and this bundles as a module; both get the identical anchors.
+//
+// The LADDERS stay on the page. This sends the number; leaderboard.js bands it
+// with Subrank.of(), so re-cutting a ladder is a site deploy and not a Worker one.
+import Subrank from "../subrank.js";
 
 // ---------------------------------------------------------------------------
 // Origins, upstream, and the small shared helpers
@@ -240,8 +249,9 @@ const SNAPSHOT_SRC_KEY = "lb:chars:gz";     // the MUTATION source: the same cha
                                             // gzipped. The served form is index-packed against string
                                             // tables, so upserting one row into it means rebuilding the
                                             // tables; keeping the objects is cheaper than unpacking.
-const SNAPSHOT_V = 2;                       // the WIRE format (payload.v). 2 added the per-row loadouts.
-const SNAPSHOT_FMT = 2;                     // the ENTRY shape stored in SNAPSHOT_SRC_KEY. Bump it whenever
+const SNAPSHOT_V = 3;                       // the WIRE format (payload.v). 2 added the per-row loadouts;
+                                            // 3 dropped every raw bracelet and sends finished numbers.
+const SNAPSHOT_FMT = 3;                     // the ENTRY shape stored in SNAPSHOT_SRC_KEY. Bump it whenever
                                             // snapshotEntry() starts carrying a new field: the incremental
                                             // rebuild only rewrites the rows a dirty marker points at, so a
                                             // widened row would otherwise reach the board one takedown at a
@@ -279,6 +289,27 @@ const FB_LIST_MAX = 200;           // newest notes the admin read returns — ca
  */
 const DEFAULT_PROFILE = Bracelet.normalizeProfile({});
 const MODEL_SIG = Bracelet.MODEL_SIG + "@" + Bracelet.VERSION;
+
+/**
+ * THE SECOND READING, and the only other profile this Worker ever scores on.
+ *
+ * A Bard, Paladin, Artist or Valkyrie is read twice — once as a damage dealer,
+ * once as a support — and the board shows whichever grades the bracelet better
+ * (Shizu, 2026-08-14). Both readings used to be computed in the browser off the
+ * raw bracelet the snapshot shipped; the snapshot ships numbers now, so both are
+ * computed here. It is still one canonical character per role, never the reader's.
+ *
+ * The class list is spelled out rather than inferred: the game's own answer to
+ * "is this class a support" is not written down anywhere either side can read.
+ * Guardian Knight is deliberately absent — it is a damage dealer. Keep it in step
+ * with leaderboard.js's SUPPORT_CLASSES; the two are matched the same way, on the
+ * name with punctuation and case stripped.
+ */
+const SUPPORT_PROFILE = Bracelet.normalizeProfile({ role: "support" });
+const SUPPORT_CLASSES = { bard: 1, paladin: 1, artist: 1, valkyrie: 1 };
+function isSupportClass(cls) {
+  return !!SUPPORT_CLASSES[String(cls == null ? "" : cls).replace(/[^A-Za-z]/g, "").toLowerCase()];
+}
 
 // decodeBibleBracelet names the Swiftness trait the way the official table does;
 // the calculator's three trait rows call it "swift". Crit and Spec already agree.
@@ -409,6 +440,68 @@ function score(stats) {
     unmapped: dec.unknown || [],
     profile: "canonical-default",
     modelSig: MODEL_SIG
+  };
+}
+
+/**
+ * boardScore(stats, role) — one bracelet, read as one role, in the shape the
+ * BOARD ROW needs and nothing more.
+ *
+ * score() above is the RECORD's score: it labels every line, keeps the damage of
+ * each, and is stored in KV. This one is the board's: percentages, the 0–100
+ * grade, and the decoded lines in their raw form so the page can letter them.
+ *
+ * The two must agree on the damage-dealer reading and there is one test that says
+ * so — tools/test-worker.mjs re-scores the whole character file through score()
+ * and compares it with the summary file boardScore() wrote.
+ *
+ *   role      "dps" (every row) or "support" (the second reading a support-class
+ *             row gets). On the support reading every figure is WHAT ONE DAMAGE
+ *             DEALER GAINS, which is the unit the model's support channel is in.
+ *   pct       the whole bracelet: both combat traits AND every effect line, in
+ *             one pool (jointScore). NOT traitDamage() + setDamage() summed —
+ *             that double-pays crit when a trait line and an effect line both
+ *             add crit rate, and it is what leaderboard.js was doing in the
+ *             browser until this moved here. On the 59-character seed the two
+ *             disagree on 42 rows, by up to 0.12pp.
+ *   linesPct  the effect lines alone, which is the figure comparable to
+ *             lostark.bible's own "Bracelet Effects +X%".
+ *   score     the 0–100 grade, Subrank.braceletScore() on the same two terms.
+ *             A NUMBER, not a band: the page bands it, so the ladders can be
+ *             re-cut without redeploying this.
+ */
+function boardScore(stats, role) {
+  if (!Array.isArray(stats) || !stats.length) return null;
+  const sup = role === "support";
+  const prof = sup ? SUPPORT_PROFILE : DEFAULT_PROFILE;
+  const dec = decodeWithGradeCheck(stats);
+  const traits = { crit: 0, spec: 0, swift: 0 };
+  const lines = [];
+  for (const l of dec.lines) {
+    const key = TRAIT_TO_APP[l.family];
+    if (l.cat === "trait" && key) { traits[key] = l.value; continue; }
+    lines.push(l);
+  }
+  const g = Subrank.braceletScore({
+    lines: lines, traits: traits, grade: dec.grade,
+    // null, not DEFAULT_PROFILE: null is what hits subrank's anchor cache. The
+    // support reading misses it and recomputes its anchors — 0.18ms a row
+    // against 0.04, which is 135ms if an entire 750-record rebuild chunk were
+    // supports. Well inside the tick, and cheaper than a second copy of
+    // braceletScore's formula living here to hold a cache of its own.
+    profile: sup ? SUPPORT_PROFILE : null
+  });
+  return {
+    role: sup ? "support" : "dps",
+    grade: dec.grade,
+    traits: traits,
+    traitLines: dec.lines.filter(function (l) { return l.cat === "trait" && TRAIT_TO_APP[l.family]; }),
+    lines: lines,
+    pct: Bracelet.damagePercent(Bracelet.jointScore(lines, traits, dec.grade, prof)),
+    linesPct: Bracelet.damagePercent(Bracelet.setDamage(lines, dec.grade, prof)),
+    unmapped: (dec.unknown || []).length,
+    score: g.score,
+    isPerfect: !!g.isPerfect
   };
 }
 
@@ -568,8 +661,9 @@ function adminOk(request, env) {
  * /api/oauth/rosters names classes with the game's internal snake_case codes
  * ("devil_hunter_female"), not the English display names the character PAGE
  * badge carries ("Gunslinger"). Eight of these were verified by joining the live
- * roster against data/leaderboard-seed.json, which was read off the pages
- * themselves — see docs/research/oauth-rosters-shape.md.
+ * roster against the baked characters (data/characters.json since the board file
+ * was split), which were read off the pages themselves — see
+ * docs/research/oauth-rosters-shape.md.
  *
  * DORMANT since 2026-08-11, deliberately kept. It was the class fallback for a
  * lookup that had already read the caller's roster; a lookup reads no roster any
@@ -2391,87 +2485,194 @@ function packStats(stats) {
 }
 
 /**
- * The board row we keep per character, before it is packed for the wire.
+ * THE SNAPSHOT IS A SUMMARY. It carries no bracelet.
  *
- * `stats` is the CHOSEN loadout — the bracelet the board RANKS on, and the only
- * one the row used to carry. `loadouts` carries every loadout the character has,
- * chosen one included, in the character's own tab order; `chosen` says which of
- * them `stats` is.
+ * Until v3 every row shipped the ranked bracelet's raw stat tuples AND, for a
+ * character wearing more than one, every loadout's tuples as well — and the page
+ * decoded and re-scored all of it on load. That is the whole record travelling to
+ * every reader so a table of letters can be drawn, and it grows with the store:
+ * the bracelet is ~40% of a row before the loadouts and ~75% after.
  *
- * IT IS OMITTED WHEN THE LOADOUTS ALL WEAR THE SAME BRACELET. Most characters
- * have three tabs and one bracelet, and shipping that bracelet three times says
- * nothing: the marker only draws on ≥2 DISTINCT brackets, and the client counts
- * distinctness off exactly these packed tuples, so a list it would collapse to
- * one is a list nobody would ever see. 9 of the 60 stored characters genuinely
- * differ, and those 9 are the ones that pay for the field.
+ * So the raw payload stays where it already lives, in the c: record, and the row
+ * carries what the table shows: the two percentages, the 0–100 grade, the role the
+ * board reads a support-class character on, the two combat traits, the effect
+ * lines in their decoded form (a family and a tier, not a stat index and a raw
+ * value), and — for the >1-bracelet marker alone — a label and a percentage per
+ * loadout. Anything that needs the bracelet itself asks GET /character for it.
+ *
+ * WHICH LOADOUT THE BOARD RANKS. The highest RE-SCORED one, ties to the record's
+ * own chosen index — which is the rule the page has always applied to the list it
+ * was sent, and it is not pickBestLoadout's (that ranks linesPct first, and it
+ * disagrees on 1 of the 67 stored characters). The rule moved; it did not change.
+ *
+ * A character with fewer than two DISTINCT brackets carries no loadout block at
+ * all: the marker only draws on ≥2, so a list that would collapse to one is a
+ * list nobody would ever see.
  */
 function snapshotEntry(rec) {
   if (!rec || !Array.isArray(rec.stats) || !rec.stats.length) return null;
   if (rec.published === false) return null;             // reading your own bracelet ≠ joining a public board
-  const e = {
-    region: rec.region, name: rec.name,
-    itemLevel: rec.itemLevel == null ? null : rec.itemLevel,
-    "class": rec["class"] || null,
-    pulledAt: rec.pulledAt || 0,
-    grade: (rec.score && rec.score.grade) || null,
-    stats: rec.stats
-  };
 
+  // Every loadout the record holds, chosen one included, in the character's own
+  // tab order — and which of them the RECORD calls the chosen one.
   const los = Array.isArray(rec.loadouts) ? rec.loadouts.filter(function (l) {
     return l && Array.isArray(l.stats) && l.stats.length;
   }) : [];
-  if (los.length < 2) return e;
-
   const sigs = los.map(function (l) { return JSON.stringify(packStats(l.stats)); });
   const distinct = {};
   for (const s of sigs) distinct[s] = 1;
-  if (Object.keys(distinct).length < 2) return e;
+  const nDistinct = Object.keys(distinct).length;
 
-  // Which loadout IS the ranked bracelet? Matched on the stats rather than
-  // trusted from `chosenLoadout`, so index 6 and the "(ranked)" pill can never
-  // disagree — a record written before the two were kept in step would.
+  // A record whose loadouts all wear one bracelet ranks that bracelet, full stop.
+  // Matched on the stats rather than trusted from `chosenLoadout`, so the ranked
+  // row and the "(ranked)" pill can never disagree.
+  const multi = los.length >= 2 && nDistinct >= 2;
   const chosenSig = JSON.stringify(packStats(rec.stats));
   let chosen = sigs.indexOf(chosenSig);
   if (chosen < 0) chosen = (typeof rec.chosenLoadout === "number" && rec.chosenLoadout >= 0 && rec.chosenLoadout < los.length) ? rec.chosenLoadout : 0;
 
-  e.loadouts = los.map(function (l, i) {
-    return {
-      label: l.label || loadoutLabel(l.classification) || ("Loadout " + (i + 1)),
-      itemLevel: l.itemLevel == null ? null : l.itemLevel,
-      stats: l.stats
-    };
-  });
-  e.chosen = chosen;
-  return e;
+  const cand = multi ? los.map(function (l, i) {
+    return { label: l.label || loadoutLabel(l.classification) || ("Loadout " + (i + 1)), stats: l.stats };
+  }) : [{ label: "Bracelet", stats: rec.stats }];
+  if (!multi) chosen = 0;
+
+  // Score every candidate as a DAMAGE DEALER and rank on that, for everyone. The
+  // support reading is a DISPLAY choice made afterwards, on the bracelet this
+  // pick already settled — the same order the page ran them in.
+  let best = -Infinity, bestI = -1;
+  for (let i = 0; i < cand.length; i++) {
+    let s = null;
+    try { s = boardScore(cand[i].stats, "dps"); } catch (e) { s = null; }
+    cand[i].s = s;
+    const p = (s && isFinite(s.pct)) ? s.pct : null;
+    cand[i].pct = p;
+    if (p != null && (p > best + 1e-9 || (Math.abs(p - best) < 1e-9 && i === chosen))) { best = p; bestI = i; }
+  }
+  const b = cand[bestI >= 0 ? bestI : chosen];
+  if (!b || !b.s) return null;                          // nothing decoded: no row rather than a wrong one
+
+  // THE BETTER-LETTER RULE (Shizu, 2026-08-14). A support class is read a second
+  // time on the support profile and the support ladder, and the board shows
+  // whichever reading BANDS better — the smaller band index. A tie keeps the
+  // damage-dealer reading, because that is what every other row is comparable to.
+  // Both readings ship whichever way it goes: the Grade tooltip names the loser.
+  let sup = null;
+  if (isSupportClass(rec["class"])) {
+    try { sup = boardScore(b.stats, "support"); } catch (e) { sup = null; }
+  }
+  const supWins = !!sup && Subrank.of(sup.score, "support").i < Subrank.of(b.s.score, "dps").i;
+  const shown = supWins ? sup : b.s;
+  const other = supWins ? b.s : sup;
+
+  return {
+    region: rec.region, name: rec.name,
+    itemLevel: rec.itemLevel == null ? null : rec.itemLevel,
+    "class": rec["class"] || null,
+    pulledAt: rec.pulledAt || 0,
+    grade: b.s.grade,
+    role: shown.role,
+    read: { pct: shown.pct, linesPct: shown.linesPct, score: shown.score, isPerfect: shown.isPerfect },
+    alt: other ? { pct: other.pct, score: other.score } : null,
+    // The decode is role-blind — a bracelet's families, tiers and trait values are
+    // the item, not the reader — so ONE copy serves both readings.
+    traits: b.s.traitLines.map(function (l) { return [l.family, l.value]; }),
+    lines: b.s.lines.map(function (l) {
+      return { cat: l.cat, family: l.family, tier: l.tier || null,
+        value: l.cat === "special" ? null : l.value, fixed: !!l.fixed };
+    }),
+    unmapped: b.s.unmapped,
+    loadouts: multi ? {
+      distinct: nDistinct,
+      best: bestI >= 0 ? bestI : chosen,
+      items: cand.map(function (c) { return { label: c.label, pct: c.pct }; })
+    } : null
+  };
 }
 function entryId(e) { return (e.region + ":" + e.name).toLowerCase(); }
 
 /**
- * ARCHITECTURE §1.2, on the wire:
+ * Numbers on the wire, at exactly the resolution the board reads them at.
  *
- *   { v:2, builtAt, classes:[…], labels:[…],
- *     characters:[ [region, name, itemLevel, classIdx, pulledAt, grade, statsPacked,
- *                   loadouts?, chosen?] ] }
+ * A double serialises to 17 significant figures — `19.702881143969385` — and
+ * every percentage on the board is printed to TWO decimals, by the same
+ * `Math.round(x*100)/100` this does, so r2 is display-exact: rounding here and
+ * rounding at the cell give the identical string.
  *
- * `statsPacked` is the raw stat tuples flattened to numbers (type, index, value,
- * fixed) × N — a bracelet is at most five lines, so a row is ~25 numbers. It is
- * the CHOSEN loadout's bracelet, and it is what the board ranks on.
+ * The grade keeps THREE, though it is printed to one. It is the board's SORT
+ * KEY, and at one decimal about a quarter of a 67-row board would tie and fall
+ * back to payload order.
  *
- * INDICES 0–6 NEVER MOVE. v2 only APPENDS, and a row that has nothing to append
- * simply ends at 6, because a JSON array does not have to be a fixed width. So a
- * client built against v1 reads a v2 payload correctly and ignores the rest, and
- * this v2 encoder's rows still decode in that older client — which is the whole
- * reason the loadouts went on the end instead of into a reshaped row.
+ * This is not a nicety. The percentages are the only high-entropy fields in the
+ * payload — gzip can do nothing with a six-figure decimal, where it packs the
+ * repeated stat indices v2 shipped almost to nothing — so their precision is
+ * most of what the served bytes cost.
  *
- *   index 7  loadouts  [ [labelIdx, itemLevel, statsPacked], … ] — every loadout
- *                      the character has, chosen one included, in tab order.
- *                      Present only when they are not all the same bracelet
- *                      (see snapshotEntry).
- *   index 8  chosen    which of index 7 is the ranked bracelet at index 6.
+ * tools/test-worker.mjs compares THROUGH these, so the parity check stays an
+ * exact equality rather than becoming a tolerance.
+ */
+function r2(x) { return (typeof x === "number" && isFinite(x)) ? Math.round(x * 1e2) / 1e2 : null; }
+function r3(x) { return (typeof x === "number" && isFinite(x)) ? Math.round(x * 1e3) / 1e3 : null; }
+
+// Row codes. Small integers instead of strings, because these repeat on every
+// row of every payload and a string table for two values costs more than the
+// two values.
+const GRADE_CODE = { ancient: 0, relic: 1 };
+const CAT_CODE = { special: 0, basic: 1, trait: 2 };
+const TIER_CODE = { low: 0, mid: 1, high: 2 };
+// basic and trait families are a closed set; special families are already ids.
+const BASIC_CODE = { mainStat: 0, vitality: 1 };
+const TRAIT_CODE = { crit: 0, spec: 1, swiftness: 2 };
+
+/**
+ * ARCHITECTURE §1.2, on the wire — v3:
  *
- * The class table rides INSIDE the payload, and so does the new label table. A
- * table shipped separately is a table that drifts: the client would decode last
- * week's indices against this week's list and mislabel every row, silently.
+ *   { v:3, builtAt, classes:[…], labels:[…], characters:[ row ] }
+ *
+ * The row is FIXED WIDTH at 13. v2 grew by appending and let a short row mean
+ * "nothing to append", which worked while the tail was optional; v3's tail is
+ * not, so every row carries every slot and a slot that has nothing to say
+ * carries 0.
+ *
+ *   0  region     "NA" | "CE"
+ *   1  name
+ *   2  itemLevel  or null
+ *   3  classIdx   into classes[]; -1 for none
+ *   4  pulledAt   ms
+ *   5  grade      0 ancient, 1 relic
+ *   6  role       0 the damage-dealer reading is shown, 1 the support one
+ *   7  read       [pct, score0to100, isPerfect] — THE SHOWN READING.
+ *                 `linesPct` is deliberately NOT here. Nothing on the board draws
+ *                 it, and slot 10 plus slot 5 are everything setDamage() needs to
+ *                 recompute it — so it would be a derived number, sent to every
+ *                 reader, for nobody. It cost 6% of the served bytes.
+ *   8  alt        0, or [pct, score0to100] — the reading that LOST, on a support
+ *                 class. Named by the Grade tooltip and the SUP chip, nothing else.
+ *   9  traits     (traitCode, value) × N, FLAT.  0 crit, 1 spec, 2 swiftness
+ *  10  lines      (catCode, family, tierOrValue, fixed) × N, FLAT — the EFFECT
+ *                 lines, which is every line except the two combat traits. The
+ *                 tuples are flattened for the same reason v2's stat tuples were:
+ *                 a bracelet is at most five lines, and the inner brackets cost
+ *                 more than the fields they hold. Slot 2 carries the only number
+ *                 the category has:
+ *                   cat 0 special  family = its id 1–33, slot 2 = tier 0 low /
+ *                                  1 mid / 2 high. The VALUE is not sent: the
+ *                                  family's own table holds it, and both sides
+ *                                  read that table.
+ *                   cat 1 basic    family = 0 mainStat / 1 vitality, slot 2 = the
+ *                                  rolled number.
+ *                   cat 2 trait    a combat trait the model has no channel for;
+ *                                  family = 0 crit / 1 spec / 2 swiftness, slot 2
+ *                                  = its value. Scores zero, and is drawn as such.
+ *  11  unmapped   how many lines used a stat index the model cannot place
+ *  12  lo         0, or [distinct, best, (labelIdx, pct) × N flat] — present only
+ *                 when the character wears ≥2 DISTINCT brackets, which is the
+ *                 only case the marker has anything to say about. The per-loadout
+ *                 percentages are the DAMAGE-DEALER reading, always: that is the
+ *                 axis the loadout is picked on, for every character.
+ *
+ * The class table and the label table ride INSIDE the payload. A table shipped
+ * separately is a table that drifts: the client would decode last week's indices
+ * against this week's list and mislabel every row, silently.
  */
 function encodeSnapshot(builtAt, entries) {
   const classes = [], classIdx = {};
@@ -2487,16 +2688,39 @@ function encodeSnapshot(builtAt, entries) {
     if (labelIdx[s] == null) { labelIdx[s] = labels.length; labels.push(s); }
     return labelIdx[s];
   }
+  function famCode(l) {
+    if (l.cat === "special") return l.family;
+    if (l.cat === "basic") return BASIC_CODE[l.family] == null ? -1 : BASIC_CODE[l.family];
+    return TRAIT_CODE[l.family] == null ? -1 : TRAIT_CODE[l.family];
+  }
+  function slot2(l) {
+    if (l.cat === "special") return TIER_CODE[l.tier] == null ? -1 : TIER_CODE[l.tier];
+    return l.value == null ? 0 : l.value;
+  }
   const characters = entries.map(function (e) {
-    const row = [e.region, e.name, e.itemLevel, ci(e["class"]), e.pulledAt || 0,
-      e.grade || null, packStats(e.stats)];
-    if (Array.isArray(e.loadouts) && e.loadouts.length > 1) {
-      row.push(e.loadouts.map(function (l) {
-        return [li(l.label), l.itemLevel == null ? null : l.itemLevel, packStats(l.stats)];
-      }));
-      row.push(e.chosen || 0);
+    const traits = [];
+    for (const t of (e.traits || [])) traits.push(TRAIT_CODE[t[0]] == null ? -1 : TRAIT_CODE[t[0]], t[1]);
+    const lines = [];
+    for (const l of (e.lines || [])) {
+      lines.push(CAT_CODE[l.cat] == null ? 0 : CAT_CODE[l.cat], famCode(l), slot2(l), l.fixed ? 1 : 0);
     }
-    return row;
+    let lo = 0;
+    if (e.loadouts) {
+      const items = [];
+      for (const it of e.loadouts.items) items.push(li(it.label), r2(it.pct));
+      lo = [e.loadouts.distinct, e.loadouts.best, items];
+    }
+    return [
+      e.region, e.name, e.itemLevel,
+      ci(e["class"]), e.pulledAt || 0,
+      GRADE_CODE[e.grade] || 0,
+      e.role === "support" ? 1 : 0,
+      [r2(e.read.pct), r3(e.read.score), e.read.isPerfect ? 1 : 0],
+      e.alt ? [r2(e.alt.pct), r3(e.alt.score)] : 0,
+      traits, lines,
+      e.unmapped || 0,
+      lo
+    ];
   });
   return { v: SNAPSHOT_V, builtAt: builtAt, classes: classes, labels: labels, characters: characters };
 }
@@ -2647,8 +2871,11 @@ async function rebuildSnapshotIfChanged(env, minIntervalMs, opts) {
   return { built: entries.length, bytes: gz.byteLength, builtAt: startedAt, fromScratch: fromScratch,
     v: SNAPSHOT_V, fmt: SNAPSHOT_FMT,
     // How many rows carry more than one distinct bracelet — the number that says
-    // whether the widened row is actually doing anything.
-    withLoadouts: entries.filter(function (e) { return e && e.loadouts && e.loadouts.length > 1; }).length };
+    // whether the loadout block is actually doing anything — and how many are
+    // shown on the support axis, which is the only sign the better-letter rule
+    // is running at all on a board where it may never fire.
+    withLoadouts: entries.filter(function (e) { return e && e.loadouts; }).length,
+    supportRead: entries.filter(function (e) { return e && e.role === "support"; }).length };
 }
 
 /**
@@ -3129,9 +3356,15 @@ async function handleForget(env, request) {
 }
 
 /**
- * POST /admin/seed — load data/leaderboard-seed.json into KV.
+ * POST /admin/seed — load data/characters.json into KV.
  *
- * The body IS the seed file (the Worker cannot read the repo). Every entry is
+ * The body IS the character file (the Worker cannot read the repo), and it must
+ * be that file and not the board summary beside it: the summary carries no
+ * bracelet, so posting it would be a request to blank 59 records. The reader
+ * below takes the keyed object it holds, and still takes a pre-split
+ * `{entries:[…]}` list so an older copy in someone's downloads still works.
+ *
+ * Every entry is
  * RE-SCORED here from its `rawStats` rather than trusting the file's stored
  * numbers: one scorer, one profile, one set of numbers on the board. The
  * response reports each entry's delta against the file, so a divergence is
@@ -3147,9 +3380,20 @@ async function handleForget(env, request) {
 async function handleAdminSeed(env, request) {
   if (!env || !env.CHARS) return json({ error: "no_kv", message: "The CHARS namespace is not bound." }, 503);
   let body;
-  try { body = await request.json(); } catch (e) { return json({ error: "bad_request", message: "POST the contents of data/leaderboard-seed.json as the body." }, 400); }
-  const entries = Array.isArray(body && body.entries) ? body.entries : null;
-  if (!entries) return json({ error: "bad_request", message: "Expected { entries: [ … ] }." }, 400);
+  try { body = await request.json(); } catch (e) { return json({ error: "bad_request", message: "POST the contents of data/characters.json as the body." }, 400); }
+  // THE WHOLE CHARACTERS, and never the board summary. data/characters.json is
+  // keyed by "<REGION>|<name>"; the pre-split data/leaderboard-seed.json was a
+  // list, and old copies of it are still around, so both are read. What is NOT
+  // read is today's leaderboard-seed.json — it carries no bracelet, so posting
+  // it here would write 59 empty records over the real ones.
+  const entries = (body && body.characters && !Array.isArray(body.characters))
+    ? Object.keys(body.characters).sort().map(function (k) { return body.characters[k]; })
+    : (Array.isArray(body && body.entries) ? body.entries : null);
+  if (!entries) {
+    return json({ error: "bad_request",
+      message: "Expected data/characters.json — { characters: { \"NA|name\": { … } } }. " +
+        "data/leaderboard-seed.json is the board SUMMARY now and carries no brackets." }, 400);
+  }
 
   const out = [];
   const now = Date.now();
@@ -3646,6 +3890,8 @@ export const __test = {
   getDrainConfig: getDrainConfig, setDrainConfig: setDrainConfig,
   rebuildSnapshotIfChanged: rebuildSnapshotIfChanged,
   encodeSnapshot: encodeSnapshot, snapshotEntry: snapshotEntry,
+  boardScore: boardScore, isSupportClass: isSupportClass, r2: r2, r3: r3,
+  SNAPSHOT_V: SNAPSHOT_V, SNAPSHOT_FMT: SNAPSHOT_FMT,
   drainSpacingMs: drainSpacingMs, validateNameRegion: validateNameRegion,
   isCharKey: isCharKey,
   // The failure copy. It is checked here rather than against the live Worker
