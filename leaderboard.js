@@ -53,12 +53,16 @@
  *   and gap-to-#1 used to have their own columns; they said less than the space
  *   they cost.
  *
- * SUPPORTS (Shizu, 2026-08-14). A Bard, Paladin, Artist or Valkyrie is scored
- *   twice — once as a damage dealer, once as a support — and shown on whichever
- *   reading grades the bracelet better. On the support reading every figure is
- *   what ONE damage dealer gains, so the board cannot rank on the Damage %
- *   column any more: it ranks on the 0–100 grade, which the two rarity-matched
- *   ladders make comparable. See SUPPORT_CLASSES and sortKeyOf().
+ * TWO BOARDS (Shizu, 2026-09-15; astrogem's DPS / Support toggle). A Bard,
+ *   Paladin, Artist or Valkyrie is scored twice by the Worker — once as a damage
+ *   dealer, once as a support — and the row carries both readings. The DPS
+ *   board reads everyone as a damage dealer and drops a support MAIN (support
+ *   reading two or more subranks above the dealer one); the Support board reads
+ *   the four support classes as supports, where every figure is what ONE damage
+ *   dealer gains. Each board sorts on its own Damage % column. Until now one
+ *   board showed each character on whichever reading graded better and sorted
+ *   on a mapped 0–100 key, because a support's 2% and a dealer's 15% cannot
+ *   share a column. Split, they do not have to. See applyMode() and rebuild().
  *
  * NETWORK: this file talks to our own origin (the seed file) and, when configured,
  * to our own Worker. It never touches lostark.bible — only the Worker may, and only
@@ -94,9 +98,9 @@
   var Favs = (typeof window !== "undefined" && window.Favorites) || null;
   var SR = (typeof window !== "undefined" && window.Subrank) || null;
 
-  // The two profiles this tab ever scores on. Computed once: both are constants.
-  // Every row is read on the damage-dealer one; a support-class row is read on
-  // BOTH and shown on whichever grades its bracelet better — see SUPPORT_CLASSES.
+  // The two profiles this tab ever letters a line on. Computed once: both are
+  // constants. The DPS board reads every line on the damage-dealer one, the
+  // Support board on the support one — see applyMode().
   var DEFAULT_PROFILE = B ? B.normalizeProfile({}) : null;
   var SUPPORT_PROFILE = B ? B.normalizeProfile({ role: "support" }) : null;
 
@@ -108,6 +112,7 @@
   var allChars = [];      // the current DISPLAY list, tagged _rank/_idx
   var searchQuery = "";
   var classFilter = "";
+  var mode = "dps";       // "dps" | "support" — which board is shown
   var page = 1;
   var loadedOnce = false;
   var busy = false;
@@ -383,10 +388,12 @@
    *
    * THE SUPPORT CLASSES no longer appear in this file. A Bard, Paladin, Artist or
    * Valkyrie is read twice — once as a damage dealer, once as a support — and
-   * shown on whichever grades the bracelet better (Shizu, 2026-08-14). Both
-   * readings are in the row: slot 7 is the one that won, slot 8 the one that
-   * lost. The list of which classes get the second reading is the Worker's
-   * SUPPORT_CLASSES, so there is one copy of it and not two drifting apart.
+   * both readings are in the row: slot 6 says which one the Worker's
+   * better-letter rule picked, slot 7 is that one, slot 8 the other. This side
+   * files them by AXIS instead — `_dps` and `_sup` — because the two boards
+   * each want one axis, not the winner. The list of which classes get the
+   * second reading is the Worker's SUPPORT_CLASSES, so there is one copy of it
+   * and not two drifting apart: a row with a slot-8 reading is a support class.
    */
   var CATS = ["special", "basic", "trait"];
   var TIERS = ["low", "mid", "high"];
@@ -426,6 +433,18 @@
     return data.characters.map(function (a) {
       var read = a[7] || [], alt = a[8], lo = a[12];
       var grade = a[5] === 1 ? "relic" : "ancient";
+      var won = {
+        pct: typeof read[0] === "number" ? read[0] : null,
+        score: typeof read[1] === "number" ? read[1] : null,
+        isPerfect: !!read[2]
+      };
+      // The Worker settles the rainbow on the reading it picked, and a bracelet
+      // at the ceiling of one axis is nowhere near the ceiling of the other (the
+      // best families differ), so the reading it did not pick is never perfect.
+      var lost = (alt && typeof alt[0] === "number")
+        ? { pct: alt[0], score: typeof alt[1] === "number" ? alt[1] : null, isPerfect: false }
+        : null;
+      var supWon = a[6] === 1;
       var c = {
         name: a[1],
         region: normRegion(a[0]),
@@ -433,13 +452,15 @@
         itemLevel: a[2] != null ? Math.round(a[2]) : null,
         pulledAt: toTime(a[4]),
         _grade: grade,
-        _role: a[6] === 1 ? "support" : "dps",
-        _pct: typeof read[0] === "number" ? read[0] : null,
-        _score: typeof read[1] === "number" ? read[1] : null,
-        _isPerfect: !!read[2],
-        // The reading the better-letter rule rejected, kept so the Grade tooltip
-        // and the SUP chip can name it. Null on every class but the four.
-        _alt: (alt && typeof alt[0] === "number") ? { pct: alt[0], score: alt[1] } : null,
+        // Both axes, filed by axis. `_sup` is null on every class but the four.
+        _dps: supWon ? lost : won,
+        _sup: supWon ? won : lost,
+        // The display fields every cell reads. applyMode() fills them from the
+        // active board's axis before each rebuild.
+        _role: "dps",
+        _pct: null,
+        _score: null,
+        _isPerfect: false,
         _traits: untraits(a[9]),
         _lines: unlines(a[10], grade),
         _unmapped: a[11] || 0,
@@ -460,60 +481,52 @@
           });
         }
       }
-      c._sortKey = sortKeyOf(c);
       return c;
     });
   }
 
   /**
-   * ONE SORT KEY FOR TWO LADDERS.
+   * TWO BOARDS, ONE ROW.
    *
-   * The board used to sort on the Damage % column, and it cannot any more: a
-   * support reading is ~1-2% where a dealer's is ~15%, so a support shown on its
-   * own axis would sink to the bottom of the board however good its bracelet is.
-   * The two figures are not comparable and never were.
-   *
-   * The two LETTERS are. tools/rank-match.mjs cut the support ladder to the same
-   * RARITIES as the DPS one — a support A- is as rare as a dealer's A- — which is
-   * exactly what makes the boards commensurable. So the key is the 0-100 grade,
-   * with a support-read score mapped onto the DPS scale through the two ladders'
-   * own cut pairs.
-   *
-   * That also changes what a rank MEANS between grades: two bracelets now sort by
-   * how far up their own grade's scale they sit, not by raw damage, so a very good
-   * Relic can outrank a poor Ancient. That is the same question the Grade column
-   * has always answered, and it is the only question both roles can answer at once.
+   * The board used to show each support-class character on whichever reading
+   * graded better and sort every row on one 0–100 key, mapping a support score
+   * onto the DPS scale through the two ladders' cut pairs — because a support
+   * reading is ~1-2% where a dealer's is ~15%, and the two cannot share a
+   * column. They no longer have to. The DPS board reads everyone as a damage
+   * dealer; the Support board reads the four support classes as supports; and
+   * each sorts on its own Damage % column, as the board did before supports
+   * were scored at all. A rank is once more "how much damage", within one axis.
    */
-  function supportScoreToDps(s) {
-    if (!SR || !SR.SUPPORT_BANDS) return s;
-    var D = SR.BANDS, S = SR.SUPPORT_BANDS;
-    // The last band (F-) opens at -Infinity on both ladders, so it is not a point
-    // to interpolate through. Everything above it is, and the arrays are read
-    // LIVE: re-cut a ladder and this map re-cuts with it.
-    var n = Math.min(D.length, S.length) - 1;
-    if (n < 2) return s;
-    if (s >= S[0].min) {
-      // Above the S+ cut both ladders run off the end of their own table. Carry
-      // the top segment's slope on rather than inventing a second rule; it stays
-      // monotone, which is all a sort key owes anyone.
-      var k = (D[0].min - D[1].min) / (S[0].min - S[1].min);
-      return D[0].min + (s - S[0].min) * k;
-    }
-    for (var i = 0; i < n - 1; i++) {
-      if (s >= S[i + 1].min) {
-        var t = (s - S[i + 1].min) / (S[i].min - S[i + 1].min);
-        return D[i + 1].min + t * (D[i].min - D[i + 1].min);
-      }
-    }
-    // Below the bottom finite cut — support F opens at 0, the DPS F at 20.
-    // braceletScore clamps at 0, so this is only ever reached by a flat zero.
-    var lo = S[n - 1].min;
-    return lo > 0 ? D[n - 1].min * (s / lo) : D[n - 1].min;
+  function isSupportClass(c) { return !!(c && c._sup); }
+
+  /**
+   * A SUPPORT MAIN leaves the DPS board: a support class whose support reading
+   * lands two or more subranks above its damage-dealer one. astrogem's rule,
+   * for astrogem's reason — they are playing support, and their dealer-read
+   * bracelet would only clutter a board they are not competing on. Within one
+   * subrank, or with the dealer reading ahead, they stay on both boards. Band
+   * index 0 is S+, so "above" is a SMALLER index.
+   */
+  function isSupportMain(c) {
+    if (!SR || !c._sup || !c._dps || c._sup.score == null || c._dps.score == null) return false;
+    return SR.of(c._dps.score, "dps").i - SR.of(c._sup.score, "support").i >= 2;
   }
 
-  function sortKeyOf(c) {
-    if (c._score == null) return null;
-    return c._role === "support" ? supportScoreToDps(c._score) : c._score;
+  /** The active board's reading of this row — null when it has none for it. */
+  function readingFor(c) { return mode === "support" ? c._sup : c._dps; }
+
+  /**
+   * Put the active board's reading on the display fields every cell reads.
+   * `_role` is what bandOf(), the line letters and every gloss key on, so this
+   * one assignment is what makes a Bard's four party lines pill out as letters
+   * on the Support board and as F- on the DPS one.
+   */
+  function applyMode(c) {
+    var r = readingFor(c);
+    c._role = mode;
+    c._pct = r ? r.pct : null;
+    c._score = r ? r.score : null;
+    c._isPerfect = !!(r && r.isPerfect);
   }
 
   // ------------------------------------------------------------------
@@ -569,12 +582,7 @@
 '  #tab-leaderboard .lb-region{color:var(--dim);font-weight:600;font-size:11px;margin-left:6px;flex:0 0 auto}' +
 '  #tab-leaderboard .lb-rank{font-variant-numeric:tabular-nums;color:var(--dim);font-weight:700}' +
 '  #tab-leaderboard .lb-ilvl{color:var(--text);font-weight:700;font-variant-numeric:tabular-nums}' +
-'  #tab-leaderboard .lb-dmg{color:var(--accent);font-weight:800;font-variant-numeric:tabular-nums}' +
-// The per-dealer tell under a support-read figure. Its own line, dim and small,
-// so the number still reads as the number and the unit never looks like a suffix
-// on it. It rides in the collapsed mini cell on phones too.
-'  #tab-leaderboard .lb-perdealer{display:block;color:var(--dim);font-weight:700;font-size:9px;' +
-     'line-height:1.3;letter-spacing:.02em;margin-top:1px;white-space:nowrap}' +
+'  #tab-leaderboard .lb-dmg{color:var(--axis,var(--accent));font-weight:800;font-variant-numeric:tabular-nums}' +
 '  #tab-leaderboard .lb-age{font-variant-numeric:tabular-nums;color:var(--dim)}' +
 '  #tab-leaderboard .lb-dash{color:var(--dim)}' +
 '  #tab-leaderboard img.lb-classicon{width:20px;height:20px;vertical-align:middle;margin-right:7px;' +
@@ -611,11 +619,6 @@
 // the multi-loadout marker
 '  #tab-leaderboard .lb-lo{flex:0 0 auto;margin-left:6px;font-size:10px;font-weight:800;color:var(--mid);' +
      'border:1px solid var(--border);border-radius:5px;padding:0 4px;cursor:help;text-decoration:none}' +
-// the role marker — the loadout marker's shape, in the accent, sitting BEFORE the
-// name where the class icon has just said what class this is
-'  #tab-leaderboard .lb-role{flex:0 0 auto;margin-right:6px;font-size:9.5px;font-weight:800;' +
-     'letter-spacing:.04em;color:var(--accent);border:1px solid var(--accent);border-radius:5px;' +
-     'padding:0 4px;line-height:16px;cursor:help;text-decoration:none;opacity:.85}' +
 '  #tab-leaderboard .lb-warn{flex:0 0 auto;margin-left:5px;color:var(--bad);font-size:11px;cursor:help;text-decoration:none}' +
 // star cell
 '  #tab-leaderboard th.lb-star,#tab-leaderboard td.lb-star{text-align:center;padding-left:4px;padding-right:4px}' +
@@ -629,8 +632,18 @@
      'margin:0 0 8px;font-weight:700;display:flex;align-items:center;gap:8px}' +
 '  #tab-leaderboard .lb-favsec h3 .ct{color:var(--dim);font-weight:600;letter-spacing:.02em;font-size:11px;text-transform:none}' +
 '  #tab-leaderboard .lb-favsec table{border:1px solid var(--border);border-radius:10px;overflow:hidden}' +
-'  #tab-leaderboard .lb-mainhdr{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);margin:0 0 8px;font-weight:700}' +
+'  #tab-leaderboard .lb-mainhdr{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--axis,var(--accent));margin:0 0 8px;font-weight:700}' +
 // controls
+// The DPS / Support toggle — astrogem's pill, and astrogem's two axis colours.
+// The toggle, the Damage % column and the section header take the board's
+// colour, so a glance says which board this is. Everything else keeps --accent.
+'  #tab-leaderboard.axis-dps{--axis:#e18ac0}' +
+'  #tab-leaderboard.axis-support{--axis:#66c7ff}' +
+'  #tab-leaderboard .lb-modes{display:inline-flex;border:1px solid var(--border);border-radius:99px;overflow:hidden}' +
+'  #tab-leaderboard .lb-modebtn{background:none;border:none;cursor:pointer;color:var(--dim);font-family:inherit;' +
+     'font-weight:700;font-size:12px;padding:5px 16px;line-height:1.4;transition:background .12s,color .12s;text-decoration:none}' +
+'  #tab-leaderboard .lb-modebtn:hover:not(.on){color:var(--text)}' +
+'  #tab-leaderboard .lb-modebtn.on{background:var(--axis,var(--accent));color:#0c0e12}' +
 '  #tab-leaderboard .lb-regs{display:inline-flex;border:1px solid var(--border);border-radius:99px;overflow:hidden}' +
 '  #tab-leaderboard .lb-regbtn{background:none;border:none;cursor:pointer;color:var(--dim);font-family:inherit;' +
      'font-weight:700;font-size:12px;padding:5px 13px;line-height:1.4;transition:background .12s,color .12s}' +
@@ -644,7 +657,7 @@
      'color:var(--text);font-family:inherit;font-weight:700;font-size:12px;padding:6px 12px;outline:none;cursor:pointer;max-width:170px}' +
 '  #tab-leaderboard .lb-search{background:var(--panel2);border:1px solid var(--border);border-radius:99px;' +
      'color:var(--text);font-family:inherit;font-size:12px;padding:6px 14px;width:150px;outline:none}' +
-'  #tab-leaderboard .lb-search:focus,#tab-leaderboard .lb-classsel:focus{border-color:var(--accent)}' +
+'  #tab-leaderboard .lb-search:focus,#tab-leaderboard .lb-classsel:focus{border-color:var(--axis,var(--accent))}' +
 '  #tab-leaderboard .lb-search::placeholder{color:var(--dim)}' +
 '  #tab-leaderboard .lb-refresh{background:var(--panel2);border:1px solid var(--border);border-radius:99px;' +
      'color:var(--text);font-family:inherit;font-weight:700;font-size:12px;padding:6px 14px;cursor:pointer}' +
@@ -675,12 +688,7 @@
 // about seventy pixels — the difference between a readable name and four letters.
 '    #tab-leaderboard .lc-dmg{width:0 !important}' +
 '    #tab-leaderboard .lb-dmg{padding-left:0 !important;padding-right:0 !important;font-size:0}' +
-'    #tab-leaderboard .lb-dmg .lb-perdealer{display:none}' +
-// In the collapsed mini cell the tell has 46px to live in, so it loses a point
-// of size rather than half a word.
-'    #tab-leaderboard .lb-dmgmini .lb-perdealer{font-size:8px;letter-spacing:-.01em}' +
-'    #tab-leaderboard .lb-role{margin-right:4px;font-size:8.5px;padding:0 3px}' +
-'    #tab-leaderboard .lb-dmgmini{display:block;color:var(--accent);font-weight:700;font-size:10.5px;' +
+'    #tab-leaderboard .lb-dmgmini{display:block;color:var(--axis,var(--accent));font-weight:700;font-size:10.5px;' +
        'font-variant-numeric:tabular-nums;margin-top:2px}' +
 // The grade cell stacks instead of sitting on one line: badge, then number,
 // then the damage the collapsed column used to carry.
@@ -732,6 +740,12 @@
 '<div class="panel">' +
 '  <h2>Leaderboard</h2>' +
 '  <div class="lb-actions">' +
+'    <div class="lb-modes" role="group" aria-label="Leaderboard type">' +
+'      <button class="lb-modebtn on" id="lb-mode-dps" type="button" aria-pressed="true"' +
+       ' data-gloss="Everyone, read as a damage dealer and ranked by what the bracelet is worth to their own damage. A support main — support reading two or more subranks above the dealer one — is on the Support board instead.">DPS</button>' +
+'      <button class="lb-modebtn" id="lb-mode-support" type="button" aria-pressed="false"' +
+       ' data-gloss="Bard, Paladin, Artist and Valkyrie, every one of them, read as a support and ranked by what the bracelet is worth to ONE damage dealer they buff.">Support</button>' +
+'    </div>' +
      regionChips() +
 '    <select class="lb-classsel" id="lb-class" aria-label="Filter by class"><option value="">All classes</option></select>' +
 '    <input class="lb-search" id="lb-search" type="search" placeholder="Search name&hellip;" autocomplete="off" aria-label="Search characters by name">' +
@@ -753,8 +767,8 @@
      'this board: every bracelet is scored <b>once, on the server</b>, when the board is built, and what reaches your browser is a ' +
      'row of finished numbers rather than sixty-odd raw brackets to re-score on every visit. Click a row and it fetches that one ' +
      'character&rsquo;s bracelet to hand to the Calculator.</p>' +
-'  <p><b>The 0&ndash;100 grade.</b> The Damage % column answers &ldquo;how much&rdquo;; the Grade column answers ' +
-     '&ldquo;how good a bracelet&rdquo;, and it is what the board ranks on. It is a straight line between two fixed points: ' +
+'  <p><b>The 0&ndash;100 grade.</b> The Damage % column answers &ldquo;how much&rdquo;, and the board ranks on it; the Grade column answers ' +
+     '&ldquo;how good a bracelet&rdquo;. It is a straight line between two fixed points: ' +
      '<b>0</b> is the worst bracelet the game can hand you &mdash; both combat traits at the bottom of the band, ' +
      '61 on an Ancient and 41 on a Relic, and three effect lines worth nothing &mdash; and <b>100</b> is a reachable ' +
      'good bracelet: the three best distinct effect families at Epic with both traits at 110 (92 on a Relic). ' +
@@ -771,11 +785,14 @@
      'whatever the owner&rsquo;s roster last synced there, which can be weeks behind what they are wearing today. It is not a ' +
      'verified snapshot and it is not a complete list of anything. The line under the table says which copy you are reading and ' +
      'how old it is.</p>' +
-'  <p><b>Supports.</b> A support-class character &mdash; Bard, Paladin, Artist or Valkyrie &mdash; is scored both ways and ' +
-     'shown on whichever axis grades their bracelet better, and when the support reading wins their % is what <b>one damage ' +
-     'dealer</b> gains rather than their own damage. That is also why the board ranks on Grade: a support&rsquo;s couple of ' +
-     'percent and a dealer&rsquo;s fifteen are not the same measurement, but the two ladders are cut to the same rarities, so ' +
-     'the letters are.</p>' +
+'  <p><b>DPS / Support toggle.</b> DPS reads everyone as a damage dealer and ranks by Damage %. Support keeps only the four ' +
+     'support classes &mdash; Bard, Paladin, Artist, Valkyrie, every one of them, even the DPS-built &mdash; read as a support, ' +
+     'where the % is what <b>one damage dealer</b> gains from the bracelet rather than the wearer&rsquo;s own damage. A support&rsquo;s ' +
+     'couple of percent and a dealer&rsquo;s fifteen are not the same measurement, which is why they are two boards and not one. ' +
+     'The letters carry across: the support ladder is cut to the same rarities as the dealer&rsquo;s, so a support A&minus; is as rare as a dealer&rsquo;s.</p>' +
+'  <p><b>Support mains move off the DPS board.</b> A support-class character whose <i>support</i> reading grades two or more ' +
+     'subranks above their <i>damage-dealer</i> reading (say B&minus; as a dealer but B+ as a support) is really playing support, ' +
+     'and is dropped from DPS &mdash; they belong on the Support board. Within one subrank, or with the dealer reading ahead, they stay on both.</p>' +
 '  <p><b>What is left out.</b> A line whose stat index the model does not map yet scores zero and is flagged rather than hidden. ' +
      'The default profile leaves the Demon/Archdemon share at zero, which costs the one family that depends on it &mdash; the ' +
      'Method tab has the working.</p>' +
@@ -835,12 +852,12 @@
       parts.push(lo.label + " " + (lo.pct == null ? "—" : fx(lo.pct, 2) + "%") + (i === c.best ? " (ranked)" : ""));
     }
     // The per-loadout figures are the DAMAGE-DEALER reading, always: that is the
-    // one the loadout is picked on, for every character. On a row the support
-    // reading went on to win, the cell's own number is a different measurement,
-    // so say which is which rather than let two percentages contradict.
+    // one the loadout is picked on, for every character. On the Support board
+    // the cell's own number is a different measurement, so say which is which
+    // rather than let two percentages contradict.
     return '<span class="lb-lo" data-gloss="' + esc(c.distinctBrackets + " different bracelets across this character's " +
       c.loadouts.length + " lostark.bible loadouts. The board ranks the highest. " + parts.join(" · ") +
-      (isSupportRead(c) ? " Those are the damage-dealer figures the loadout is chosen on; the row shows the support reading, which is per one dealer." : "")) +
+      (isSupportRead(c) ? " Those are the damage-dealer figures the loadout is chosen on; this board shows the support reading, which is per one dealer." : "")) +
       '">' + c.distinctBrackets + '</span>';
   }
 
@@ -875,12 +892,9 @@
       (anchor == null ? "—" : fx(B.damagePercent(anchor), 2)) + "% for that good one." +
       (sup ? " Read on the support ladder, which is cut to the same rarities as the damage dealer's — a support " +
         b.key + " is as rare as a dealer's " + b.key + "." : "") +
-      // A support class the DAMAGE-DEALER reading won. Say that the other axis
-      // was tried, or the rule is invisible on a board where it never fires.
-      (!sup && c._alt
-        ? " A support class: read as a support the same bracelet grades " + SR.of(c._alt.score, "support").key +
-          ", the worse letter of the two, so the board shows the damage-dealer reading."
-        : "");
+      // A support class is on both boards, or on the other one; name what the
+      // other axis says so the two boards never look like they disagree.
+      otherAxisSentence(c);
     // Only the CEILING wears the animated rainbow — the three best distinct
     // families at Legendary with both traits at the top of the band. astrogem
     // gates it on the config being perfect rather than on the band, for the same
@@ -895,43 +909,41 @@
       '<span class="lb-score">' + fx(c._score, 1) + '</span>' +
       // Phones collapse the Damage % column into this line, so the per-dealer
       // tell has to ride along with it or it is lost on the smaller screen.
-      '<span class="lb-dmgmini">' + (c._pct == null ? "&mdash;" : fx(c._pct, 2) + "%") +
-      (sup ? '<span class="lb-perdealer">per dealer</span>' : "") + '</span>';
+      '<span class="lb-dmgmini">' + (c._pct == null ? "&mdash;" : fx(c._pct, 2) + "%") + '</span>';
   }
 
   /** Is this row being shown on the support axis rather than the dealer one? */
   function isSupportRead(c) { return c._role === "support"; }
 
   /**
-   * The Damage % cell. On a support-read row the figure is WHAT ONE DAMAGE
-   * DEALER GAINS, not a party total and not the wearer's own damage, so it says
-   * so under the number rather than sitting there looking like a dealer's 15%
-   * that went wrong.
+   * What the OTHER board says about a support class's bracelet, for the Grade
+   * tooltip. Empty on a damage dealer, who is only ever on one board.
+   */
+  function otherAxisSentence(c) {
+    if (!SR || !isSupportClass(c)) return "";
+    if (isSupportRead(c)) {
+      if (!c._dps || c._dps.score == null) return "";
+      return " Read as a damage dealer the same bracelet grades " + SR.of(c._dps.score, "dps").key +
+        " at " + fx(c._dps.pct == null ? 0 : c._dps.pct, 2) + "%" +
+        (isSupportMain(c) ? ", two or more subranks below this, so it is off the DPS board." : ", which is where the DPS board has it.");
+    }
+    if (c._sup.score == null) return "";
+    return " A support class: read as a support, on the Support board, the same bracelet grades " +
+      SR.of(c._sup.score, "support").key + " at " + fx(c._sup.pct == null ? 0 : c._sup.pct, 2) + "% per damage dealer.";
+  }
+
+  /**
+   * The Damage % cell. On the Support board the figure is WHAT ONE DAMAGE
+   * DEALER GAINS, not a party total and not the wearer's own damage; the column
+   * header says so, and the gloss says it again for anyone who hovers.
    */
   function dmgCell(c) {
     if (c._pct == null) return '<span class="lb-dash">&mdash;</span>';
     var n = fx(c._pct, 2) + "%";
     if (!isSupportRead(c)) return n;
     return '<span data-gloss="' + esc("What one damage dealer standing next to this support gains from the bracelet — " +
-      "their buffs and debuffs, measured on the dealer they buff. Not the party total, and not this character's own damage. " +
-      "It is on a different axis from a damage dealer's figure, which is why the board ranks on the Grade column and not on this one.") +
-      '">' + n + '</span><span class="lb-perdealer">per dealer</span>';
-  }
-
-  /**
-   * The role marker, beside the class icon, and only on a row the support
-   * reading won. Every other row on the board is a damage dealer and says so by
-   * saying nothing.
-   */
-  function roleMarker(c) {
-    if (!isSupportRead(c)) return '';
-    var alt = c._alt
-      ? " Read as a damage dealer the same bracelet grades " + SR.of(c._alt.score, "dps").key +
-        " at " + fx(c._alt.pct, 2) + "%, which is the worse letter of the two."
-      : "";
-    return '<span class="lb-role" data-gloss="' + esc("A support class, shown on the support axis: its buffs and debuffs, " +
-      "scored on one damage dealer. A support-class character is graded both ways and the board shows whichever reading " +
-      "grades the bracelet better." + alt) + '">SUP</span>';
+      "their buffs and debuffs, measured on the dealer they buff. Not the party total, and not this character's own damage.") +
+      '">' + n + '</span>';
   }
 
   function linesCell(c) {
@@ -954,7 +966,7 @@
       starCell(c, i) +
       '<td class="lb-rank">#' + rankNum + '</td>' +
       '<td class="lb-ilvl">' + (c.itemLevel ? nf(c.itemLevel) : '<span class="lb-dash">&mdash;</span>') + '</td>' +
-      '<td class="lb-char"><span class="lb-charwrap">' + classIconHtml(c["class"]) + roleMarker(c) +
+      '<td class="lb-char"><span class="lb-charwrap">' + classIconHtml(c["class"]) +
         '<a class="lb-name" href="' + bibleUrl(c.region, c.name) + '" target="_blank" rel="noopener"' +
         ' onclick="event.stopPropagation()" title="' + esc(c.name || "") + '">' + esc(c.name || "—") + '</a>' +
         '<span class="lb-region">' + esc(c.region || "") + '</span>' + loadoutMarker(c) + warn + '</span></td>' +
@@ -983,14 +995,22 @@
   }
 
   function headRow() {
+    var sup = mode === "support";
     return '<thead><tr>' +
       (Favs ? '<th class="lb-star" aria-label="Favorite"></th>' : '') +
-      '<th><span class="gloss" data-gloss="Position on this board, by the 0–100 Grade. Every bracelet is scored on the same default character, so a rank compares bracelets and nothing else — and grade is the one scale a damage dealer and a support can share, because their two ladders are cut to the same rarities.">Rank</span></th>' +
+      '<th><span class="gloss" data-gloss="' + esc("Position on this board, by " + (sup ? "what one damage dealer gains" : "Damage %") +
+        ". Every bracelet is scored on the same default " + (sup ? "support" : "character") + ", so a rank compares bracelets and nothing else.") + '">Rank</span></th>' +
       '<th><span class="gloss" data-gloss="Item level, as the character page reported it.">iLvl</span></th>' +
       '<th>Character</th>' +
-      '<th><span class="gloss" data-gloss="' + esc("The whole bracelet on one 0–100 scale, and its subrank. " + gradeAnchorSentence("ancient")) + '">Grade</span></th>' +
-      '<th><span class="gloss" data-gloss="What the whole bracelet — both combat traits and every effect line — is worth in % damage on the canonical default character. On a support-class character shown on the support axis it is what ONE damage dealer gains, which is a different axis: that is why the board ranks on Grade and not on this column.">Damage %</span></th>' +
-      '<th><span class="gloss" data-gloss="One subrank per effect line: that line as a share of the strongest single roll its grade can carry, on the same ladder the Tier List uses. On a support-read row the letters are the support&rsquo;s, so its ally-buff lines read as what they are worth to it. Hover a letter for the full effect, its roll and what it is worth. A dashed letter is locked.">Effects</span></th>' +
+      '<th><span class="gloss" data-gloss="' + esc("The whole bracelet on one 0–100 scale, and its subrank. " + gradeAnchorSentence("ancient") +
+        (sup ? " Read on the support ladder, which is cut to the same rarities as the damage dealer's." : "")) + '">Grade</span></th>' +
+      (sup
+        ? '<th><span class="gloss" data-gloss="What ONE damage dealer standing next to this support gains from the bracelet — its buffs and debuffs, measured on the dealer they land on. Not the party total, and not the wearer&rsquo;s own damage. The board ranks on it.">Per-dealer %</span></th>'
+        : '<th><span class="gloss" data-gloss="What the whole bracelet — both combat traits and every effect line — is worth in % damage on the canonical default character. The board ranks on it.">Damage %</span></th>') +
+      '<th><span class="gloss" data-gloss="' + esc("One subrank per effect line: that line as a share of the strongest single roll its grade can carry, on the same ladder the Tier List uses. " +
+        (sup ? "The letters are the support's, so an ally-buff line reads as what it is worth to the dealer it buffs." :
+               "The letters are a damage dealer's, so an ally-buff line is worth nothing here and reads F-.") +
+        " Hover a letter for the full effect, its roll and what it is worth. A dashed letter is locked.") + '">Effects</span></th>' +
       '<th class="lb-agecell"><span class="gloss" data-gloss="When this character&rsquo;s page was last read.">Last pulled</span></th>' +
       '</tr></thead>';
   }
@@ -1043,7 +1063,8 @@
     var start = (page - 1) * PAGE_SIZE;
     var slice = allChars.slice(start, start + PAGE_SIZE);
     var rows = slice.map(function (c) { return charRow(c, c._idx, c._rank); }).join("");
-    var hdr = searching ? (allChars.length + ' match' + (allChars.length === 1 ? '' : 'es')) : 'All characters';
+    var hdr = searching ? (allChars.length + ' match' + (allChars.length === 1 ? '' : 'es'))
+      : (mode === "support" ? 'All supports' : 'All characters');
     return '<div class="lb-mainhdr">' + hdr + '</div>' +
       '<div class="lb-tw"><table>' + colGroup() + headRow() +
       '<tbody id="lb-rows">' + rows + '</tbody></table></div>' +
@@ -1231,26 +1252,53 @@
   // ------------------------------------------------------------------
 
   /**
-   * Highest 0-100 grade first, on the shared scale sortKeyOf() puts both roles
-   * on. A row we could not score at all has no key and sorts last, exactly as a
-   * row with no damage figure did before.
+   * Highest Damage % first, on the active board's axis. A row we could not
+   * score at all has no figure and sorts last.
    */
-  function bySortKeyDesc(a, b) {
-    var av = a._sortKey == null ? -Infinity : a._sortKey;
-    var bv = b._sortKey == null ? -Infinity : b._sortKey;
+  function byPctDesc(a, b) {
+    var av = a._pct == null ? -Infinity : a._pct;
+    var bv = b._pct == null ? -Infinity : b._pct;
     return bv - av;
   }
 
+  /** The classes that carry a support reading — the Worker's SUPPORT_CLASSES,
+   *  learnt from the data rather than copied. */
+  function supportClassNames() {
+    var set = {}, i;
+    for (i = 0; i < rawChars.length; i++) {
+      if (isSupportClass(rawChars[i]) && rawChars[i]["class"]) set[rawChars[i]["class"]] = true;
+    }
+    return set;
+  }
+
   /**
-   * Build the display list from rawChars and paint.
+   * The class filter this board honours. A Berserker picked on the DPS board is
+   * remembered but means nothing on the Support board, which shows every
+   * support rather than an empty table; switch back and it applies again.
+   */
+  function effectiveClassFilter() {
+    if (!classFilter) return "";
+    return (mode === "support" && !supportClassNames()[classFilter]) ? "" : classFilter;
+  }
+
+  /**
+   * Build the display list from rawChars for the active board and paint.
+   *
+   *   DPS:      everyone with a damage-dealer reading, minus support mains.
+   *   Support:  the four support classes, every one of them, on the support reading.
    *
    * Ranking happens BEFORE the name search filters anything, so a searched
    * character keeps its true overall rank.
    */
   function rebuild() {
-    var base = rawChars.filter(function (c) { return regions[c.region]; });
-    if (classFilter) base = base.filter(function (c) { return c["class"] === classFilter; });
-    base.sort(bySortKeyDesc);
+    rawChars.forEach(applyMode);
+    var base = rawChars.filter(function (c) {
+      if (!regions[c.region] || !readingFor(c)) return false;
+      return mode === "support" ? isSupportClass(c) : !isSupportMain(c);
+    });
+    var cf = effectiveClassFilter();
+    if (cf) base = base.filter(function (c) { return c["class"] === cf; });
+    base.sort(byPctDesc);
     for (var i = 0; i < base.length; i++) base[i]._rank = i + 1;
     var q = (searchQuery || "").trim().toLowerCase();
     var list = q
@@ -1286,13 +1334,17 @@
     var sel = $("lb-class");
     if (!sel) return;
     var set = {}, i;
-    for (i = 0; i < rawChars.length; i++) if (rawChars[i]["class"]) set[rawChars[i]["class"]] = true;
-    if (classFilter) set[classFilter] = true;      // keep a saved choice selectable
+    if (mode === "support") {
+      set = supportClassNames();                   // the Support board lists only the four
+    } else {
+      for (i = 0; i < rawChars.length; i++) if (rawChars[i]["class"]) set[rawChars[i]["class"]] = true;
+      if (classFilter) set[classFilter] = true;    // keep a saved choice selectable
+    }
     var classes = Object.keys(set).sort();
     var html = '<option value="">All classes</option>';
     for (i = 0; i < classes.length; i++) html += '<option value="' + esc(classes[i]) + '">' + esc(classes[i]) + '</option>';
     sel.innerHTML = html;
-    sel.value = classFilter;
+    sel.value = effectiveClassFilter();
   }
 
   function renderTable(chars) {
@@ -1426,6 +1478,7 @@
     if (!el || el.getAttribute("data-init")) return;
     el.setAttribute("data-init", "1");
     el.innerHTML = shell();
+    el.classList.add("axis-dps");                   // the DPS board, and its colour, by default
     paintFoot();
 
     if (!B) {
@@ -1445,6 +1498,23 @@
         if (rawChars.length) rebuild();
       }, SEARCH_DEBOUNCE);
     });
+
+    // DPS / Support toggle: re-filter, re-rank, page 1. The class list and the
+    // pinned Favorites follow the board, since both read from the rebuilt list.
+    function setMode(m) {
+      if (m === mode) return;
+      mode = m;
+      var dpsBtn = $("lb-mode-dps"), supBtn = $("lb-mode-support");
+      if (dpsBtn) { dpsBtn.classList.toggle("on", m === "dps"); dpsBtn.setAttribute("aria-pressed", m === "dps" ? "true" : "false"); }
+      if (supBtn) { supBtn.classList.toggle("on", m === "support"); supBtn.setAttribute("aria-pressed", m === "support" ? "true" : "false"); }
+      el.classList.toggle("axis-dps", m !== "support");
+      el.classList.toggle("axis-support", m === "support");
+      page = 1;
+      if (rawChars.length) { populateClassOptions(); rebuild(); }
+    }
+    var dpsBtn = $("lb-mode-dps"), supBtn = $("lb-mode-support");
+    if (dpsBtn) dpsBtn.onclick = function () { setMode("dps"); };
+    if (supBtn) supBtn.onclick = function () { setMode("support"); };
 
     // Region chips: independent toggles, persisted, all-on when the store is empty.
     REGIONS.forEach(function (rg) {
