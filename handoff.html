@@ -2,70 +2,121 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Bracelet Calculator — handoff</title>
+<title>Moving your saved data</title>
 <meta name="robots" content="noindex">
 <!--
-  handoff.html — hands this origin's saved data to the tool's new address.
+  handoff.html — hands this origin's saved data to the tool's new home.
 
   The calculator moved to https://www.loseii.com/loa-bracelet-calc/, and
-  localStorage does not move with it. The new page loads this one in a hidden
-  iframe and asks for the data; we read our own localStorage and post it back.
+  localStorage belongs to one origin. THIS PAGE IS A TOP-LEVEL STOP, not a
+  frame: every browser now partitions storage for a framed third-party site, so
+  a page framed under loseii.com gets an empty bucket keyed to loseii and cannot
+  see a thing. Only a first-party visit can read what the user saved here.
 
-  Rules:
-    - Only answers {type:"bc-handoff-request"} from an allowlisted origin, and
-      replies to that exact origin. Everything else is ignored in silence.
-    - READ ONLY. The old data is never deleted, never rewritten. A user who
-      comes back to an old bookmark still finds everything here.
-    - NO redirect on this page, ever. Redirecting would kill the iframe before
-      it could answer.
+  Two ways in, one job:
+    1. ?return=<url on the new site>  — the new site sent the user here for one
+       round trip. Read our keys, send them back in the URL FRAGMENT.
+    2. no query — somebody's bookmark. Same thing, aimed at the tool's new home.
+
+  The payload rides in the FRAGMENT, never the query: a fragment is never sent
+  to a server and never appears in a Referer header. The new site reads it and
+  strips it from the address bar at once.
+
+  The return URL is checked against a short allowlist before we hand anything
+  over. Without that check, a link with ?return=<anywhere> would post a
+  visitor's saved data, sign-in token and all, to a stranger.
+
+  READ ONLY. Nothing here is deleted or rewritten; an old bookmark still finds
+  everything where it was.
 -->
-<script>
-"use strict";
-(function () {
-  // The new home, its apex, the github.io mirror, and the two local dev servers.
-  var ALLOW = [
-    "https://www.loseii.com",
-    "https://loseii.com",
-    "https://shizukaziye.github.io",
-    "http://localhost:8080",
-    "http://localhost:8081",
-    "http://127.0.0.1:8080"
-  ];
-
-  function allowed(origin) {
-    for (var i = 0; i < ALLOW.length; i++) if (ALLOW[i] === origin) return true;
-    return false;
-  }
-
-  /** Every key this origin holds, as a plain {key: value} object. */
-  function dump() {
-    var out = {};
-    try {
-      for (var i = 0; i < localStorage.length; i++) {
-        var k = localStorage.key(i);
-        if (k === null || k === "__proto__") continue;
-        var v = null;
-        try { v = localStorage.getItem(k); } catch (e) { continue; }
-        if (typeof v === "string") out[k] = v;
-      }
-    } catch (e) { /* storage blocked: an empty answer is still an answer */ }
-    return out;
-  }
-
-  window.addEventListener("message", function (ev) {
-    if (!allowed(ev.origin)) return;
-    var m = ev.data;
-    if (!m || typeof m !== "object" || m.type !== "bc-handoff-request") return;
-    if (!ev.source) return;
-    try { ev.source.postMessage({ type: "bc-handoff", data: dump() }, ev.origin); } catch (e) {}
-  }, false);
-})();
-</script>
-<style>body{background:#0c0e12;color:#e7e9ee;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;text-align:center;padding:20px}a{color:#e8b75c}p{font-size:13px;color:#97a0b4}</style>
+<style>body{background:#0c0e12;color:#e7e9ee;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;text-align:center;padding:20px}a{color:#e8b75c}p{margin:6px 0}small{color:#97a0b4}</style>
+<noscript><meta http-equiv="refresh" content="0; url=https://www.loseii.com/loa-bracelet-calc/"></noscript>
 </head>
 <body>
 <div>
-<p>Nothing to see here. This page hands your saved data to <a href="https://www.loseii.com/loa-bracelet-calc/">www.loseii.com/loa-bracelet-calc/</a>.</p>
+<p>Moving your saved data to <a id="go" href="https://www.loseii.com/loa-bracelet-calc/">www.loseii.com/loa-bracelet-calc/</a></p>
+<p><small>One moment&hellip;</small></p>
 </div>
+<script>
+"use strict";
+(function () {
+  // Local dev: the new side runs on localhost:8080 and this stub on
+  // 127.0.0.1:8081 — different sites, so the partitioning that broke the old
+  // iframe design is in force here too.
+  var LOCAL = /^(127\.0\.0\.1|localhost|\[::1\])$/.test(location.hostname);
+  var NEW_BASE = LOCAL ? "http://localhost:8080/" : "https://www.loseii.com/loa-bracelet-calc/";
+
+  // Where a ?return= may point. Nothing else is ever answered.
+  var RETURN_ORIGINS = [
+    "https://www.loseii.com",
+    "https://loseii.com",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080"
+  ];
+
+  // The only keys that travel: this tool's own.
+  var KEYS = ["loa-bracelet-calc.v1", "bc_favs", "bc_bible_oauth", "bc_bi_last", "bc_lb_regions", "bc_lb_class"];
+
+  function utf8(s) {
+    var esc = encodeURIComponent(s), out = "", i = 0;
+    while (i < esc.length) {
+      if (esc.charAt(i) === "%") { out += String.fromCharCode(parseInt(esc.substr(i + 1, 2), 16)); i += 3; }
+      else { out += esc.charAt(i); i++; }
+    }
+    return out;
+  }
+  function b64url(s) {
+    return btoa(utf8(s)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  /** Our keys, plus the hash the user was carrying, as one fragment payload. */
+  function payload(userHash) {
+    var d = {}, i, k, v;
+    for (i = 0; i < KEYS.length; i++) {
+      k = KEYS[i];
+      try { v = localStorage.getItem(k); } catch (e) { v = null; }
+      if (typeof v === "string") d[k] = v;
+    }
+    if (userHash && userHash.indexOf("#bchandoff") === 0) userHash = "";   // never echo our own
+    return "#bchandoff=" + b64url(JSON.stringify({ v: 2, d: d, h: userHash || "" }));
+  }
+
+  function param(name) {
+    var m = new RegExp("[?&]" + name + "=([^&]*)").exec(location.search);
+    return m ? decodeURIComponent(m[1].replace(/\+/g, " ")) : "";
+  }
+
+  /** Resolve and vet a return URL. Returns {base, hash} or null. */
+  function vetReturn(raw) {
+    if (!raw) return null;
+    var a = document.createElement("a");
+    a.href = raw;
+    var origin = a.protocol + "//" + a.host;
+    var ok = false, i;
+    for (i = 0; i < RETURN_ORIGINS.length; i++) if (RETURN_ORIGINS[i] === origin) { ok = true; break; }
+    if (!ok) return null;
+    // On the live site the tool sits under one path; locally it is served at the root.
+    var path = a.pathname.charAt(0) === "/" ? a.pathname : "/" + a.pathname;
+    if (!LOCAL && path.indexOf("/loa-bracelet-calc/") !== 0) return null;
+    return { base: origin + path + (a.search || ""), hash: a.hash || "" };
+  }
+
+  var link = document.getElementById("go");
+  var ret = vetReturn(param("return"));
+  var target;
+
+  if (ret) {
+    target = ret.base + payload(ret.hash);          // the round trip: straight back where they were
+  } else {
+    // A bookmark, or a link someone shared. Carry them — and their data — over.
+    target = NEW_BASE + (location.search || "") + payload(location.hash);
+  }
+
+  if (link) link.href = ret ? ret.base : NEW_BASE;
+  // Framed, we do nothing at all: a frame cannot read this origin's storage
+  // anyway, and navigating somebody's frame would be rude.
+  if (window.top === window) location.replace(target);
+})();
+</script>
 </body>
 </html>

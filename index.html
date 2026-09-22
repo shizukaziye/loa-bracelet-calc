@@ -6,82 +6,104 @@
 <link rel="canonical" href="https://www.loseii.com/loa-bracelet-calc/">
 <meta name="robots" content="noindex">
 <!--
-  The redirect stub for the tool's old address. Two things it does that the
-  plain hell-key-calc stub does not:
+  The old address. It sends visitors to https://www.loseii.com/loa-bracelet-calc/
+  AND carries their saved data with them.
 
-    1. It forwards the query string and the hash, so a shared link keeps
-       whatever it was carrying.
-    2. Inside an iframe it does NOT redirect. It answers the handoff instead,
-       exactly as handoff.html does. A browser holding a stale cached copy of
-       this page can still hand the user's saved data over.
+  localStorage belongs to one origin, and a framed third-party page now gets an
+  empty, partitioned bucket in every browser — so the only place this origin's
+  data can be read is right here, in a first-party visit. We read our six keys
+  and hand them to the new site in the URL FRAGMENT, which never reaches a
+  server and never shows up in a Referer. The new site imports them and strips
+  the fragment at once.
 
-  The meta refresh sits in <noscript> for the same reason: with scripting on,
-  the script below decides, and the framed case must not navigate. With
-  scripting off there is no iframe and no handoff, so the plain refresh is
-  right. Crawlers get the canonical link and the visible link either way.
+  Three things it keeps:
+    - the query string, forwarded as it stands;
+    - the visitor's own hash, tucked inside the payload for the new site to put
+      back (the fragment slot itself is taken by the payload);
+    - every byte of the old data, which is read and never touched.
+
+  It also answers ?return=<url on the new site>, exactly as handoff.html does,
+  so the new site's one-time round trip still works if it lands here.
+
+  The meta refresh sits in <noscript>: with scripting on, the script decides
+  (and a framed copy must not navigate); with scripting off there is no storage
+  to carry anyway. Crawlers have the canonical link and the visible link.
 -->
 <noscript><meta http-equiv="refresh" content="0; url=https://www.loseii.com/loa-bracelet-calc/"></noscript>
-<script>
-"use strict";
-(function () {
-  if (window.top === window) return;   // top-level load: the redirect below handles it
-
-  // Framed. Behave like handoff.html.
-  var ALLOW = [
-    "https://www.loseii.com",
-    "https://loseii.com",
-    "https://shizukaziye.github.io",
-    "http://localhost:8080",
-    "http://localhost:8081",
-    "http://127.0.0.1:8080"
-  ];
-
-  function allowed(origin) {
-    for (var i = 0; i < ALLOW.length; i++) if (ALLOW[i] === origin) return true;
-    return false;
-  }
-
-  function dump() {
-    var out = {};
-    try {
-      for (var i = 0; i < localStorage.length; i++) {
-        var k = localStorage.key(i);
-        if (k === null || k === "__proto__") continue;
-        var v = null;
-        try { v = localStorage.getItem(k); } catch (e) { continue; }
-        if (typeof v === "string") out[k] = v;
-      }
-    } catch (e) {}
-    return out;
-  }
-
-  window.addEventListener("message", function (ev) {
-    if (!allowed(ev.origin)) return;
-    var m = ev.data;
-    if (!m || typeof m !== "object" || m.type !== "bc-handoff-request") return;
-    if (!ev.source) return;
-    try { ev.source.postMessage({ type: "bc-handoff", data: dump() }, ev.origin); } catch (e) {}
-  }, false);
-})();
-</script>
-<style>body{background:#0c0e12;color:#e7e9ee;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;text-align:center;padding:20px}a{color:#e8b75c}</style>
+<style>body{background:#0c0e12;color:#e7e9ee;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;text-align:center;padding:20px}a{color:#e8b75c}p{margin:6px 0}small{color:#97a0b4}</style>
 </head>
 <body>
 <div>
 <p>This tool now lives at <a id="go" href="https://www.loseii.com/loa-bracelet-calc/">www.loseii.com/loa-bracelet-calc/</a></p>
-<p id="wait">Redirecting&hellip;</p>
+<p><small id="wait">Taking your saved data with you&hellip;</small></p>
 </div>
 <script>
 "use strict";
 (function () {
-  // Carry the query string and the hash across, so a shared link survives.
-  var target = "https://www.loseii.com/loa-bracelet-calc/" + location.search + location.hash;
+  var LOCAL = /^(127\.0\.0\.1|localhost|\[::1\])$/.test(location.hostname);
+  var NEW_BASE = LOCAL ? "http://localhost:8080/" : "https://www.loseii.com/loa-bracelet-calc/";
+
+  var RETURN_ORIGINS = [
+    "https://www.loseii.com",
+    "https://loseii.com",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080"
+  ];
+
+  var KEYS = ["loa-bracelet-calc.v1", "bc_favs", "bc_bible_oauth", "bc_bi_last", "bc_lb_regions", "bc_lb_class"];
+
+  function utf8(s) {
+    var esc = encodeURIComponent(s), out = "", i = 0;
+    while (i < esc.length) {
+      if (esc.charAt(i) === "%") { out += String.fromCharCode(parseInt(esc.substr(i + 1, 2), 16)); i += 3; }
+      else { out += esc.charAt(i); i++; }
+    }
+    return out;
+  }
+  function b64url(s) {
+    return btoa(utf8(s)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  function payload(userHash) {
+    var d = {}, i, k, v;
+    for (i = 0; i < KEYS.length; i++) {
+      k = KEYS[i];
+      try { v = localStorage.getItem(k); } catch (e) { v = null; }
+      if (typeof v === "string") d[k] = v;
+    }
+    if (userHash && userHash.indexOf("#bchandoff") === 0) userHash = "";
+    return "#bchandoff=" + b64url(JSON.stringify({ v: 2, d: d, h: userHash || "" }));
+  }
+
+  function param(name) {
+    var m = new RegExp("[?&]" + name + "=([^&]*)").exec(location.search);
+    return m ? decodeURIComponent(m[1].replace(/\+/g, " ")) : "";
+  }
+
+  function vetReturn(raw) {
+    if (!raw) return null;
+    var a = document.createElement("a");
+    a.href = raw;
+    var origin = a.protocol + "//" + a.host;
+    var ok = false, i;
+    for (i = 0; i < RETURN_ORIGINS.length; i++) if (RETURN_ORIGINS[i] === origin) { ok = true; break; }
+    if (!ok) return null;
+    var path = a.pathname.charAt(0) === "/" ? a.pathname : "/" + a.pathname;
+    if (!LOCAL && path.indexOf("/loa-bracelet-calc/") !== 0) return null;
+    return { base: origin + path + (a.search || ""), hash: a.hash || "" };
+  }
+
   var link = document.getElementById("go");
-  if (link) link.href = target;
+  var ret = vetReturn(param("return"));
+  var target = ret
+    ? ret.base + payload(ret.hash)
+    : NEW_BASE + (location.search || "") + payload(location.hash);
+
+  if (link) link.href = ret ? ret.base : NEW_BASE + (location.search || "") + (location.hash || "");
   if (window.top !== window) {
     var wait = document.getElementById("wait");
     if (wait && wait.parentNode) wait.parentNode.removeChild(wait);
-    return;                 // framed: the handoff handler above is the whole job
+    return;                       // framed: never navigate somebody's frame
   }
   location.replace(target);
 })();

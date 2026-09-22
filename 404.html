@@ -6,81 +6,99 @@
 <link rel="canonical" href="https://www.loseii.com/loa-bracelet-calc/">
 <meta name="robots" content="noindex">
 <!--
-  GitHub Pages serves this page for any path under the old repo that no longer
-  has a file. It sends the visitor to the same path on the new address: the
-  remainder after /loa-bracelet-calc/, plus the query string and the hash.
+  GitHub Pages serves this page for any path under the old repo that has no
+  file. It does what index.html does — sends the visitor to the same path on the
+  new address AND carries their saved data along in the URL fragment — with the
+  path remainder after /loa-bracelet-calc/ added to the target.
 
-  Framed, it does not redirect and answers the handoff instead — which also
-  covers the case where a browser asks for handoff.html before the stub has
-  landed and Pages serves this page in its place.
+  It also answers ?return=<url on the new site>. That matters: if a browser asks
+  for handoff.html before the stub has landed, or the file is ever missing,
+  Pages serves THIS page instead, and the new site's one-time round trip still
+  completes rather than stranding the visitor.
 -->
 <noscript><meta http-equiv="refresh" content="0; url=https://www.loseii.com/loa-bracelet-calc/"></noscript>
-<script>
-"use strict";
-(function () {
-  if (window.top === window) return;   // top-level load: the redirect below handles it
-
-  var ALLOW = [
-    "https://www.loseii.com",
-    "https://loseii.com",
-    "https://shizukaziye.github.io",
-    "http://localhost:8080",
-    "http://localhost:8081",
-    "http://127.0.0.1:8080"
-  ];
-
-  function allowed(origin) {
-    for (var i = 0; i < ALLOW.length; i++) if (ALLOW[i] === origin) return true;
-    return false;
-  }
-
-  function dump() {
-    var out = {};
-    try {
-      for (var i = 0; i < localStorage.length; i++) {
-        var k = localStorage.key(i);
-        if (k === null || k === "__proto__") continue;
-        var v = null;
-        try { v = localStorage.getItem(k); } catch (e) { continue; }
-        if (typeof v === "string") out[k] = v;
-      }
-    } catch (e) {}
-    return out;
-  }
-
-  window.addEventListener("message", function (ev) {
-    if (!allowed(ev.origin)) return;
-    var m = ev.data;
-    if (!m || typeof m !== "object" || m.type !== "bc-handoff-request") return;
-    if (!ev.source) return;
-    try { ev.source.postMessage({ type: "bc-handoff", data: dump() }, ev.origin); } catch (e) {}
-  }, false);
-})();
-</script>
-<style>body{background:#0c0e12;color:#e7e9ee;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;text-align:center;padding:20px}a{color:#e8b75c}</style>
+<style>body{background:#0c0e12;color:#e7e9ee;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;text-align:center;padding:20px}a{color:#e8b75c}p{margin:6px 0}small{color:#97a0b4}</style>
 </head>
 <body>
 <div>
 <p>This tool now lives at <a id="go" href="https://www.loseii.com/loa-bracelet-calc/">www.loseii.com/loa-bracelet-calc/</a></p>
-<p id="wait">Redirecting&hellip;</p>
+<p><small id="wait">Taking your saved data with you&hellip;</small></p>
 </div>
 <script>
 "use strict";
 (function () {
-  var BASE = "https://www.loseii.com/loa-bracelet-calc/";
+  var LOCAL = /^(127\.0\.0\.1|localhost|\[::1\])$/.test(location.hostname);
+  var NEW_BASE = LOCAL ? "http://localhost:8080/" : "https://www.loseii.com/loa-bracelet-calc/";
   var MARK = "/loa-bracelet-calc/";
-  var path = location.pathname || "";
-  var i = path.indexOf(MARK);
-  var rest = (i === -1) ? "" : path.slice(i + MARK.length);
-  while (rest.charAt(0) === "/") rest = rest.slice(1);      // never double the slash
-  var target = BASE + rest + location.search + location.hash;
+
+  var RETURN_ORIGINS = [
+    "https://www.loseii.com",
+    "https://loseii.com",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080"
+  ];
+
+  var KEYS = ["loa-bracelet-calc.v1", "bc_favs", "bc_bible_oauth", "bc_bi_last", "bc_lb_regions", "bc_lb_class"];
+
+  function utf8(s) {
+    var esc = encodeURIComponent(s), out = "", i = 0;
+    while (i < esc.length) {
+      if (esc.charAt(i) === "%") { out += String.fromCharCode(parseInt(esc.substr(i + 1, 2), 16)); i += 3; }
+      else { out += esc.charAt(i); i++; }
+    }
+    return out;
+  }
+  function b64url(s) {
+    return btoa(utf8(s)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  function payload(userHash) {
+    var d = {}, i, k, v;
+    for (i = 0; i < KEYS.length; i++) {
+      k = KEYS[i];
+      try { v = localStorage.getItem(k); } catch (e) { v = null; }
+      if (typeof v === "string") d[k] = v;
+    }
+    if (userHash && userHash.indexOf("#bchandoff") === 0) userHash = "";
+    return "#bchandoff=" + b64url(JSON.stringify({ v: 2, d: d, h: userHash || "" }));
+  }
+
+  function param(name) {
+    var m = new RegExp("[?&]" + name + "=([^&]*)").exec(location.search);
+    return m ? decodeURIComponent(m[1].replace(/\+/g, " ")) : "";
+  }
+
+  function vetReturn(raw) {
+    if (!raw) return null;
+    var a = document.createElement("a");
+    a.href = raw;
+    var origin = a.protocol + "//" + a.host;
+    var ok = false, i;
+    for (i = 0; i < RETURN_ORIGINS.length; i++) if (RETURN_ORIGINS[i] === origin) { ok = true; break; }
+    if (!ok) return null;
+    var path = a.pathname.charAt(0) === "/" ? a.pathname : "/" + a.pathname;
+    if (!LOCAL && path.indexOf(MARK) !== 0) return null;
+    return { base: origin + path + (a.search || ""), hash: a.hash || "" };
+  }
+
+  /** Whatever came after /loa-bracelet-calc/ in the path we were asked for. */
+  function remainder() {
+    var p = location.pathname || "", i = p.indexOf(MARK);
+    var rest = (i === -1) ? "" : p.slice(i + MARK.length);
+    while (rest.charAt(0) === "/") rest = rest.slice(1);
+    return rest;
+  }
 
   var link = document.getElementById("go");
-  if (link) link.href = target;
+  var ret = vetReturn(param("return"));
+  var plain = NEW_BASE + remainder() + (location.search || "");
+  var target = ret ? ret.base + payload(ret.hash) : plain + payload(location.hash);
+
+  if (link) link.href = ret ? ret.base : plain + (location.hash || "");
   if (window.top !== window) {
     var wait = document.getElementById("wait");
     if (wait && wait.parentNode) wait.parentNode.removeChild(wait);
-    return;                 // framed: the handoff handler above is the whole job
+    return;
   }
   location.replace(target);
 })();
