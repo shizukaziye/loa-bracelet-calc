@@ -6,19 +6,13 @@
 <link rel="canonical" href="https://www.loseii.com/loa-bracelet-calc/">
 <meta name="robots" content="noindex">
 <!--
-  The redirect stub for the tool's old address. Two things it does that the
-  plain hell-key-calc stub does not:
+  GitHub Pages serves this page for any path under the old repo that no longer
+  has a file. It sends the visitor to the same path on the new address: the
+  remainder after /loa-bracelet-calc/, plus the query string and the hash.
 
-    1. It forwards the query string and the hash, so a shared link keeps
-       whatever it was carrying.
-    2. Inside an iframe it does NOT redirect. It answers the handoff instead,
-       exactly as handoff.html does. A browser holding a stale cached copy of
-       this page can still hand the user's saved data over.
-
-  The meta refresh sits in <noscript> for the same reason: with scripting on,
-  the script below decides, and the framed case must not navigate. With
-  scripting off there is no iframe and no handoff, so the plain refresh is
-  right. Crawlers get the canonical link and the visible link either way.
+  Framed, it does not redirect and answers the handoff instead — which also
+  covers the case where a browser asks for handoff.html before the stub has
+  landed and Pages serves this page in its place.
 -->
 <noscript><meta http-equiv="refresh" content="0; url=https://www.loseii.com/loa-bracelet-calc/"></noscript>
 <script>
@@ -26,7 +20,6 @@
 (function () {
   if (window.top === window) return;   // top-level load: the redirect below handles it
 
-  // Framed. Behave like handoff.html.
   var ALLOW = [
     "https://www.loseii.com",
     "https://loseii.com",
@@ -74,8 +67,14 @@
 <script>
 "use strict";
 (function () {
-  // Carry the query string and the hash across, so a shared link survives.
-  var target = "https://www.loseii.com/loa-bracelet-calc/" + location.search + location.hash;
+  var BASE = "https://www.loseii.com/loa-bracelet-calc/";
+  var MARK = "/loa-bracelet-calc/";
+  var path = location.pathname || "";
+  var i = path.indexOf(MARK);
+  var rest = (i === -1) ? "" : path.slice(i + MARK.length);
+  while (rest.charAt(0) === "/") rest = rest.slice(1);      // never double the slash
+  var target = BASE + rest + location.search + location.hash;
+
   var link = document.getElementById("go");
   if (link) link.href = target;
   if (window.top !== window) {

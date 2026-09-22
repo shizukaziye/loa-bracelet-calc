@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bracelet Calculator — handoff</title>
+<meta name="robots" content="noindex">
+<!--
+  handoff.html — hands this origin's saved data to the tool's new address.
+
+  The calculator moved to https://www.loseii.com/loa-bracelet-calc/, and
+  localStorage does not move with it. The new page loads this one in a hidden
+  iframe and asks for the data; we read our own localStorage and post it back.
+
+  Rules:
+    - Only answers {type:"bc-handoff-request"} from an allowlisted origin, and
+      replies to that exact origin. Everything else is ignored in silence.
+    - READ ONLY. The old data is never deleted, never rewritten. A user who
+      comes back to an old bookmark still finds everything here.
+    - NO redirect on this page, ever. Redirecting would kill the iframe before
+      it could answer.
+-->
+<script>
+"use strict";
+(function () {
+  // The new home, its apex, the github.io mirror, and the two local dev servers.
+  var ALLOW = [
+    "https://www.loseii.com",
+    "https://loseii.com",
+    "https://shizukaziye.github.io",
+    "http://localhost:8080",
+    "http://localhost:8081",
+    "http://127.0.0.1:8080"
+  ];
+
+  function allowed(origin) {
+    for (var i = 0; i < ALLOW.length; i++) if (ALLOW[i] === origin) return true;
+    return false;
+  }
+
+  /** Every key this origin holds, as a plain {key: value} object. */
+  function dump() {
+    var out = {};
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k === null || k === "__proto__") continue;
+        var v = null;
+        try { v = localStorage.getItem(k); } catch (e) { continue; }
+        if (typeof v === "string") out[k] = v;
+      }
+    } catch (e) { /* storage blocked: an empty answer is still an answer */ }
+    return out;
+  }
+
+  window.addEventListener("message", function (ev) {
+    if (!allowed(ev.origin)) return;
+    var m = ev.data;
+    if (!m || typeof m !== "object" || m.type !== "bc-handoff-request") return;
+    if (!ev.source) return;
+    try { ev.source.postMessage({ type: "bc-handoff", data: dump() }, ev.origin); } catch (e) {}
+  }, false);
+})();
+</script>
+<style>body{background:#0c0e12;color:#e7e9ee;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;text-align:center;padding:20px}a{color:#e8b75c}p{font-size:13px;color:#97a0b4}</style>
+</head>
+<body>
+<div>
+<p>Nothing to see here. This page hands your saved data to <a href="https://www.loseii.com/loa-bracelet-calc/">www.loseii.com/loa-bracelet-calc/</a>.</p>
+</div>
+</body>
+</html>
